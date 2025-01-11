@@ -1,0 +1,53 @@
+# ---------------------------------------------------------------------------- #
+# data
+# ---------------------------------------------------------------------------- #
+data:
+ train:
+   img_dir: '../../Data/MR_time'
+   ann_dir: null
+ test:
+   img_dir: '../../Data/MR/imagesTs'
+   ann_dir: null
+ sanity_check: False  # Sanity check means only 1 dataset sample to test overfitting
+ augmentations:
+   blur_prob: 0.5
+   noise_prob: 0.8
+   hflip_prob: 0.5
+   rotate_max_deg: 0.0
+
+# ---------------------------------------------------------------------------- #
+# Training options
+# ---------------------------------------------------------------------------- #
+training:
+ batch_size: 1
+ num_workers: 10
+ epochs: 1000
+ seed: 7
+
+model:
+ name: "MAEPreTraining"
+
+encoder:
+ num_classes: 100
+ dim: 512
+ depth: 1
+ heads: 4
+ mlp_dim: 512
+ dropout: 0.1
+ emb_dropout: 0.1
+
+mae:
+ masking_ratio: 0.25
+ decoder_dim: 512
+ decoder_depth: 6
+
+lr_scheduler:
+ name: 'ReduceLROnPlateau'
+ patience: 22
+
+optimizer:
+ name: 'Adam'  # SGD, Adam
+ lr: 1.5e-5
+
+logging:
+ run_notes: ""

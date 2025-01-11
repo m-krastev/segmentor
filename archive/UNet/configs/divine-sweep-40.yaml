@@ -1,0 +1,53 @@
+# ---------------------------------------------------------------------------- #
+# data
+# ---------------------------------------------------------------------------- #
+data:
+  train:
+    img_dir: '../../Data/MR/imagesTr'
+    ann_dir: '../../Data/MR/labelsTr'
+  test:
+    img_dir: '../../Data/MR/imagesTs'
+    ann_dir: '../../Data/MR/labelsTs'
+  sanity_check: False  # Sanity check means only 1 dataset sample to test overfitting
+  augmentations:
+    blur_prob: 0.2742929679723477
+    noise_prob: 0.9829131469768484
+    hflip_prob: 0.38157051194423297
+    rotate_max_deg: 0.0
+    elastic: # See https://pytorch.org/vision/main/generated/torchvision.transforms.v2.ElasticTransform.html#torchvision.transforms.v2.ElasticTransform
+      prob: 0.0
+      alpha: 50.0  # Magnitude of displacements
+      sigma: 5.0  # Smoothness of displacements
+
+# ---------------------------------------------------------------------------- #
+# Training options
+# ---------------------------------------------------------------------------- #
+training:
+  batch_size: 1
+  num_workers: 10
+  epochs: 400
+  DICE_weight: 1.0
+  L1_weight: 0.025
+  seed: 7
+  accumulate_grad_batches: 1
+
+model:
+  name: "DualHeadUNet3D"
+  dropout: 0.37248989269567423
+  fmaps: 64
+  num_levels: 4
+  dual_head: False
+
+lr_scheduler:
+  name: 'ReduceLROnPlateau'
+  patience: 23
+
+optimizer:
+  name: 'Adam'  # SGD, Adam
+  weight_decay: 0.0001  # Only for SGD
+  momentum: 0.98  # Only for SGD
+  lr: 0.0002388544691586894
+  nesterov: True  # Only for SGD
+
+logging:
+  run_notes: ""

@@ -1,0 +1,17 @@
+nnUNet/
+.idea/
+wandb/
+UNet/artifacts/
+UNet/__pycache__/
+UNet/model/__pycache__/
+UNet/predictions/
+__pycache__/
+pytorch-3dunet/
+MAE/artifacts
+UNet/overfit_test_L1
+UNet/overfit_test_MSE
+MAE/BowelSegmentation
+*.nii
+vit_pytorch/
+vit_pytorch_OG/
+utils/artifacts/

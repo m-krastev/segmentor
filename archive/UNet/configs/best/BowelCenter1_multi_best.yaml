@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------- #
+# data
+# ---------------------------------------------------------------------------- #
+data:
+  train:
+    img_dir: '../../Data/MR/imagesTr'
+    ann_dir: '../../Data/MR/labelsTr'
+  test:
+    img_dir: '../../Data/MR/imagesTs'
+    ann_dir: '../../Data/MR/labelsTs'
+  sanity_check: False  # Sanity check means only 1 dataset sample to test overfitting
+  augmentations:
+    blur_prob: 0.60
+    noise_prob: 0.25
+    hflip_prob: 0.60
+    rotate_max_deg: 90
+    elastic_prob: 0.90 # See https://pytorch.org/vision/main/generated/torchvision.transforms.v2.ElasticTransform.html#torchvision.transforms.v2.ElasticTransform
+    biasfield_prob: 0.70
+    gamma_prob: 0.70
+
+# ---------------------------------------------------------------------------- #
+# Training options
+# ---------------------------------------------------------------------------- #
+training:
+  batch_size: 1
+  num_workers: 5
+  epochs: 400
+  DICE_weight: 1.0
+  L1_weight: 0.05
+  seed: 7
+  accumulate_grad_batches: 1
+
+model:
+  name: "DualHeadUNet3D"
+  dropout: 0.25
+  fmaps: 64
+  num_levels: 5
+  dual_head: True
+
+lr_scheduler:
+  name: 'ReduceLROnPlateau'
+  patience: 25
+
+optimizer:
+  name: 'Adam'
+  lr: 0.0003
+
+logging:
+  run_notes: ""

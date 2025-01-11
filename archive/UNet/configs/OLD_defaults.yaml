@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------- #
+# data
+# ---------------------------------------------------------------------------- #
+data:
+  train:
+    img_dir: '../../Data/MR/imagesTr'
+    ann_dir: '../../Data/Segmentation/labelsTr'
+  test:
+    img_dir: '../../Data/MR/imagesTs'
+    ann_dir: '../../Data/Segmentation/labelsTs'
+  augmentations:
+    blur_prob: 0.0
+    noise_prob: 0.0
+    hflip_prob: 0.0
+    rotate_max_deg: 0.0
+    elastic:  # See https://pytorch.org/vision/main/generated/torchvision.transforms.v2.ElasticTransform.html#torchvision.transforms.v2.ElasticTransform
+      prob: 0.0
+      alpha: 50.0  # Magnitude of displacements
+      sigma: 5.0  # Smoothness of displacements
+
+
+# ---------------------------------------------------------------------------- #
+# Training options
+# ---------------------------------------------------------------------------- #
+training:
+  batch_size: 1
+  num_workers: 10
+  epochs: 100
+  losses: ["DICE", "Hausdorff"]
+  loss_weights: [1, 0]
+  seed: 7
+
+model:
+  name: "UNet3D"
+  dropout: 0.1
+  fmaps: 64
+  num_levels: 4
+
+lr_scheduler:
+  name: 'ReduceLROnPlateau'
+  patience: 30
+
+optimizer:
+  name: 'Adam'  # SGD, Adam
+  weight_decay: 0.0001  # Only for SGD
+  momentum: 0.98  # Only for SGD
+  lr: 0.001
+  nesterov: True  # Only for SGD
+
+logging:
+  run_notes: ""

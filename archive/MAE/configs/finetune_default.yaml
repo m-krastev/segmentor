@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------- #
+# data
+# ---------------------------------------------------------------------------- #
+data:
+  train:
+    img_dir: '../../Data/MR_extended/imagesTr'
+    ann_dir: '../../Data/MR_extended/labelsTr'
+  test:
+    img_dir: '../../Data/MR/imagesTs'
+    ann_dir: '../../Data/MR/labelsTs'
+  augmentations:
+    blur_prob: 0.0
+    noise_prob: 0.0
+    hflip_prob: 0.0
+    rotate_max_deg: 0.0
+  sanity_check: False  # Sanity check means only 1 dataset sample to test overfitting
+
+# ---------------------------------------------------------------------------- #
+# Training options
+# ---------------------------------------------------------------------------- #
+training:
+  batch_size: 1
+  num_workers: 4
+  epochs: 400
+  seed: 7
+  DICE_weight: 1.0
+  L1_weight: 0.025
+
+model:
+  name: "ViTUnet"
+
+decoder:
+  name: 'DualHeadUNet3D'
+  dropout: 0.37248989269567423
+  fmaps: 64
+  num_levels: 4
+
+encoder:
+  num_classes: 1000
+  dim: 1024
+  depth: 6
+  heads: 8
+  mlp_dim: 2048
+  dropout: 0.1
+  emb_dropout: 0.1
+  save_layers: [0, 1, 3, 5]
+  freeze_up_to: null  # null to freeze all, 0 to freeze nothing, or -25 for example to freeze up to last 25 layers
+
+enc_to_dec:
+  upsample: 'deconv'  # deconv (default) or nearest
+  z_norm: False  # Do z-normalization of ViT encoder outputs
+
+mae:
+  masking_ratio: 0.0
+  decoder_dim: 512
+  decoder_depth: 6
+  run_link: 'thomasvanorden/BowelSegmentation/b3i99iqh'
+
+lr_scheduler:
+  name: 'ReduceLROnPlateau'
+  patience: 22
+
+optimizer:
+  name: 'Adam'  # SGD, Adam
+  weight_decay: 0.0001  # Only for SGD
+  momentum: 0.98  # Only for SGD
+  lr: 0.0002388544691586894
+  nesterov: True  # Only for SGD
+
+logging:
+  run_notes: ""

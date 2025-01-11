@@ -1,0 +1,46 @@
+# ---------------------------------------------------------------------------- #
+# data
+# ---------------------------------------------------------------------------- #
+data:
+  train:
+    img_dir: '../../Data/MR/imagesTr'
+    ann_dir: '../../Data/MR/labelsTr'
+  test:
+    img_dir: '../../Data/MR/imagesTs'
+    ann_dir: '../../Data/MR/labelsTs'
+  augmentations:
+    blur_prob: 0.5698771651179085
+    noise_prob: 0.70583692722797
+    hflip_prob: 0.3645774008669499
+    rotate_max_deg: 0.0
+
+# ---------------------------------------------------------------------------- #
+# Training options
+# ---------------------------------------------------------------------------- #
+training:
+  batch_size: 2
+  num_workers: 10
+  epochs: 100
+  losses: ["DICE", "Hausdorff"]
+  loss_weights: [0.8, 0.2]
+  seed: 7
+
+model:
+  name: "UNet3D"
+  dropout: 0.4963911798875888
+  fmaps: 64
+  num_levels: 4
+
+lr_scheduler:
+  name: 'ReduceLROnPlateau'
+  patience: 22
+
+optimizer:
+  name: 'Adam'  # SGD, Adam
+  weight_decay: 0.0001  # Only for SGD
+  momentum: 0.98  # Only for SGD
+  lr: 0.0006699696828051401
+  nesterov: True  # Only for SGD
+
+logging:
+  run_notes: ""

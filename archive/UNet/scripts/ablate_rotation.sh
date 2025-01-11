@@ -1,0 +1,9 @@
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=10.0
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=20.0
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=30.0
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=40.0
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=50.0
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=60.0
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=70.0
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=80.0
+python train.py --config_file=configs/divine-sweep-40.yaml --training.seed=7 --data.augmentations.rotate_max_deg=90.0
