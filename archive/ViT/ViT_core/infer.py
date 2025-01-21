@@ -1,7 +1,7 @@
 import glob
 from torch.utils.tensorboard import SummaryWriter
 import logging
-import os, losses, utils, nrrd
+import os, losses, utils.utils as utils, nrrd
 import shutil
 import sys
 from torch.utils.data import DataLoader

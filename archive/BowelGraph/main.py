@@ -401,12 +401,12 @@ if __name__ == "__main__":
         return sdf[img.bool()].mean()
 
     seg, header = torch_from_nii("/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/experiment/TwoStep/Test/seg/pt_012.nii")
-    # seg = seg.int()
+    seg = seg.int()
     #
-    # gt_center, _ = torch_from_nii("/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/Centerlines/labelsTr/pt_012.nii")
+    gt_center, _ = torch_from_nii("/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/Centerlines/labelsTr/pt_012.nii")
     #
-    # graph = seg_to_graph(seg)
-    # score_graph(graph, gt_seg=seg)
+    graph = seg_to_graph(seg)
+    score_graph(graph, gt_seg=seg)
     graph = post_process_graph(graph, end_threshold=end_thresh, distance_threshold=dist_thresh)
     sdf_post, gc_degs, gc_cc = score_graph(graph, gt_seg=seg)
     # expl_mat = print_sdf_stats(sdf_post, gve_dist_thresh)

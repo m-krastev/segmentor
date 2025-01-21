@@ -1,5 +1,5 @@
 from torch.utils.tensorboard import SummaryWriter
-import os, utils, glob, losses
+import os, utils.utils as utils, glob, losses
 import sys
 from torch.utils.data import DataLoader
 from data import datasets, trans

@@ -4,10 +4,13 @@
 if [ -z "$DATA_DIR" ]; then
     echo "DATA_DIR is not set. Please set it to the directory where the data should be stored."
     exit 1
-elif [ ! -d $DATA_DIR ]; then
+fi
+
+if [ ! -d $DATA_DIR ]; then
     echo "Creating data directory at $DATA_DIR"
     echo "Warning: The directory is empty and should be populated with the dataset."
 fi
+
 
 # Depending on the dataset specified in the args, download and unzip. If the dataset is not specified, do not do anything.
 if [ -z "$1" ]; then
@@ -20,7 +23,7 @@ if [ $1 == "totalsegmentatormri" ]; then
 elif [ $1 == "totalsegmentatorct" ]; then
     DATASET_LINK="https://www.dropbox.com/scl/fi/oq0fsz8oauory204g8o6f/Totalsegmentator_dataset_v201.zip?rlkey=afnl2ixhqca2ukkf1v9p6jz7p&e=1&st=hmp1p0x3&dl=0"
 else
-    echo "Invalid dataset specified. Please specify either 'totalsegmentatormri' or 'totalsegmentatorct'."
+    echo "Invalid dataset specified. Please specify either 'totalsegmentatormri' or 'totalsegmentator'."
     exit 1
 fi
 
