@@ -57,7 +57,6 @@ def create_dataset(
             )
 
         patients = sorted(train_image_dir.iterdir())
-        patients_labels = sorted(train_label_dir.iterdir())
 
         random.seed(seed)
         random.shuffle(patients)
@@ -67,9 +66,7 @@ def create_dataset(
 
         for i, patient in enumerate(test_patients):
             patient.rename(patient.as_posix().replace("imagesTr", "imagesTs"))
-            patients_labels[i].rename(
-                patients_labels[i].as_posix().replace("labelsTr", "labelsTs")
-            )
+            patient.rename(patient.with_stem(patient.stem.partition("_")[0]).as_posix().replace("labelsTr", "labelsTs"))
 
         dataset_metadata = {
             "channel_names": {  # formerly modalities

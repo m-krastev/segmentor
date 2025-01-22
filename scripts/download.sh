@@ -4,13 +4,10 @@
 if [ -z "$DATA_DIR" ]; then
     echo "DATA_DIR is not set. Please set it to the directory where the data should be stored."
     exit 1
-fi
-
-if [ ! -d $DATA_DIR ]; then
+elif [ ! -d $DATA_DIR ]; then
     echo "Creating data directory at $DATA_DIR"
     echo "Warning: The directory is empty and should be populated with the dataset."
 fi
-
 
 # Depending on the dataset specified in the args, download and unzip. If the dataset is not specified, do not do anything.
 if [ -z "$1" ]; then
@@ -28,12 +25,12 @@ else
 fi
 
 # Check if the dataset is already downloaded
-if [ -d $DATA_DIR/$DATASET_NAME ]; then
+if [ -d $DATA_DIR/$1 ]; then
     echo "Dataset already downloaded. Skipping download."
 else
     echo "Downloading dataset from $DATASET_LINK"
     wget $DATASET_LINK -O $DATA_DIR/$1.zip
     echo "Unzipping dataset"
-    unzip $DATA_DIR/$1.zip -d $DATA_DIR
+    unzip $DATA_DIR/$1.zip -d $DATA_DIR/$1
     rm $DATA_DIR/$1.zip
 fi
