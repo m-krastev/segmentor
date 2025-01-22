@@ -1,7 +1,19 @@
 [project]
 name = "segmentor"
-version = "0.1.0"
+version = "0.0.1"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "monai[all]",
+    "torch",
+    "torchvision",
+    "lightning",
+    "nibabel",
+    "pandas",
+    "tqdm",
+    "scipy",
+    "scikit-learn",
+    "scikit-image",
+    "pyvista",
+]
