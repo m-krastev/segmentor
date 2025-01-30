@@ -16,4 +16,23 @@ dependencies = [
     "scikit-learn",
     "scikit-image",
     "pyvista",
+    "wandb"
+]
+
+
+[tool.ruff]
+line-length = 120
+fix = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu126", marker = "platform_system != 'Darwin'"},
+]
+torchvision = [
+  { index = "pytorch-cu126", marker = "platform_system != 'Darwin'"},
 ]

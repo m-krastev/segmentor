@@ -27,7 +27,7 @@ FOLD=1
 DEVICE=cuda
 DATASET_ID=42
 
-# nnUNetv2_plan_and_preprocess -d $DATASET_ID --verify_dataset_integrity -c $UNET_CONFIG -np 16
+# nnUNetv2_plan_and_preprocess -d $DATASET_ID --verify_dataset_integrity -c $UNET_CONFIG -np 16 -pl nnUNetPlannerResEncL
 
 # Training
-nnUNetv2_train $DATASET_ID $UNET_CONFIG $FOLD -device $DEVICE --npz
+nnUNetv2_train $DATASET_ID $UNET_CONFIG $FOLD -device $DEVICE --npz -p nnUNetResEncUNetLPlans -tr nnUNetTrainerDiceFocal
