@@ -27,8 +27,8 @@ def visualize(graph, plot_nodes=False, vis_deg=None, highlight_nodes=None, borde
     if highlight_nodes is None:
         highlight_nodes = list()
 
-    node_xyz = np.array([graph.nodes[i]['coords'] for i in sorted(graph)])
-    edge_xyz = np.array([(graph.nodes[u]['coords'], graph.nodes[v]['coords']) for u, v in graph.edges()])
+    node_xyz = np.array([graph.nodes[i]["coords"] for i in sorted(graph)])
+    edge_xyz = np.array([(graph.nodes[u]["coords"], graph.nodes[v]["coords"]) for u, v in graph.edges()])
 
     # Create the 3D figure
     fig = plt.figure()
@@ -44,23 +44,25 @@ def visualize(graph, plot_nodes=False, vis_deg=None, highlight_nodes=None, borde
     for deg, nodes in degs.items():
         if deg in vis_deg:
             c = colors.pop()
-            nodes = np.array([graph.nodes[node]['coords'] for node in nodes if node not in highlight_nodes])
+            nodes = np.array([graph.nodes[node]["coords"] for node in nodes if node not in highlight_nodes])
             border_frac = nodes / np.array([100, 160, 160])
-            at_border = (border_frac <= border_threshold).any(axis=1) | (border_frac >= (1 - border_threshold)).any(axis=1)
+            at_border = (border_frac <= border_threshold).any(axis=1) | (border_frac >= (1 - border_threshold)).any(
+                axis=1
+            )
 
             # Plot nodes at border
-            ax.scatter(*nodes[at_border].T, s=70, marker='*', c='red', edgecolors=c, label=f'Border node (deg {deg})')
+            ax.scatter(*nodes[at_border].T, s=70, marker="*", c="red", edgecolors=c, label=f"Border node (deg {deg})")
 
             # Plot other nodes
-            ax.scatter(*nodes[~at_border].T, s=70, ec="w", c=c, label=f'Deg {deg}')
+            ax.scatter(*nodes[~at_border].T, s=70, ec="w", c=c, label=f"Deg {deg}")
 
     # Color highlighted nodes
     for node in highlight_nodes:
-        ax.scatter(*graph.nodes[node]['coords'], color='red', s=50, ec="w")
+        ax.scatter(*graph.nodes[node]["coords"], color="red", s=50, ec="w")
 
     # Plot the edges
     for vizedge in edge_xyz:
-        ax.plot(*vizedge.T, color="tab:gray", alpha=.3)
+        ax.plot(*vizedge.T, color="tab:gray", alpha=0.3)
 
     ax.set_xlabel("x")
     ax.set_ylabel("y")
@@ -84,7 +86,7 @@ def seg_to_graph(segmentation):
     graph = kimimaro.skeletonize(
         segmentation.bool(),
         teasar_params={
-            "scale": .5,
+            "scale": 0.5,
             "const": 10,
         },
         anisotropy=(1.25, 1.25, 1.25),
@@ -111,11 +113,11 @@ def seg_to_graph(segmentation):
 
     # Add edges with length (norm) as attribute
     edges = []
-    for (start, end) in graph.edges:
-        length = np.linalg.norm(g.nodes[start]['coords'] - g.nodes[end]['coords'])
+    for start, end in graph.edges:
+        length = np.linalg.norm(g.nodes[start]["coords"] - g.nodes[end]["coords"])
         length *= 1.25  # Correct the length for the physical distance a voxel represents (1.25mm)
 
-        edges.append((start, end, {'length': length}))
+        edges.append((start, end, {"length": length}))
 
     g.add_edges_from(edges)
 
@@ -132,11 +134,11 @@ def shortest_path(source, graph, ends):
             continue
 
         # Find the shortest path based on edge's length attribute
-        temp_path = nx.shortest_path(graph, source=source, target=end, weight='length')
+        temp_path = nx.shortest_path(graph, source=source, target=end, weight="length")
 
         # Calculate length of shortest path
         temp_graph = nx.path_graph(temp_path)
-        length = sum([graph.edges[start, end]['length'] for (start, end) in temp_graph.edges()])
+        length = sum([graph.edges[start, end]["length"] for (start, end) in temp_graph.edges()])
 
         # Update best path
         if length < best_length:
@@ -201,29 +203,29 @@ def Bresenham3D(x1, y1, z1, x2, y2, z2):
     dy = abs(y2 - y1)
     dz = abs(z2 - z1)
 
-    if (x2 > x1):
+    if x2 > x1:
         xs = 1
     else:
         xs = -1
-    if (y2 > y1):
+    if y2 > y1:
         ys = 1
     else:
         ys = -1
-    if (z2 > z1):
+    if z2 > z1:
         zs = 1
     else:
         zs = -1
 
     # Driving axis is X-axis
-    if (dx >= dy and dx >= dz):
+    if dx >= dy and dx >= dz:
         p1 = 2 * dy - dx
         p2 = 2 * dz - dx
-        while (x1 != x2):
+        while x1 != x2:
             x1 += xs
-            if (p1 >= 0):
+            if p1 >= 0:
                 y1 += ys
                 p1 -= 2 * dx
-            if (p2 >= 0):
+            if p2 >= 0:
                 z1 += zs
                 p2 -= 2 * dx
             p1 += 2 * dy
@@ -231,15 +233,15 @@ def Bresenham3D(x1, y1, z1, x2, y2, z2):
             ListOfPoints.append((x1, y1, z1))
 
     # Driving axis is Y-axis
-    elif (dy >= dx and dy >= dz):
+    elif dy >= dx and dy >= dz:
         p1 = 2 * dx - dy
         p2 = 2 * dz - dy
-        while (y1 != y2):
+        while y1 != y2:
             y1 += ys
-            if (p1 >= 0):
+            if p1 >= 0:
                 x1 += xs
                 p1 -= 2 * dy
-            if (p2 >= 0):
+            if p2 >= 0:
                 z1 += zs
                 p2 -= 2 * dy
             p1 += 2 * dx
@@ -250,12 +252,12 @@ def Bresenham3D(x1, y1, z1, x2, y2, z2):
     else:
         p1 = 2 * dy - dz
         p2 = 2 * dx - dz
-        while (z1 != z2):
+        while z1 != z2:
             z1 += zs
-            if (p1 >= 0):
+            if p1 >= 0:
                 y1 += ys
                 p1 -= 2 * dz
-            if (p2 >= 0):
+            if p2 >= 0:
                 x1 += xs
                 p2 -= 2 * dz
             p1 += 2 * dy
@@ -273,7 +275,8 @@ def create_volumetric_image(nodes, connections, voxel_size=(1, 1, 1), image_size
         image_size = np.ceil(max_extent / np.array(voxel_size)).astype(int)
 
     volume = np.zeros(image_size, dtype=np.uint8)
-
+    voxel_size = np.array(voxel_size)
+    
     # Draw lines between connected nodes
     for index, parent_index in connections:
         if parent_index == -1:
@@ -283,16 +286,23 @@ def create_volumetric_image(nodes, connections, voxel_size=(1, 1, 1), image_size
         line_points = Bresenham3D(*np.floor(p0), *np.ceil(p1))
         line_points.extend(Bresenham3D(*np.ceil(p0), *np.floor(p1)))
 
-        for x, y, z in set(line_points):
-            i, j, k = np.round(np.array([x, y, z]) / np.array(voxel_size)).astype(int)
-            volume[i, j, k] = 1
+        # for x, y, z in set(line_points):
+        #     i, j, k = np.round(np.array([x, y, z]) / np.array(voxel_size)).astype(int)
+        #     volume[i, j, k] = 1
+        
+        volume[np.round(np.array(line_points) / voxel_size).astype(int)] = 1
 
     return volume
 
 
 def graph_to_image(graph, dilate=False):
     # Create a 3D matrix from the nodes
-    img = create_volumetric_image([(i, *graph.nodes[i]['coords']) for i in graph.nodes], graph.edges, voxel_size=(1., 1., 1.), image_size=(100, 160, 160))
+    img = create_volumetric_image(
+        [(i, *graph.nodes[i]["coords"]) for i in graph.nodes],
+        graph.edges,
+        voxel_size=(1.0, 1.0, 1.0),
+        image_size=(100, 160, 160),
+    )
 
     if dilate:
         struct1 = ndimage.generate_binary_structure(3, 1)
@@ -304,7 +314,7 @@ def graph_to_image(graph, dilate=False):
 def score_graph(graph, gt_seg=None, gt_graph=None, voxel_spacing=1.25):
     # Intrinsic graph metrics
     n_cycles, connected_comps, degs = intrinsic_graph_stats(graph)
-    length = sum([graph.edges[start, end]['length'] for (start, end) in graph.edges()])
+    length = sum([graph.edges[start, end]["length"] for (start, end) in graph.edges()])
 
     # Calculate number of end nodes NOT at the border margin of the volume
     border_margin = 5  # mm
@@ -312,8 +322,10 @@ def score_graph(graph, gt_seg=None, gt_graph=None, voxel_spacing=1.25):
     inside_end_nodes = 0
     if degs[1]:
         for node in degs[1]:
-            in_border_margin = any(graph.nodes[node]['coords'] <= border_margin_voxels)
-            in_border_margin |= any(abs(graph.nodes[node]['coords'] - np.array([100, 160, 160])) <= border_margin_voxels)
+            in_border_margin = any(graph.nodes[node]["coords"] <= border_margin_voxels)
+            in_border_margin |= any(
+                abs(graph.nodes[node]["coords"] - np.array([100, 160, 160])) <= border_margin_voxels
+            )
             if not in_border_margin:
                 inside_end_nodes += 1
 
@@ -400,10 +412,14 @@ if __name__ == "__main__":
         sdf *= voxel_spacing
         return sdf[img.bool()].mean()
 
-    seg, header = torch_from_nii("/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/experiment/TwoStep/Test/seg/pt_012.nii")
+    seg, header = torch_from_nii(
+        "/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/experiment/TwoStep/Test/seg/pt_012.nii"
+    )
     seg = seg.int()
     #
-    gt_center, _ = torch_from_nii("/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/Centerlines/labelsTr/pt_012.nii")
+    gt_center, _ = torch_from_nii(
+        "/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/Centerlines/labelsTr/pt_012.nii"
+    )
     #
     graph = seg_to_graph(seg)
     score_graph(graph, gt_seg=seg)
@@ -418,8 +434,12 @@ if __name__ == "__main__":
     mat = []
     graph_center = []
 
-    seg_dir = "/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/Segmentation/labelsTr"
-    center_dir = "/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/Centerlines/labelsTr"
+    seg_dir = (
+        "/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/Segmentation/labelsTr"
+    )
+    center_dir = (
+        "/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/Centerlines/labelsTr"
+    )
 
     for PATIENT in tqdm(os.listdir(center_dir)):
         if not PATIENT.endswith(".nii") or "013" not in PATIENT:
@@ -458,5 +478,3 @@ if __name__ == "__main__":
     print()
     print(np.mean(np.array(mat), axis=0))
     print(np.mean(np.array(graph_center), axis=0))
-
-

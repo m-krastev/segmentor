@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
+
 import argparse
 import json
-from pathlib import Path
-import shutil
 import random
+import shutil
+from pathlib import Path
 
 DATASET_LABELS = {
     "small_bowel": 42,
@@ -18,32 +19,28 @@ def create_dataset(
     labels: list[str],
     ratio: float,
     seed: int = 42,
-    file_ending=".nii.gz",
+    file_ending: str = ".nii.gz",
 ):
     modality = 0  # CT
     for label in labels:
-        output_dir = (
-            output_dir / "nnUNet_raw" / f"Dataset{DATASET_LABELS[label]:03d}_{label}"
-        )
+        output_dir = output_dir / "nnUNet_raw" / f"Dataset{DATASET_LABELS[label]:03d}_{label}"
         train_image_dir = output_dir / "imagesTr"
         train_label_dir = output_dir / "labelsTr"
         test_image_dir = output_dir / "imagesTs"
         test_label_dir = output_dir / "labelsTs"
-        for dir in [
+        for _dir in [
             train_image_dir,
             train_label_dir,
             test_image_dir,
             test_label_dir,
         ]:
-            dir.mkdir(parents=True, exist_ok=True)
+            _dir.mkdir(parents=True, exist_ok=True)
 
         patients = sorted(filter(lambda file: file.is_dir(), data_dir.iterdir()))
 
         # Names must follow the format LABEL_XXXX.ext
         # where XXXX is a 4 digit number indicating the channel/modality, I suppose in this case it works for cineMRI, but here we only deal with CT
-        new_names_images = [
-            f"{patient.stem}_{modality:04d}{file_ending}" for patient in patients
-        ]
+        new_names_images = [f"{patient.stem}_{modality:04d}{file_ending}" for patient in patients]
 
         new_names_labels = [f"{patient.stem}{file_ending}" for patient in patients]
 
@@ -64,7 +61,7 @@ def create_dataset(
         train_patients = patients[:num_train]
         test_patients = patients[num_train:]
 
-        for i, patient in enumerate(test_patients):
+        for patient in test_patients:
             patient.rename(patient.as_posix().replace("imagesTr", "imagesTs"))
             patient.rename(patient.with_stem(patient.stem.partition("_")[0]).as_posix().replace("labelsTr", "labelsTs"))
 
@@ -81,28 +78,19 @@ def create_dataset(
             # "overwrite_image_reader_writer": "SimpleITKIO"
         }
 
-        with open(output_dir / "dataset.json", "w") as f:
+        with (output_dir / "dataset.json").open("w") as f:
             json.dump(dataset_metadata, f, indent=4)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Create nnUNet dataset from TotalSegmentator-like file structure. Currently only supports CT and small_bowel."
+        description="Create nnUNet dataset from TotalSegmentator-like file structure. "
+        "Currently only supports CT and small_bowel.",
     )
-    parser.add_argument(
-        "--data_dir", type=Path, help="Path to data directory", required=True
-    )
-    parser.add_argument(
-        "--output_dir", type=Path, help="Path to output directory", required=True
-    )
-    parser.add_argument(
-        "--ratio", "-r", type=float, help="Ratio of training data", default=0.8
-    )
-    parser.add_argument(
-        "--seed", type=int, help="Seed for random shuffling", default=42
-    )
-    parser.add_argument(
-        "--labels", nargs="+", help="List of labels", default=["small_bowel"]
-    )
+    parser.add_argument("--data_dir", type=Path, help="Path to data directory", required=True)
+    parser.add_argument("--output_dir", type=Path, help="Path to output directory", required=True)
+    parser.add_argument("--ratio", "-r", type=float, help="Ratio of training data", default=0.8)
+    parser.add_argument("--seed", type=int, help="Seed for random shuffling", default=42)
+    parser.add_argument("--labels", nargs="+", help="List of labels", default=["small_bowel"])
     args = parser.parse_args()
     create_dataset(args.data_dir, args.output_dir, args.labels, args.ratio, args.seed)
