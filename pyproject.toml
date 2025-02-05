@@ -36,3 +36,6 @@ torch = [
 torchvision = [
   { index = "pytorch-cu126", marker = "platform_system != 'Darwin'"},
 ]
+
+[tool.uv.workspace]
+members = ["slic"]
