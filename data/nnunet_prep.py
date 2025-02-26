@@ -5,6 +5,7 @@ import json
 import random
 import shutil
 from pathlib import Path
+from tqdm import tqdm
 
 DATASET_LABELS = {
     "small_bowel": 42,
@@ -45,7 +46,7 @@ def create_dataset(
         new_names_labels = [f"{patient.stem}{file_ending}" for patient in patients]
 
         # Copy the files to a new directory
-        for i, patient in enumerate(patients):
+        for i, patient in tqdm(enumerate(patients), desc="Copying files: ", total=len(patients)):
             shutil.copy(patient / "ct.nii.gz", train_image_dir / new_names_images[i])
 
             shutil.copy(
@@ -61,9 +62,14 @@ def create_dataset(
         train_patients = patients[:num_train]
         test_patients = patients[num_train:]
 
-        for patient in test_patients:
+        for patient in tqdm(test_patients, desc="Moving test files: ", total=len(test_patients)):
             patient.rename(patient.as_posix().replace("imagesTr", "imagesTs"))
-            patient.rename(patient.with_stem(patient.stem.partition("_")[0]).as_posix().replace("labelsTr", "labelsTs"))
+            patient_label = Path(
+                patient.with_name(patient.stem.partition("_")[0] + file_ending)
+                .as_posix()
+                .replace("imagesTr", "labelsTr")
+            )
+            patient_label.rename(patient_label.as_posix().replace("labelsTr", "labelsTs"))
 
         dataset_metadata = {
             "channel_names": {  # formerly modalities

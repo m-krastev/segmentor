@@ -177,3 +177,9 @@ data
 .DS_Store
 .vscode
 wandb
+*.nii*
+*.off
+*.stl
+*.npy
+*.pkl
+*.obj
