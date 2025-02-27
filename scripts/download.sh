@@ -2,8 +2,8 @@
 
 # Check if DATA_DIR is set
 if [ -z "$DATA_DIR" ]; then
-    echo "DATA_DIR is not set. Please set it to the directory where the data should be stored."
-    exit 1
+    export DATA_DIR="$(pwd)/data"
+    echo "DATA_DIR is not set. Setting DATA_DIR to $DATA_DIR."
 elif [ ! -d $DATA_DIR ]; then
     echo "Creating data directory at $DATA_DIR"
     echo "Warning: The directory is empty and should be populated with the dataset."
