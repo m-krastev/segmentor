@@ -4,14 +4,17 @@
 if [ -z "$DATA_DIR" ]; then
     export DATA_DIR="$(pwd)/data"
     echo "DATA_DIR is not set. Setting DATA_DIR to $DATA_DIR."
-elif [ ! -d $DATA_DIR ]; then
+fi
+
+if [ ! -d $DATA_DIR ]; then
     echo "Creating data directory at $DATA_DIR"
+    mkdir -p $DATA_DIR
     echo "Warning: The directory is empty and should be populated with the dataset."
 fi
 
 # Depending on the dataset specified in the args, download and unzip. If the dataset is not specified, do not do anything.
 if [ -z "$1" ]; then
-    echo "No dataset specified. Please specify the dataset to download."
+    echo "No dataset specified. Please specify the dataset to download. (options: totalsegmentatormri, totalsegmentatorct)"
     exit 1
 fi
 

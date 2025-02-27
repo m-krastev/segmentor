@@ -8,7 +8,9 @@ from pathlib import Path
 from tqdm import tqdm
 
 DATASET_LABELS = {
-    "small_bowel": 42,
+    "small_bowel": 18,
+    "duodenum" : 19,
+    "colon": 20
 }
 
 # It's a good idea to train on multiple labels at once, so that the model can learn to differentiate between them. In doing that, it can also learn to better segment the label of interest. We can also try to identify the centerline of the whole gastrointestinal tract, although this seems like at best might be a very slight improvement, and at worst might be a distraction for the auxilliary loss (for centerline prediction).
@@ -97,6 +99,6 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=Path, help="Path to output directory", required=True)
     parser.add_argument("--ratio", "-r", type=float, help="Ratio of training data", default=0.8)
     parser.add_argument("--seed", type=int, help="Seed for random shuffling", default=42)
-    parser.add_argument("--labels", nargs="+", help="List of labels", default=["small_bowel"])
+    parser.add_argument("--labels", nargs="+", help="List of labels", default=list(DATASET_LABELS.keys()), choices=DATASET_LABELS.keys())
     args = parser.parse_args()
     create_dataset(args.data_dir, args.output_dir, args.labels, args.ratio, args.seed)
