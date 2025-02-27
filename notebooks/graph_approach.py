@@ -34,6 +34,7 @@ from dataclasses import dataclass, field, replace  # MODIFIED
 from typing import List, Optional, Tuple, Dict, Any  # MODIFIED
 
 import networkx as nx
+from tqdm import tqdm
 import nibabel as nib
 import numpy as np
 import pyvista as pv
@@ -65,7 +66,7 @@ class Config:
     dilation_iterations: int = 3
     thetav: int = 3
     thetad: int = 6
-    delta: int = 5000
+    delta: int = 500
     start_node: Optional[int] = None
     end_node: Optional[int] = None
 
@@ -128,7 +129,7 @@ class SmallBowelSegmentor:
         voxel_size: int = 1 * 1 * 1  # mm3
         num_voxels: int = np.prod(self.ground_truth.shape)
         num_supervoxels: int = int(num_voxels * voxel_size / self.supervoxel_size)
-        print(num_supervoxels)
+        logging.info(f"Number of supervoxels required {num_supervoxels} for the desired supervoxel size: {self.supervoxel_size} mm3")
         return num_supervoxels
 
     def compute_edges(self) -> np.ndarray:
@@ -181,12 +182,12 @@ class SmallBowelSegmentor:
         """Compute the distance map from the inverted small bowel segmentation."""
         return distance_transform_edt(
             binary_dilation(
-                self.edges > 0.1, iterations=self.config.dilation_iterations, mask=self.ground_truth
+                self.edges > self.config.edge_threshold, iterations=self.config.dilation_iterations, mask=self.ground_truth
             )
         )
 
     def compute_peaks(
-        self, distance_map: np.ndarray, thetav: int = 3, thetad: int = 6
+        self, distance_map: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Get the must-pass nodes as local peaks on the distance map."""
         self.peak_idxs = peak_local_max(
@@ -201,7 +202,7 @@ class SmallBowelSegmentor:
         logging.info(f"Found {len(peaks)} peaks")
         return self.peak_idxs, peaks
 
-    def simplify_graph(self, peaks: np.ndarray, delta: int = 5000) -> nx.Graph:
+    def simplify_graph(self, peaks: np.ndarray) -> nx.Graph:
         """Simplify the graph."""
         rag2: nx.Graph = nx.Graph()
         rag2.add_nodes_from(peaks)
@@ -224,11 +225,10 @@ class SmallBowelSegmentor:
         allpairs: List[Tuple[int, int]] = list(combinations(nodes, 2))
 
         dists: List[float] = []
-        for node1, node2 in allpairs:
+        for node1, node2 in tqdm(allpairs, desc="Computing distances"):
             dist: float = euclid[self.peak_to_idx[node1], self.peak_to_idx[node2]]
             if dist <= self.config.delta:
-                dijkstra_length: Any  # TODO: fix type hint
-                dijkstra_length, _ = nx.all_pairs_dijkstra_path_length(
+                dijkstra_length = nx.dijkstra_path_length(
                     self.rag, node1, node2, weight="cost"
                 )
                 rag2.add_edge(node1, node2, cost=dist, normalized=False)
@@ -300,7 +300,6 @@ class SmallBowelSegmentor:
         lines: pv.PolyData = pv.lines_from_points(self.pcoordinates[filtered_path])
         plotter.add_mesh(lines, line_width=10, cmap="viridis")
         plotter.add_points(self.pcoordinates[filtered_path], color="blue", point_size=10)
-
         # Add labels at each point
         # nodes = list(rag2.nodes)
         # for i in range(len(filtered_path)):
@@ -315,7 +314,11 @@ class SmallBowelSegmentor:
         #     active_segments[segments == node] = i
 
         # plotter.add_volume(active_segments, shade=True, cmap="hot")
-        plotter.show()
+        import pickle
+        with open("savefile.pkl") as f:
+            pickle.dump(plotter, f)
+        # TODO: Figure out how to export the path to NIFTI
+        # plotter.show()
 
     def run(self) -> None:
         """Run the entire segmentation pipeline."""
