@@ -45,7 +45,14 @@ from skimage.feature import peak_local_max
 from scipy.ndimage import binary_dilation, distance_transform_edt
 from sklearn.metrics import euclidean_distances as edist
 
-from segmentor.utils.medutils import load_and_normalize_nifti, load_and_resample_nifti, save_nifti
+from segmentor.utils.medutils import (
+    load_and_normalize_nifti,
+    load_and_resample_nifti,
+    save_nifti,
+    load_nifti,
+)
+import kimimaro
+import rustworkx as rx
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -55,6 +62,19 @@ logging.getLogger("trame_server").setLevel(logging.ERROR)
 logging.getLogger("trame_server.controller").setLevel(logging.ERROR)
 logging.getLogger("trame_client").setLevel(logging.ERROR)
 logging.getLogger("trame_client.widgets.core").setLevel(logging.ERROR)
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Special class to serialize numpy types such as int32, int16, float32, etc."""
+
+    def default(self, obj):
+        if isinstance(obj, (np.int32, np.int64, np.int16)):
+            return int(obj)
+        elif isinstance(obj, np.float32):
+            return float(obj)
+        elif isinstance(obj, rx.AllPairsPathLengthMapping):
+            return {k: dict(v) for k, v in obj.items()}
+        return json.JSONEncoder.default(self, obj)
 
 
 @dataclass
@@ -69,6 +89,10 @@ class Config:
     delta: int = 500
     start_node: Optional[int] = None
     end_node: Optional[int] = None
+    start_volume: Optional[str] = None
+    end_volume: Optional[str] = None
+    precompute: bool = False
+    use_rustworkx: bool = False
 
     @classmethod
     def from_json(cls, path: str | os.PathLike) -> "Config":
@@ -108,7 +132,7 @@ class SmallBowelSegmentor:
         self.cache_path.mkdir(exist_ok=True)
         self.edges_cache: Path = self.cache_path / "edges.npy"
         self.segments_cache: Path = self.cache_path / "segments.npy"
-        self.rag_cache: Path = self.cache_path / "rag.pkl"
+        self.rag_cache: Path = self.cache_path / "rag.json"
         self.label: Optional[int] = (
             label if label is not None else (1 if "nnUNet" in filename_gt else 18)
         )
@@ -129,7 +153,9 @@ class SmallBowelSegmentor:
         voxel_size: int = 1 * 1 * 1  # mm3
         num_voxels: int = np.prod(self.ground_truth.shape)
         num_supervoxels: int = int(num_voxels * voxel_size / self.supervoxel_size)
-        logging.info(f"Number of supervoxels required {num_supervoxels} for the desired supervoxel size: {self.supervoxel_size} mm3")
+        logging.info(
+            f"Desired supervoxel size: {self.supervoxel_size:<4} mm3; Assumed voxel size: {voxel_size:<4} mm3; Number of supervoxels required:{num_supervoxels:<4}"
+        )
         return num_supervoxels
 
     def compute_edges(self) -> np.ndarray:
@@ -140,8 +166,10 @@ class SmallBowelSegmentor:
         else:
             logging.info("Edge map not found. Generating...")
             self.edges = meijering(
-                self.nii, sigmas=self.config.sigmas, black_ridges=self.config.black_ridges
+                1 - self.nii, sigmas=self.config.sigmas, black_ridges=self.config.black_ridges
             ).astype(np.float32)
+            self.edges = ski.filters.median(self.edges)
+            self.edges = ski.filters.gaussian(self.edges, sigma=3)
             np.save(self.edges_cache, self.edges)
             logging.info("Edges generated")
         return self.edges
@@ -168,27 +196,26 @@ class SmallBowelSegmentor:
     def generate_rag(self) -> nx.Graph:
         """Generate the Region Adjacency Graph (RAG)."""
         if self.rag_cache.exists():
-            with open(self.rag_cache, "rb") as f:
-                self.rag = pickle.load(f)
+            with open(self.rag_cache, "r") as f:
+                self.rag = nx.node_link_graph(json.load(f))
                 logging.info("RAG loaded")
         else:
             self.rag = ski.graph.rag_boundary(self.segments, self.edges)
-            with open(self.rag_cache, "wb") as f:
-                pickle.dump(self.rag, f)
+            with open(self.rag_cache, "w") as f:
+                json.dump(nx.node_link_data(self.rag), f, cls=NumpyEncoder)
             logging.info("RAG saved")
         return self.rag
 
     def compute_distance_map(self) -> np.ndarray:
         """Compute the distance map from the inverted small bowel segmentation."""
         return distance_transform_edt(
-            binary_dilation(
-                self.edges > self.config.edge_threshold, iterations=self.config.dilation_iterations, mask=self.ground_truth
-            )
+            # binary_dilation(
+            #     self.edges > self.config.edge_threshold, iterations=self.config.dilation_iterations, mask=self.ground_truth
+            # )
+            self.ground_truth.astype(bool)
         )
 
-    def compute_peaks(
-        self, distance_map: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def compute_peaks(self, distance_map: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Get the must-pass nodes as local peaks on the distance map."""
         self.peak_idxs = peak_local_max(
             distance_map,
@@ -202,12 +229,89 @@ class SmallBowelSegmentor:
         logging.info(f"Found {len(peaks)} peaks")
         return self.peak_idxs, peaks
 
+    def find_start_end(self, start_volume, end_volume):
+        peaks = list(self.peak_to_idx.keys())
+        start_segments = np.intersect1d(peaks, self.segments[start_volume])
+        end_segments = np.intersect1d(peaks, self.segments[end_volume])
+        # Let start be the first peak
+        start = start_segments[0]
+        end = end_segments
+        # Let end be the lowest peak
+        # end = np.isin(segments, end)
+        # end = end[np.max(end[:, 2])]
+        # end = segments[end[0], end[1], end[2]]
+
+        def get_ileocecal_end(colon: np.ndarray) -> np.ndarray:
+            colon_skeleton = kimimaro.skeletonize(
+                colon,
+                teasar_params={
+                    "scale": 3,
+                    "const": 5,
+                    "pdrf_scale": 10000,
+                    "pdrf_exponent": 4,
+                    "soma_acceptance_threshold": 3500,  # physical units
+                    # "soma_detection_threshold": 750,  # physical units
+                    # "soma_invalidation_const": 300,  # physical units
+                    # "soma_invalidation_scale": 2,
+                },
+                anisotropy=(1, 1, 1),
+                dust_threshold=5,
+                fix_branching=True,
+                progress=False,
+                parallel_chunk_size=100,  # for the progress bar
+            )[1]
+            colon_graph = nx.Graph()
+            colon_graph.add_nodes_from(
+                (idx, {"location": loc}) for idx, loc in enumerate(colon_skeleton.vertices)
+            )
+            colon_graph.add_edges_from(colon_skeleton.edges)
+
+            ends = list(node[0] for node in colon_graph.degree() if node[1] == 1)
+            ends
+            rectal_end = max(ends, key=lambda x: colon_graph.nodes[x]["location"][2])
+            ends.remove(rectal_end)
+            if len(ends) > 1:
+                # The ileocecal end is the one farthest away from the rectal end
+                # This can be done by finding the end that is the farthest away in terms of graph distance
+                ileocecal_end = max(
+                    ends, key=lambda x: nx.shortest_path_length(colon_graph, rectal_end, x)
+                )
+                # Alternatively, find the end that is the farthest away in terms of Euclidean distance
+                # ileocecal_end = max(
+                #     ends,
+                #     key=lambda x: np.linalg.norm(
+                #         colon_graph.nodes[x]["location"] - colon_graph.nodes[rectal_end]["location"]
+                #     ),
+                # )
+            else:
+                ileocecal_end = ends[0]
+
+            return colon_graph.nodes[ileocecal_end]["location"].astype(int), list(
+                map(lambda end: colon_graph.nodes[end]["location"].astype(int), ends)
+            )
+
+        ileocecal_end_coords, _ = get_ileocecal_end(end_volume)
+        end = self.segments[
+            ileocecal_end_coords[0], ileocecal_end_coords[1], ileocecal_end_coords[2]
+        ]
+        if end not in peaks:
+            # Find the closest peak to the ileocecal end
+            end_idx = np.argmin(
+                np.linalg.norm(
+                    self.peak_idxs - ileocecal_end_coords,
+                    axis=1,
+                )
+            )
+            end = self.segments[
+                self.peak_idxs[end_idx][0], self.peak_idxs[end_idx][1], self.peak_idxs[end_idx][2]
+            ]
+        return start, end
+
     def simplify_graph(self, peaks: np.ndarray) -> nx.Graph:
         """Simplify the graph."""
         rag2: nx.Graph = nx.Graph()
         rag2.add_nodes_from(peaks)
         nodes: List[int] = list(rag2.nodes)
-        print(len(nodes))
 
         self.idx_to_peak = {
             idx: peak
@@ -222,15 +326,41 @@ class SmallBowelSegmentor:
         self.pcoordinates: np.ndarray = np.asarray(self.peak_idxs)
         euclid: np.ndarray = edist(self.pcoordinates)
 
-        allpairs: List[Tuple[int, int]] = list(combinations(nodes, 2))
+        allpairs = combinations(nodes, 2)
+
+        # Check for cache of precomputed distances
+        if (self.cache_path / "lengths.json").exists():
+            logging.info("Cache for Dijkstra distances found. Loading precomputed distances...")
+            with open(self.cache_path / "lengths.pkl", "rb") as f:
+                lengths = pickle.load(f)
+            self.config.precompute = True
+
+        else:
+            if self.config.precompute:
+                if self.config.use_rustworkx:
+                    import rustworkx as rx
+
+                    ragx = rx.networkx_converter(self.rag)
+                    lengths = rx.all_pairs_dijkstra_path_lengths(
+                        ragx, edge_cost_fn=lambda edge: edge["weight"]
+                    )
+                else:
+                    lengths = dict(nx.all_pairs_dijkstra_path_length(self.rag, weight="cost"))
+                    # Save lengths to cache
+                    logging.info("Precomputed distances saved to cache")
+                    with open(self.cache_path / "lengths.pkl", "wb") as f:
+                        pickle.dump(lengths, f)
 
         dists: List[float] = []
-        for node1, node2 in tqdm(allpairs, desc="Computing distances"):
+        for node1, node2 in tqdm(
+            allpairs, desc="Computing distances", total=len(nodes) * (len(nodes) - 1) // 2
+        ):
             dist: float = euclid[self.peak_to_idx[node1], self.peak_to_idx[node2]]
             if dist <= self.config.delta:
-                dijkstra_length = nx.dijkstra_path_length(
-                    self.rag, node1, node2, weight="cost"
-                )
+                if self.config.precompute:
+                    dijkstra_length = lengths[node1][node2]
+                else:
+                    dijkstra_length = nx.dijkstra_path_length(self.rag, node1, node2, weight="cost")
                 rag2.add_edge(node1, node2, cost=dist, normalized=False)
                 dists.append(dijkstra_length)
             else:
@@ -246,18 +376,10 @@ class SmallBowelSegmentor:
 
     def solve_tsp(self, rag2: nx.Graph) -> Tuple[List[int], int, int, float]:
         """Solve the Traveling Salesman Problem (TSP)."""
-        start_node: int = (
-            self.config.start_node
-            if self.config.start_node is not None
-            else self.idx_to_peak[np.argmax(self.pcoordinates[:, -1], axis=-1)]
-        )
-        end_node: int = (
-            self.config.end_node
-            if self.config.end_node is not None
-            else self.idx_to_peak[np.argmin(self.pcoordinates[:, -1], axis=-1)]
-        )
-        # start_node, end_node = 155, 195
-        print(f"{start_node=}, {end_node=}")
+        start_volume = load_nifti(self.config.start_volume) == 1
+        end_volume = load_nifti(self.config.end_volume) == 1
+        start_node, end_node = self.find_start_end(start_volume, end_volume)
+        logging.info(f"Start node: {start_node}, End node: {end_node}")
 
         # Add a final node with infinite cost to all other nodes
         dummy_node: float = np.inf
@@ -314,11 +436,9 @@ class SmallBowelSegmentor:
         #     active_segments[segments == node] = i
 
         # plotter.add_volume(active_segments, shade=True, cmap="hot")
-        import pickle
-        with open("savefile.pkl") as f:
-            pickle.dump(plotter, f)
+        np.savetxt("path.txt", self.pcoordinates[filtered_path])
+        plotter.export_html("path.html")
         # TODO: Figure out how to export the path to NIFTI
-        # plotter.show()
 
     def run(self) -> None:
         """Run the entire segmentation pipeline."""
@@ -356,7 +476,12 @@ if __name__ == "__main__":
     parser.add_argument("--delta", type=int, help="Delta")
     parser.add_argument("--start_node", type=int, help="Start node")
     parser.add_argument("--end_node", type=int, help="End node")
-
+    parser.add_argument("--start_volume", type=str, help="Path to start volume")
+    parser.add_argument("--end_volume", type=str, help="Path to end volume")
+    parser.add_argument("--precompute", action="store_true", help="Precompute distances")
+    parser.add_argument(
+        "--use_rustworkx", action="store_true", help="Use rustworkx for precomputation"
+    )
     args = parser.parse_args()
 
     if args.config:
@@ -370,9 +495,6 @@ if __name__ == "__main__":
         config, **{k: arg_overrides[k] for k in config.__dict__.keys() if k in arg_overrides}
     )
 
-    segmentor = SmallBowelSegmentor(
-        args.filename_ct,
-        args.filename_gt,
-        config,
-    )
+    logging.info(config)
+    segmentor = SmallBowelSegmentor(args.filename_ct, args.filename_gt, config, 1)
     segmentor.run()

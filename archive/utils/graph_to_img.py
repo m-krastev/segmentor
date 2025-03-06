@@ -3,10 +3,10 @@
 # import SimpleITK as sitk
 # from scipy.ndimage import morphology
 # from tqdm import tqdm
-#
+
 # from archive.utils.utils import torch_from_nii, save_nii
-#
-#
+
+
 # def read_swc(file_path):
 #     """
 #     Reads an SWC file and returns a list of nodes and their connections.
@@ -18,16 +18,16 @@
 #         for line in file:
 #             if line.startswith('#') or len(line) <= 1:  # Skip comments
 #                 continue
-#
+
 #             parts = line.strip().split()
 #             index, _, x, y, z, radius, parent_index = map(float, parts)
 #             nodes.append((index, x, y, z, radius))
 #             connections.append((index, parent_index))
 #     return nodes, connections
-#
-#
-#
-#
+
+
+
+
 # def interpolate_points(p0, p1):
 #     """
 #     Bresenham's line algorithm for 3D to interpolate points between two points p0 and p1.
@@ -83,11 +83,11 @@
 #             yd += ay
 #     points.append((x1, y1, z1))
 #     return points
-#
-#
-#
-#
-#
+
+
+
+
+
 # def create_volumetric_image_no_conn(nodes, voxel_size=(1, 1, 1), image_size=None):
 #     """
 #     Creates a 3D matrix from the list of nodes. Each node's position is marked in the matrix.
@@ -97,40 +97,40 @@
 #         # Determine the required size of the 3D matrix
 #         max_extent = np.max(np.array(nodes)[:, :3], axis=0)
 #         image_size = np.ceil(max_extent / np.array(voxel_size)).astype(int)
-#
+
 #     # Create an empty 3D matrix
 #     volume = np.zeros(image_size, dtype=np.uint8)
-#
+
 #     for _, x, y, z, radius in nodes:
 #         # Convert node coordinates to voxel indices
 #         i, j, k = np.round(np.array([x, y, z]) / np.array(voxel_size)).astype(int)
 #         volume[i, j, k] = 1  # Mark the voxel as occupied
-#
+
 #     return volume
-#
-#
+
+
 # if __name__ == "__main__":
 #     # Path to your SWC file
 #     swc_file_path = 'graph.swc'
-#
+
 #     # Read SWC file and create a list of nodes
 #     nodes, connections = read_swc(swc_file_path)
-#
+
 #     # Create a 3D matrix from the nodes
-#     voxel_grid = create_volumetric_image(nodes, connections, voxel_size=(1.25, 1.25, 1.25), image_size=(100, 160, 160))
-#
-#
+#     voxel_grid = create_volumetric_image_no_conn(nodes, connections, voxel_size=(1.25, 1.25, 1.25), image_size=(100, 160, 160))
+
+
 #     from scipy import ndimage
 #     import matplotlib.pyplot as plt
-#
+
 #     struct1 = ndimage.generate_binary_structure(3, 1)
 #     dilated = ndimage.binary_dilation(voxel_grid, structure=struct1, iterations=1).astype(np.uint8)
-#
+
 #     fig, ax = plt.subplots(1, 2)
 #     ax[0].imshow(voxel_grid[50])
 #     ax[1].imshow(dilated[50])
 #     plt.show()
-#
+
 #     # Save image in correct coordinates
 #     _, header = torch_from_nii("/Users/thomasvanorden/Documents/UvA Master Artificial Intelligence/Jaar 3/Thesis/Data/annotations_v2/Bowel_06v2.nii")
 #     save_nii(dilated, header, "centerline_connected_dilated.nii")
