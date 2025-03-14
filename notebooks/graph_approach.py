@@ -54,6 +54,7 @@ from segmentor.utils.medutils import (
 import kimimaro
 import edt
 import rustworkx as rx
+from segmentor.utils.plotting import path3d
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -118,10 +119,21 @@ class Config:
 
 
 class SmallBowelSegmentor:
+    nii: np.ndarray
+    ground_truth: np.ndarray
+    edges: Optional[np.ndarray]
+    segments: Optional[np.ndarray]
+    rag: Optional[nx.Graph]
+    peak_idxs: Optional[np.ndarray]
+    pcoordinates: Optional[np.ndarray]
+    idx_to_peak: Optional[Dict[int, int]]
+    peak_to_idx: Optional[Dict[int, int]]
+
     def __init__(
         self,
         filename_ct: str,
         filename_gt: str,
+        output_dir: str,
         config: Config,
         label: Optional[int] = None,
     ):
@@ -129,11 +141,11 @@ class SmallBowelSegmentor:
         self.filename_gt: str = filename_gt
         self.config: Config = config
         self.supervoxel_size: int = config.supervoxel_size
-        self.cache_path: Path = Path("cache")
-        self.cache_path.mkdir(exist_ok=True)
-        self.edges_cache: Path = self.cache_path / "edges.npy"
-        self.segments_cache: Path = self.cache_path / "segments.npy"
-        self.rag_cache: Path = self.cache_path / "rag.json"
+
+        self.output_dir: Path = Path(output_dir)
+        self.cache_dir = self.output_dir / "cache"
+        self.cache_dir.mkdir(exist_ok=True)
+
         self.label: Optional[int] = (
             label if label is not None else (1 if "nnUNet" in filename_gt else 18)
         )
@@ -141,13 +153,6 @@ class SmallBowelSegmentor:
             np.asarray(nib.load(self.filename_gt).dataobj) == self.label
         ).astype(np.uint8)
         self.nii: np.ndarray = load_and_normalize_nifti(self.filename_ct)
-        self.edges: Optional[np.ndarray] = None
-        self.segments: Optional[np.ndarray] = None
-        self.rag: Optional[nx.Graph] = None
-        self.peak_idxs: Optional[np.ndarray] = None
-        self.pcoordinates: Optional[np.ndarray] = None
-        self.idx_to_peak: Optional[Dict[int, int]] = None
-        self.peak_to_idx: Optional[Dict[int, int]] = None
 
     def compute_supervoxels(self) -> int:
         """Compute number of supervoxels needed for desired supervoxel size"""
@@ -161,8 +166,9 @@ class SmallBowelSegmentor:
 
     def compute_edges(self) -> np.ndarray:
         """Compute edge map using Meijering filter."""
-        if self.edges_cache.exists():
-            self.edges = np.load(self.edges_cache)
+        edges_cache = self.cache_dir / "edges.npy"
+        if edges_cache.exists():
+            self.edges = np.load(edges_cache)
             logging.info("Edges loaded")
         else:
             logging.info("Edge map not found. Generating...")
@@ -171,14 +177,15 @@ class SmallBowelSegmentor:
             ).astype(np.float32)
             self.edges = ski.filters.median(self.edges)
             self.edges = ski.filters.gaussian(self.edges, sigma=3)
-            np.save(self.edges_cache, self.edges)
+            np.save(edges_cache, self.edges)
             logging.info("Edges generated")
         return self.edges
 
     def compute_segments(self, num_supervoxels: int) -> np.ndarray:
         """Compute supervoxels using SLIC algorithm."""
-        if self.segments_cache.exists():
-            self.segments = np.load(self.segments_cache)
+        segments_cache = self.cache_dir / "segments.npy"
+        if segments_cache.exists():
+            self.segments = np.load(segments_cache)
             logging.info(f"{np.max(self.segments)} segments loaded")
         else:
             self.edges = np.where(self.edges > self.config.edge_threshold, self.edges, 0)
@@ -190,19 +197,20 @@ class SmallBowelSegmentor:
                 channel_axis=None,
                 sigma=0,
             ).astype(np.uint16 if num_supervoxels < 2**16 else np.uint32)
-            np.save(self.segments_cache, self.segments)
+            np.save(segments_cache, self.segments)
             logging.info(f"{np.max(self.segments)} segments generated")
         return self.segments
 
     def generate_rag(self) -> nx.Graph:
         """Generate the Region Adjacency Graph (RAG)."""
-        if self.rag_cache.exists():
-            with open(self.rag_cache, "r") as f:
+        rag_cache = self.cache_dir / "rag.json"
+        if rag_cache.exists():
+            with open(rag_cache, "r") as f:
                 self.rag = nx.node_link_graph(json.load(f))
                 logging.info("RAG loaded")
         else:
             self.rag = ski.graph.rag_boundary(self.segments, self.edges)
-            with open(self.rag_cache, "w") as f:
+            with open(rag_cache, "w") as f:
                 json.dump(nx.node_link_data(self.rag), f, cls=NumpyEncoder)
             logging.info("RAG saved")
         return self.rag
@@ -330,9 +338,9 @@ class SmallBowelSegmentor:
         allpairs = combinations(nodes, 2)
 
         # Check for cache of precomputed distances
-        if (self.cache_path / "lengths.json").exists():
+        if (self.cache_dir / "lengths.pkl").exists():
             logging.info("Cache for Dijkstra distances found. Loading precomputed distances...")
-            with open(self.cache_path / "lengths.pkl", "rb") as f:
+            with open(self.cache_dir / "lengths.pkl", "rb") as f:
                 lengths = pickle.load(f)
             self.config.precompute = True
 
@@ -349,7 +357,7 @@ class SmallBowelSegmentor:
                     lengths = dict(nx.all_pairs_dijkstra_path_length(self.rag, weight="cost"))
                     # Save lengths to cache
                     logging.info("Precomputed distances saved to cache")
-                    with open(self.cache_path / "lengths.pkl", "wb") as f:
+                    with open(self.cache_dir / "lengths.pkl", "wb") as f:
                         pickle.dump(lengths, f)
 
         dists: List[float] = []
@@ -359,7 +367,11 @@ class SmallBowelSegmentor:
             dist: float = euclid[self.peak_to_idx[node1], self.peak_to_idx[node2]]
             if dist <= self.config.delta:
                 if self.config.precompute:
-                    dijkstra_length = lengths[node1][node2]
+                    dijkstra_length = (
+                        lengths[self.peak_to_idx[node1]][self.peak_to_idx[node2]]
+                        if self.config.use_rustworkx
+                        else lengths[node1][node2]
+                    )
                 else:
                     dijkstra_length = nx.dijkstra_path_length(self.rag, node1, node2, weight="cost")
                 rag2.add_edge(node1, node2, cost=dist, normalized=False)
@@ -437,12 +449,45 @@ class SmallBowelSegmentor:
         #     active_segments[segments == node] = i
 
         # plotter.add_volume(active_segments, shade=True, cmap="hot")
-        np.savetxt("path.txt", self.pcoordinates[filtered_path])
-        plotter.export_html("path.html")
-        # TODO: Figure out how to export the path to NIFTI
+
+        path_map, coords = path3d(self.nii, self.pcoordinates[filtered_path], dilate=2)
+
+        np.savetxt(self.output_dir / "nodes.txt", self.pcoordinates[filtered_path])
+        np.save(self.output_dir / "path.npy", coords)
+        save_nifti(path_map.astype(np.uint8), self.output_dir / "path.nii.gz")
+        plotter.export_html(self.output_dir / "path.html")
+
+    def evaluate_metrics(self, path: list[list] = None):
+        if path is None:
+            path = np.load(self.output_dir / "path.npy")
+
+        length = path.shape[0]
+
+        average_gradient = np.mean(self.nii[path[:, 0], path[:, 1], path[:, 2]])
+
+
+        dice_overlap = []
+        path_map = np.zeros_like(self.ground_truth)
+        path_map[path[:, 0], path[:, 1], path[:, 2]] = 1
+        for i in range(1, 6):
+            # Dilate at each iteration
+            path_map = binary_dilation(path_map, iterations=1)
+            dice_overlap.append(
+                2
+                * np.sum(self.ground_truth * path_map)
+                / (np.sum(self.ground_truth) + np.sum(path_map))
+            )
+
+        dice_overlap = np.mean(dice_overlap)
+        metrics = {"curve_length": length, "average_gradient": average_gradient, "dice_overlap" : dice_overlap}
+
+        with open(self.output_dir / "metrics.json", "w") as f:
+            json.dump(metrics, f)
+
+        return metrics
 
     def run(self) -> None:
-        """Run the entire segmentation pipeline."""
+        logging.info("Running segmentation pipeline...")
         num_supervoxels: int = self.compute_supervoxels()
         self.compute_edges()
         self.compute_segments(num_supervoxels)
@@ -453,6 +498,8 @@ class SmallBowelSegmentor:
         path, start_node, end_node, dummy_node = self.solve_tsp(rag2)
         filtered_path: List[int] = self.filter_path(path, start_node, end_node, dummy_node)
         self.visualize_path(filtered_path)
+        metrics = self.evaluate_metrics()
+        logging.info("Segmentation pipeline completed with the following metrics: %s", metrics)
 
 
 # Example Usage
@@ -461,6 +508,7 @@ if __name__ == "__main__":
     parser.add_argument("--filename_ct", type=str, required=True, help="Path to CT scan")
     parser.add_argument("--filename_gt", type=str, required=True, help="Path to ground truth")
     parser.add_argument("--config", type=str, default=None, help="Path to JSON configuration file")
+    parser.add_argument("--output", "-o", type=str, default="output", help="Output directory")
 
     # Add arguments to overwrite config properties
     parser.add_argument("--supervoxel_size", type=int, help="Supervoxel size")
@@ -497,5 +545,5 @@ if __name__ == "__main__":
     )
 
     logging.info(config)
-    segmentor = SmallBowelSegmentor(args.filename_ct, args.filename_gt, config, 1)
+    segmentor = SmallBowelSegmentor(args.filename_ct, args.filename_gt, args.output, config, 1)
     segmentor.run()
