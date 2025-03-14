@@ -170,10 +170,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Custom data files
-
 # Data Files/Directories
 data
+spiemi
 .DS_Store
 .vscode
 wandb

@@ -1,7 +1,7 @@
 import pyvista as pv
 import numpy as np
 import numpy.typing as npt
-from typing import Any
+from typing import Any, Union
 from scipy.ndimage import binary_dilation
 
 
@@ -97,14 +97,22 @@ def plotLine3d(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int) -> list[tup
     return points
 
 
-def path3d(reference: np.ndarray, path: list[tuple], dilate: int = 0) -> np.ndarray:
+def path3d(reference: np.ndarray, path: list[tuple], dilate: int = 0, return_coords = True) -> np.ndarray | Union[np.ndarray, list]:
     """Draws a path on a 3D volume."""
     base = np.zeros_like(reference)
     base[tuple(np.asarray(path).T)] = 1
+
+    if return_coords:
+        return_coords = []
+
     for start, end in zip(path[:-1], path[1:]):
-        base[tuple(np.asarray(plotLine3d(*start, *end)).T)] = 1
+        coords = plotLine3d(*start, *end)
+        base[tuple(np.asarray(coords.T))] = 1
+
+        if return_coords:
+            return_coords.extend(coords)
 
     if dilate:
         base = binary_dilation(base, iterations=dilate)
 
-    return base
+    return base, return_coords if return_coords else base

@@ -205,3 +205,73 @@ def create_volumetric_image(
         volume[np.round(np.array(line_points) / voxel_size).astype(int)] = 1
 
     return volume
+
+
+
+# ########################################################
+# EVALUATION METRICS
+# ########################################################
+
+def line_length(points: list[tuple]):
+    """
+    Calculate the length of a line in ND space.
+
+    Args:
+        list[tuple]: List of tuples containing the coordinates of the connected points.
+
+    Returns:
+        float: The length of the line.
+    """
+    return np.sum(np.linalg.norm(np.diff(points, axis=0), axis=-1))
+
+def dice_overlap(segmentation: np.ndarray, ground_truth: np.ndarray) -> float:
+    """
+    Calculate the Dice coefficient between two binary masks.
+
+    Args:
+        segmentation (np.ndarray): The predicted binary mask.
+        ground_truth (np.ndarray): The ground truth binary mask.
+
+    Returns:
+        float: The Dice coefficient.
+    """
+    intersection = np.sum(segmentation * ground_truth)
+    return 2 * intersection / (np.sum(segmentation) + np.sum(ground_truth))
+
+def hausdorff_distance(segmentation: np.ndarray, ground_truth: np.ndarray) -> float:
+    """
+    Calculate the Hausdorff distance between two binary masks.
+
+    Args:
+        segmentation (np.ndarray): The predicted binary mask.
+        ground_truth (np.ndarray): The ground truth binary mask.
+
+    Returns:
+        float: The Hausdorff distance.
+
+    NOTE: This algo is trash and takes 10 million years, don't use it.
+    """
+    seg_to_gt = np.max(np.array([np.min(np.linalg.norm(segmentation - gt, axis=-1)) for gt in np.argwhere(ground_truth)]))
+    gt_to_seg = np.max(np.array([np.min(np.linalg.norm(gt - segmentation, axis=-1)) for gt in np.argwhere(ground_truth)]))
+    return max(seg_to_gt, gt_to_seg)
+
+
+def average_gradient(path: list[tuple[int, int, int]], image: np.ndarray) -> float:
+    """
+    Calculate the average of the gradient along a path in an image.
+
+    Args:
+        path (list[tuple[int, int, int]]): List of tuples containing the coordinates of the connected points.
+        image (np.ndarray): The image to use as index.
+
+    Returns:
+        float: The average of the gradient along the path.
+    """
+    return np.mean(image[coordinate_to_index(np.asarray(path))])
+
+def coordinate_to_index(coord):
+    """
+    Convert a list of coordinates to a list of indices, e.g.
+     [[1, 2], [3, 4], [5, 6]] -> [[1, 3, 5], [2, 4, 6]]
+    """
+    return tuple(coord.astype(int).T)

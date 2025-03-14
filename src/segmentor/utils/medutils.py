@@ -58,7 +58,8 @@ def normalize_ct(
         # Normalize to [0, 1]
         nii = (nii - low) / (high - low)
     else:
-        nii = (nii - np.min(nii)) / (np.max(nii) - np.min(nii))
+        _min = np.min(nii)
+        nii = (nii - _min) / (np.max(nii) - _min)
     return nii
 
 def load_and_normalize_nifti(
