@@ -12,20 +12,22 @@ def load_nifti(img_path: str | Path) -> npt.NDArray:
     return np.asarray(nib.load(img_path).dataobj)
 
 
-def save_nifti(data: npt.NDArray, filename: str | Path, other: str | Path = None):
+def save_nifti(data: npt.NDArray, filename: str | Path, other: str | Path | nib.Nifti1Image = None):
     """
     Saves a NumPy array as a NIfTI image.
 
     Args:
         data (npt.NDArray): The NumPy array to save.
         filename (str | Path): The filename to save the image to.
-        other (str | Path, optional): Another NIfTI image to copy the header from. Defaults to None.
+        other (str | Path | Nifti1Image, optional): Another NIfTI image to copy the header from. Defaults to None.
                                         If None, the header from the image to be saved is used.
     """
     if other is None:
         other = nib.load(filename)
     else:
-        other = nib.load(other)
+        if not hasattr(other, "affine"):
+            other = nib.load(other)
+
     new_image = nib.Nifti1Image(data, other.affine, other.header)
     nib.save(new_image, filename)
 

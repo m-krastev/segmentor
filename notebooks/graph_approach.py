@@ -52,6 +52,7 @@ from segmentor.utils.medutils import (
     load_nifti,
 )
 import kimimaro
+import edt
 import rustworkx as rx
 
 logging.basicConfig(
@@ -208,7 +209,7 @@ class SmallBowelSegmentor:
 
     def compute_distance_map(self) -> np.ndarray:
         """Compute the distance map from the inverted small bowel segmentation."""
-        return distance_transform_edt(
+        return edt.edt(
             # binary_dilation(
             #     self.edges > self.config.edge_threshold, iterations=self.config.dilation_iterations, mask=self.ground_truth
             # )
