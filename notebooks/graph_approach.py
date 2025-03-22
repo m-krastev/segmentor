@@ -264,17 +264,49 @@ class SmallBowelSegmentor:
         self.voxel_size: Tuple[float, float, float] = nib.load(self.filename_ct).header.get_zooms()
 
     def compute_supervoxels(self) -> int:
-        """Compute number of supervoxels needed for desired supervoxel size"""
+        """Calculate the number of supervoxels needed based on desired physical size.
+        
+        This function determines how many supervoxels to create based on:
+        - The desired physical supervoxel size (in mm³)
+        - The actual voxel size from the CT scan
+        - The total volume of the image
+        
+        Returns:
+            int: The number of supervoxels needed to achieve the desired physical size
+        
+        Example:
+            If desired_size = 216mm³, voxel_size = 1mm³, image_size = 512x512x512
+            Then num_supervoxels = (512*512*512 * 1) / 216 ≈ 625,777
+        """
         voxel_size = np.prod(self.voxel_size)
         num_voxels: int = np.prod(self.ground_truth.shape)
         num_supervoxels: int = int((num_voxels * voxel_size) / self.supervoxel_size)
         logging.info(
-            f"Desired supervoxel size: {self.supervoxel_size:>6} mm3; Assumed voxel size: {voxel_size:>6.2f} mm3; Number of supervoxels required: {num_supervoxels:>6}"
+            f"Desired supervoxel size: {self.supervoxel_size:>6} mm3; "
+            f"Assumed voxel size: {voxel_size:>6.2f} mm3; "
+            f"Number of supervoxels required: {num_supervoxels:>6}"
         )
         return num_supervoxels
 
     def compute_edges(self) -> np.ndarray:
-        """Compute edge map using Meijering filter."""
+        """Compute edge map of the CT scan using Meijering filter.
+        
+        Algorithm steps:
+        1. Check for cached results to avoid recomputation
+        2. Apply Meijering filter to detect tubular structures:
+            - Uses multiple sigma values for multi-scale detection
+            - Inverts image if black_ridges=True
+        3. Remove false positives from air bubbles
+        4. Apply median filter to reduce noise
+        5. Cache results for future use
+        
+        Returns:
+            np.ndarray: Edge map where higher values indicate stronger edges
+            
+        Note:
+            The Meijering filter is particularly good at detecting tubular structures
+            like blood vessels and intestines, making it ideal for bowel tracking.
+        """
         edges_cache = self.cache_dir / "edges.npy"
         if edges_cache.exists():
             self.edges = np.load(edges_cache)
@@ -289,7 +321,7 @@ class SmallBowelSegmentor:
 
             # remove potential FP edges caused by air bubbles
             self.edges[self.nii < np.quantile(self.nii, 0.01)] = 0
-
+            # The median filter might be too aggressive
             self.edges = ski.filters.median(self.edges)
             # self.edges = ski.filters.gaussian(self.edges, sigma=3)
             np.save(edges_cache, self.edges)
@@ -343,22 +375,53 @@ class SmallBowelSegmentor:
         return self.rag
 
     def compute_distance_map(self) -> np.ndarray:
-        """Compute the distance map from the inverted small bowel segmentation."""
-        return distance_transform_edt(
-            # binary_dilation(
-            #     self.edges > self.config.edge_threshold, iterations=self.config.dilation_iterations, mask=self.ground_truth
-            # )
-            self.ground_truth.astype(bool)
-        )
+        """Compute Euclidean distance transform of the segmentation mask.
+        
+        The distance transform assigns to each voxel the distance to the nearest
+        boundary of the segmentation mask. This is useful for:
+        1. Finding the centerline of the bowel
+        2. Identifying potential must-pass points
+        3. Ensuring the path stays within the segmentation
+        
+        Returns:
+            np.ndarray: Distance map where each value is the distance to the nearest boundary
+        """
+        return distance_transform_edt(self.ground_truth.astype(bool))
+        # return distance_transform_edt(
+        #     # binary_dilation(
+        #     #     self.edges > self.config.edge_threshold, iterations=self.config.dilation_iterations, mask=self.
+        #     ground_truth
+        #     # )
+        #     self.ground_truth.astype(bool)
+        # )
 
     def compute_peaks(self, distance_map: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Get the must-pass nodes as local peaks on the distance map."""
+        """Identify must-pass nodes as local maxima in the distance map.
+        
+        Parameters:
+            distance_map (np.ndarray): Distance transform of the segmentation mask
+            
+        Algorithm:
+        1. Find local maxima in the distance map that are:
+            - At least thetad voxels apart (minimum distance)
+            - Above thetav threshold (minimum peak height)
+            - Within valid supervoxel regions
+        2. Convert peak coordinates to supervoxel indices
+        
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: 
+                - Array of peak coordinates (N x 3)
+                - Array of unique supervoxel indices containing peaks
+                
+        Note:
+            These peaks will serve as waypoints that the final path must visit
+        """
         self.peak_idxs = peak_local_max(
             distance_map,
             min_distance=self.config.thetad,
             threshold_abs=self.config.thetav,
             labels=self.segments,
-        )  # labels = segments is probably needed here, otherwise the points are too sparse
+        )
         peaks = np.unique(
             self.segments[self.peak_idxs[:, 0], self.peak_idxs[:, 1], self.peak_idxs[:, 2]]
         )
@@ -493,11 +556,34 @@ class SmallBowelSegmentor:
         return start, end
 
     def simplify_graph(self, peaks: np.ndarray) -> nx.Graph:
-        """Simplify the graph."""
+        """Create a simplified graph connecting must-pass points.
+        
+        Parameters:
+            peaks (np.ndarray): Array of supervoxel indices containing peaks
+            
+        Algorithm:
+        1. Create new graph with peaks as nodes
+        2. Create mappings between peak indices and supervoxel indices
+        3. Compute Euclidean distances between all peak pairs
+        4. For each pair of peaks:
+            - If distance <= delta: Add edge with normalized cost based on Dijkstra path
+            - If distance > delta: Add edge with cost proportional to Euclidean distance
+        5. Normalize all costs to [0,1] range
+        
+        Returns:
+            nx.Graph: Simplified graph where:
+                - Nodes are supervoxels containing peaks
+                - Edges represent possible paths between peaks
+                - Edge weights represent normalized path costs
+                
+        Note:
+            This simplification is crucial for making the TSP problem tractable
+        """
         rag2: nx.Graph = nx.Graph()
         rag2.add_nodes_from(peaks)
         nodes: List[int] = list(rag2.nodes)
 
+        # Create bidirectional mappings for peak indices
         self.idx_to_peak = {
             idx: peak
             for idx, peak in enumerate(
@@ -511,15 +597,15 @@ class SmallBowelSegmentor:
         self.pcoordinates: np.ndarray = np.asarray(self.peak_idxs)
         euclid: np.ndarray = edist(self.pcoordinates)
 
+        # Process all possible peak pairs
         allpairs = combinations(nodes, 2)
-
-        # Check for cache of precomputed distances
+        
+        # Load or compute path lengths
         if (self.cache_dir / "lengths.pkl").exists():
             logging.info("Cache for Dijkstra distances found. Loading precomputed distances...")
             with open(self.cache_dir / "lengths.pkl", "rb") as f:
                 lengths = pickle.load(f)
             self.config.precompute = True
-
         else:
             if self.config.precompute:
                 if self.config.use_rustworkx:
@@ -536,6 +622,7 @@ class SmallBowelSegmentor:
                     with open(self.cache_dir / "lengths.pkl", "wb") as f:
                         pickle.dump(lengths, f)
 
+        # Build edges with appropriate weights
         dists: List[float] = []
         for node1, node2 in tqdm(
             allpairs,
@@ -558,14 +645,14 @@ class SmallBowelSegmentor:
             else:
                 rag2.add_edge(node1, node2, cost=dist / self.config.delta, normalized=True)
 
+        # Normalize costs
         maxdist: float = max(dists)
-        # Second pass to normalize by the max
         for edge in rag2.edges:
             if not rag2.edges[edge]["normalized"]:
                 rag2.edges[edge]["cost"] /= maxdist
                 rag2.edges[edge]["normalized"] = True
 
-        # Save the graph
+        # Cache the simplified graph
         with open(self.cache_dir / "rag2.json", "w") as f:
             json.dump(nx.node_link_data(rag2), f, cls=NumpyEncoder)
         return rag2
