@@ -23,37 +23,36 @@
 #    2.  Solve the TSP problem using the Co.
 #
 
+import argparse
+import json
 import logging
 import os
 import pickle
-from pathlib import Path
+import shutil
+from dataclasses import dataclass, field, replace
 from itertools import combinations
-import argparse
-import json  # ADDED
-from dataclasses import dataclass, field, replace  # MODIFIED
-from typing import List, Optional, Tuple, Dict, Any  # MODIFIED
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple 
 
+import kimimaro
 import networkx as nx
-from tqdm import tqdm
 import nibabel as nib
 import numpy as np
 import pyvista as pv
 import skimage as ski
+from scipy.ndimage import binary_dilation, distance_transform_edt
+from skimage.feature import peak_local_max
 from skimage.filters import meijering
 from skimage.segmentation import slic
-from skimage.feature import peak_local_max
-from scipy.ndimage import binary_dilation, distance_transform_edt
 from sklearn.metrics import euclidean_distances as edist
+from tqdm import tqdm
 
 from segmentor.utils.medutils import (
     load_and_normalize_nifti,
     load_and_resample_nifti,
-    save_nifti,
     load_nifti,
+    save_nifti,
 )
-import kimimaro
-import edt
-import rustworkx as rx
 from segmentor.utils.plotting import path3d
 
 logging.basicConfig(
@@ -66,13 +65,105 @@ logging.getLogger("trame_client").setLevel(logging.ERROR)
 logging.getLogger("trame_client.widgets.core").setLevel(logging.ERROR)
 
 
+try:
+    import cupy
+    from cucim.core.operations.morphology import distance_transform_edt as _distance_transform_edt
+    from cucim.skimage.feature import peak_local_max as _peak_local_max
+    from cucim.skimage.filters import meijering as _meijering
+    from cucim.skimage.morphology import binary_dilation as _binary_dilation
+
+    def distance_transform_edt(image, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        return cupy.asnumpy(_distance_transform_edt(image, **kwargs).get())
+
+    def binary_dilation(image, iterations=None, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        if iterations is None:
+            image = _binary_dilation(image, **kwargs)
+        else:
+            for _ in range(iterations):
+                image = _binary_dilation(image, **kwargs)
+        return cupy.asnumpy(image.get())
+
+    def meijering(image, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        image = _meijering(cupy.array(image, dtype=cupy.float32), **kwargs).get()
+        return cupy.asnumpy(image)
+
+    def peak_local_max(image, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        
+        labels = kwargs.pop("labels", None)
+        if labels is not None:
+            labels = cupy.array(labels, dtype=cupy.int32)
+        return cupy.asnumpy(_peak_local_max(image, labels=labels, **kwargs).get())
+    
+    logging.info("CuCIM/CuPy installed. Using GPU for graphics heavy operations.")
+
+except ImportError:
+    logging.error("CuCIM/CuPy not installed. Please install it to enable GPU acceleration.")
+    try:
+        from edt import edt as distance_transform_edt
+        logging.info("EDT installed. Using CPU for distance transform.")
+    except ImportError:
+        logging.error(
+            "EDT not installed. Please install it to enable fast distance transform: `pip install edt`."
+        )
+# try:
+#     from cuda_slic import slic as _slic
+
+#     def slic(
+#         image,
+#         n_segments=100,
+#         compactness=1.0,
+#         spacing=(1, 1, 1),
+#         slic_zero=None,
+#         multichannel=False,
+#         channel_axis=None,
+#         start_label=None,
+#         mask=None,
+#         sigma=0,
+#     ):
+#         return _slic(
+#             image,
+#             n_segments,
+#             spacing=spacing,
+#             compactness=compactness,
+#             multichannel=multichannel,
+#             # start_label=start_label,
+#             # mask=mask,
+#             # sigma=sigma,
+#         )
+
+# except ImportError:
+#     logging.error(
+#         "CUDA SLIC not installed. Please install it to enable GPU acceleration for SLIC superpixels: `pip install gpu-slic --no-deps`."
+#     )
+
+# Speed up imports
+try:
+    import rustworkx as rx
+except ImportError:
+    logging.error(
+        "Rustworkx not installed. Please install it to enable fast precomputation of Dijkstra lengths."
+    )
+
+
 class NumpyEncoder(json.JSONEncoder):
     """Special class to serialize numpy types such as int32, int16, float32, etc."""
 
     def default(self, obj):
-        if isinstance(obj, (np.int32, np.int64, np.int16)):
+        if isinstance(obj, np.integer):
             return int(obj)
-        elif isinstance(obj, np.float32):
+        elif isinstance(obj, np.floating):
             return float(obj)
         elif isinstance(obj, rx.AllPairsPathLengthMapping):
             return {k: dict(v) for k, v in obj.items()}
@@ -111,7 +202,7 @@ class Config:
     def to_json(self, path: str):
         """Save hyperparameters to a JSON configuration file."""
         with open(path, "w") as f:
-            json.dump(self.to_dict(), f)
+            json.dump(self.to_dict(), f, indent=4)
 
     def to_dict(self) -> dict:
         """Return hyperparameters as a dictionary."""
@@ -128,6 +219,7 @@ class SmallBowelSegmentor:
     pcoordinates: Optional[np.ndarray]
     idx_to_peak: Optional[Dict[int, int]]
     peak_to_idx: Optional[Dict[int, int]]
+    voxel_size: Tuple[float, float, float]
 
     def __init__(
         self,
@@ -144,7 +236,23 @@ class SmallBowelSegmentor:
 
         self.output_dir: Path = Path(output_dir)
         self.cache_dir = self.output_dir / "cache"
-        self.cache_dir.mkdir(exist_ok=True)
+
+        # Config check for cache invalidation
+        config_path = self.cache_dir / "config.json"
+        if config_path.exists():
+            with open(config_path, "r") as f:
+                old_config = Config.from_dict(json.load(f))
+            if old_config != config:
+                logging.warning("Config has changed. Clearing cache to avoid conflicts...")
+                shutil.rmtree(self.cache_dir)
+                self.cache_dir.mkdir(exist_ok=True, parents=True)
+            else:
+                if (self.output_dir / "metrics.json").exists():
+                    logging.info("Metrics found. Skipping computation...")
+                    exit(0)
+        else:
+            self.cache_dir.mkdir(exist_ok=True, parents=True)
+            config_path.write_text(json.dumps(config.to_dict(), indent=4))
 
         self.label: Optional[int] = (
             label if label is not None else (1 if "nnUNet" in filename_gt else 18)
@@ -152,15 +260,16 @@ class SmallBowelSegmentor:
         self.ground_truth: np.ndarray = (
             np.asarray(nib.load(self.filename_gt).dataobj) == self.label
         ).astype(np.uint8)
-        self.nii: np.ndarray = load_and_normalize_nifti(self.filename_ct)
+        self.nii: np.ndarray = load_and_normalize_nifti(self.filename_ct).astype(np.float32)
+        self.voxel_size: Tuple[float, float, float] = nib.load(self.filename_ct).header.get_zooms()
 
     def compute_supervoxels(self) -> int:
         """Compute number of supervoxels needed for desired supervoxel size"""
-        voxel_size: int = 1 * 1 * 1  # mm3
+        voxel_size = np.prod(self.voxel_size)
         num_voxels: int = np.prod(self.ground_truth.shape)
-        num_supervoxels: int = int(num_voxels * voxel_size / self.supervoxel_size)
+        num_supervoxels: int = int((num_voxels * voxel_size) / self.supervoxel_size)
         logging.info(
-            f"Desired supervoxel size: {self.supervoxel_size:<4} mm3; Assumed voxel size: {voxel_size:<4} mm3; Number of supervoxels required:{num_supervoxels:<4}"
+            f"Desired supervoxel size: {self.supervoxel_size:>6} mm3; Assumed voxel size: {voxel_size:>6.2f} mm3; Number of supervoxels required: {num_supervoxels:>6}"
         )
         return num_supervoxels
 
@@ -173,11 +282,18 @@ class SmallBowelSegmentor:
         else:
             logging.info("Edge map not found. Generating...")
             self.edges = meijering(
-                1 - self.nii, sigmas=self.config.sigmas, black_ridges=self.config.black_ridges
+                1 - self.nii,
+                sigmas=self.config.sigmas,
+                black_ridges=self.config.black_ridges,
             ).astype(np.float32)
+
+            # remove potential FP edges caused by air bubbles
+            self.edges[self.nii < np.quantile(self.nii, 0.01)] = 0
+
             self.edges = ski.filters.median(self.edges)
-            self.edges = ski.filters.gaussian(self.edges, sigma=3)
+            # self.edges = ski.filters.gaussian(self.edges, sigma=3)
             np.save(edges_cache, self.edges)
+            save_nifti(self.edges, self.cache_dir / "edges.nii.gz", self.filename_gt)
             logging.info("Edges generated")
         return self.edges
 
@@ -188,16 +304,27 @@ class SmallBowelSegmentor:
             self.segments = np.load(segments_cache)
             logging.info(f"{np.max(self.segments)} segments loaded")
         else:
-            self.edges = np.where(self.edges > self.config.edge_threshold, self.edges, 0)
+            # self.edges = np.where(
+            #     self.edges > self.config.edge_threshold, self.edges, 0
+            # )
             self.segments = slic(
                 self.edges,
                 n_segments=num_supervoxels,
                 compactness=0.01,
+                slic_zero=True,
                 start_label=1,
                 channel_axis=None,
                 sigma=0,
             ).astype(np.uint16 if num_supervoxels < 2**16 else np.uint32)
+
+            # TODO: Remove edges which cross the segmentation mask
             np.save(segments_cache, self.segments)
+
+            save_nifti(self.segments, self.cache_dir / "segments.nii.gz", self.filename_gt)
+            # Save another copy of the segments for visualization
+            # Values inside any given supervoxel equal the average value in the supervoxel
+            segments_viz = ski.color.label2rgb(self.segments, self.edges, bg_label=0, kind="avg")
+            save_nifti(segments_viz, self.cache_dir / "segments_viz.nii.gz", self.filename_gt)
             logging.info(f"{np.max(self.segments)} segments generated")
         return self.segments
 
@@ -217,7 +344,7 @@ class SmallBowelSegmentor:
 
     def compute_distance_map(self) -> np.ndarray:
         """Compute the distance map from the inverted small bowel segmentation."""
-        return edt.edt(
+        return distance_transform_edt(
             # binary_dilation(
             #     self.edges > self.config.edge_threshold, iterations=self.config.dilation_iterations, mask=self.ground_truth
             # )
@@ -243,7 +370,51 @@ class SmallBowelSegmentor:
         start_segments = np.intersect1d(peaks, self.segments[start_volume])
         end_segments = np.intersect1d(peaks, self.segments[end_volume])
         # Let start be the first peak
-        start = start_segments[0]
+        if len(start_segments) > 0:
+            start = start_segments[0]
+        else:
+            # Generate the skeleton of the duodenum
+            duodenum_skeleton = kimimaro.skeletonize(
+                # Paranoid dilation to make sure the duodenum is connected
+                binary_dilation(start_volume, iterations=5),
+                teasar_params={
+                    "scale": 3,
+                    "const": 5,
+                    "pdrf_scale": 10000,
+                    "pdrf_exponent": 4,
+                    "soma_acceptance_threshold": 3500,  # physical units
+                    # "soma_detection_threshold": 750,  # physical units
+                    # "soma_invalidation_const": 300,  # physical units
+                    # "soma_invalidation_scale": 2,
+                },
+                anisotropy=(1, 1, 1),
+                dust_threshold=5,
+                fix_branching=True,
+                progress=False,
+                parallel_chunk_size=100,  # for the progress bar
+            )[1]
+            duodenum_graph = nx.Graph()
+            duodenum_graph.add_nodes_from(
+                (idx, {"location": loc}) for idx, loc in enumerate(duodenum_skeleton.vertices)
+            )
+            duodenum_graph.add_edges_from(duodenum_skeleton.edges)
+
+            # Get the lowest end of the duodenum
+            ends = list(node[0] for node in duodenum_graph.degree() if node[1] == 1)
+            start = max(ends, key=lambda x: duodenum_graph.nodes[x]["location"][2])
+            # Get the closest peak to the duodenum end
+            start_idx = np.argmin(
+                np.linalg.norm(
+                    self.peak_idxs - duodenum_graph.nodes[start]["location"],
+                    axis=1,
+                )
+            )
+            start = self.segments[
+                self.peak_idxs[start_idx][0],
+                self.peak_idxs[start_idx][1],
+                self.peak_idxs[start_idx][2],
+            ]
+
         end = end_segments
         # Let end be the lowest peak
         # end = np.isin(segments, end)
@@ -252,7 +423,8 @@ class SmallBowelSegmentor:
 
         def get_ileocecal_end(colon: np.ndarray) -> np.ndarray:
             colon_skeleton = kimimaro.skeletonize(
-                colon,
+                # Paranoid dilation to make sure the colon is connected
+                binary_dilation(colon, iterations=5),
                 teasar_params={
                     "scale": 3,
                     "const": 5,
@@ -275,23 +447,25 @@ class SmallBowelSegmentor:
             )
             colon_graph.add_edges_from(colon_skeleton.edges)
 
+            # Secondary graph that will only use the largest connected component (copy probably unneeded but its not that big anyway)
+            colon_graph = colon_graph.subgraph(
+                max(nx.connected_components(colon_graph), key=len)
+            ).copy()
+
             ends = list(node[0] for node in colon_graph.degree() if node[1] == 1)
-            ends
             rectal_end = max(ends, key=lambda x: colon_graph.nodes[x]["location"][2])
             ends.remove(rectal_end)
             if len(ends) > 1:
                 # The ileocecal end is the one farthest away from the rectal end
                 # This can be done by finding the end that is the farthest away in terms of graph distance
                 ileocecal_end = max(
-                    ends, key=lambda x: nx.shortest_path_length(colon_graph, rectal_end, x)
+                    ends,
+                    key=lambda x: nx.shortest_path_length(colon_graph, rectal_end, x),
+                    # # Alternatively, find the end that is the farthest away in terms of Euclidean distance
+                    # key=lambda x: np.linalg.norm(
+                    #     colon_graph.nodes[x]["location"] - colon_graph.nodes[rectal_end]["location"]
+                    # ),
                 )
-                # Alternatively, find the end that is the farthest away in terms of Euclidean distance
-                # ileocecal_end = max(
-                #     ends,
-                #     key=lambda x: np.linalg.norm(
-                #         colon_graph.nodes[x]["location"] - colon_graph.nodes[rectal_end]["location"]
-                #     ),
-                # )
             else:
                 ileocecal_end = ends[0]
 
@@ -312,7 +486,9 @@ class SmallBowelSegmentor:
                 )
             )
             end = self.segments[
-                self.peak_idxs[end_idx][0], self.peak_idxs[end_idx][1], self.peak_idxs[end_idx][2]
+                self.peak_idxs[end_idx][0],
+                self.peak_idxs[end_idx][1],
+                self.peak_idxs[end_idx][2],
             ]
         return start, end
 
@@ -362,13 +538,16 @@ class SmallBowelSegmentor:
 
         dists: List[float] = []
         for node1, node2 in tqdm(
-            allpairs, desc="Computing distances", total=len(nodes) * (len(nodes) - 1) // 2
+            allpairs,
+            desc="Computing distances",
+            total=len(nodes) * (len(nodes) - 1) // 2,
         ):
             dist: float = euclid[self.peak_to_idx[node1], self.peak_to_idx[node2]]
             if dist <= self.config.delta:
                 if self.config.precompute:
                     dijkstra_length = (
-                        lengths[self.peak_to_idx[node1]][self.peak_to_idx[node2]]
+                        # Paranoid copy to avoid memory leak from rustworkx
+                        float(lengths[self.peak_to_idx[node1]][self.peak_to_idx[node2]])
                         if self.config.use_rustworkx
                         else lengths[node1][node2]
                     )
@@ -385,6 +564,10 @@ class SmallBowelSegmentor:
             if not rag2.edges[edge]["normalized"]:
                 rag2.edges[edge]["cost"] /= maxdist
                 rag2.edges[edge]["normalized"] = True
+
+        # Save the graph
+        with open(self.cache_dir / "rag2.json", "w") as f:
+            json.dump(nx.node_link_data(rag2), f, cls=NumpyEncoder)
         return rag2
 
     def solve_tsp(self, rag2: nx.Graph) -> Tuple[List[int], int, int, float]:
@@ -416,7 +599,6 @@ class SmallBowelSegmentor:
         start_idx: int = path.index(start_node)
         end_idx: int = path.index(end_node)
         dummy_idx: int = path.index(dummy_node)
-        print(len(path), path)
         if start_idx > end_idx:
             # TODO: Check.
             filtered_path: List[int] = path[start_idx:-1][::-1] + path[: end_idx + 1][::-1]
@@ -454,7 +636,7 @@ class SmallBowelSegmentor:
 
         np.savetxt(self.output_dir / "nodes.txt", self.pcoordinates[filtered_path])
         np.save(self.output_dir / "path.npy", coords)
-        save_nifti(path_map.astype(np.uint8), self.output_dir / "path.nii.gz")
+        save_nifti(path_map.astype(np.uint8), self.output_dir / "path.nii.gz", self.filename_gt)
         plotter.export_html(self.output_dir / "path.html")
 
     def evaluate_metrics(self, path: list[list] = None):
@@ -462,9 +644,7 @@ class SmallBowelSegmentor:
             path = np.load(self.output_dir / "path.npy")
 
         length = path.shape[0]
-
-        average_gradient = np.mean(self.nii[path[:, 0], path[:, 1], path[:, 2]])
-
+        average_gradient = np.mean(self.nii[tuple(np.asarray(path).T)])
 
         dice_overlap = []
         path_map = np.zeros_like(self.ground_truth)
@@ -479,10 +659,14 @@ class SmallBowelSegmentor:
             )
 
         dice_overlap = np.mean(dice_overlap)
-        metrics = {"curve_length": length, "average_gradient": average_gradient, "dice_overlap" : dice_overlap}
+        metrics = {
+            "curve_length": length,
+            "average_gradient": average_gradient,
+            "dice_overlap": dice_overlap,
+        }
 
         with open(self.output_dir / "metrics.json", "w") as f:
-            json.dump(metrics, f)
+            json.dump(metrics, f, indent=4, cls=NumpyEncoder)
 
         return metrics
 
@@ -515,10 +699,14 @@ if __name__ == "__main__":
     parser.add_argument("--sigmas", type=float, nargs="+", help="Sigmas for Meijering filter")
     parser.add_argument("--edge_threshold", type=float, help="Edge threshold")
     parser.add_argument(
-        "--black_ridges", action="store_true", help="Use black ridges in Meijering filter"
+        "--black_ridges",
+        action="store_true",
+        help="Use black ridges in Meijering filter",
     )
     parser.add_argument(
-        "--dilation_iterations", type=int, help="Number of iterations for binary dilation"
+        "--dilation_iterations",
+        type=int,
+        help="Number of iterations for binary dilation",
     )
     parser.add_argument("--thetav", type=int, help="Theta v")
     parser.add_argument("--thetad", type=int, help="Theta d")
@@ -541,7 +729,8 @@ if __name__ == "__main__":
     # Overwrite config properties with arguments
     arg_overrides = {k: v for k, v in vars(args).items() if v is not None}
     config = replace(
-        config, **{k: arg_overrides[k] for k in config.__dict__.keys() if k in arg_overrides}
+        config,
+        **{k: arg_overrides[k] for k in config.__dict__.keys() if k in arg_overrides},
     )
 
     logging.info(config)

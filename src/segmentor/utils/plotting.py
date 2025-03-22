@@ -103,16 +103,16 @@ def path3d(reference: np.ndarray, path: list[tuple], dilate: int = 0, return_coo
     base[tuple(np.asarray(path).T)] = 1
 
     if return_coords:
-        return_coords = []
+        coord_list = []
 
     for start, end in zip(path[:-1], path[1:]):
         coords = plotLine3d(*start, *end)
-        base[tuple(np.asarray(coords.T))] = 1
+        base[tuple(np.asarray(coords).T)] = 1
 
         if return_coords:
-            return_coords.extend(coords)
+            coord_list.extend(coords)
 
     if dilate:
         base = binary_dilation(base, iterations=dilate)
 
-    return base, return_coords if return_coords else base
+    return (base, coord_list) if return_coords else base
