@@ -249,7 +249,7 @@ def hausdorff_distance(segmentation: np.ndarray, ground_truth: np.ndarray) -> fl
     Returns:
         float: The Hausdorff distance.
 
-    NOTE: This algo is trash and takes 10 million years, don't use it.
+    HACK: This algo is trash and takes 10 million years, don't use it.
     """
     seg_to_gt = np.max(np.array([np.min(np.linalg.norm(segmentation - gt, axis=-1)) for gt in np.argwhere(ground_truth)]))
     gt_to_seg = np.max(np.array([np.min(np.linalg.norm(gt - segmentation, axis=-1)) for gt in np.argwhere(ground_truth)]))

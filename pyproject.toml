@@ -15,10 +15,18 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "scikit-image",
-    "pyvista",
-    "wandb"
+    "pyvista[jupyter]",
+    "wandb",
+    "kimimaro",
+    "networkx",
+    "rustworkx"
 ]
 
+[project.optional-dependencies]
+cuda = [
+    "cupy",
+    "cucim-cu12",
+]
 
 [tool.ruff]
 line-length = 100
