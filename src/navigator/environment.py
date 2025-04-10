@@ -17,7 +17,7 @@ class SmallBowelEnv:
     Handles the 3D navigation environment, rewards, and state preparation.
     """
 
-    def __init__(self, config: Config, start_end_coords: Dict[str, Tuple[int, int, int]] = None):
+    def __init__(self, config: Config):
         """Initialize the small bowel environment."""
         self.config = config
         self.device = torch.device(config.device)
@@ -44,6 +44,8 @@ class SmallBowelEnv:
         self.seg = None
         self.wall_map = None
         self.gt_path_vol = None
+        self.spacing = None
+        self.image_affine = None
 
         # Initialize path tracking variables
         self.current_step: int = 0
@@ -54,6 +56,10 @@ class SmallBowelEnv:
         self.current_gdt_val: float = (
             0.0  # Store GDT value of current position for immediate reward
         )
+
+        # Flag to avoid recomputing the GDT too often
+        self.gdt_computed = False
+        self.start_choice = "start"  # Default start choice
 
     def _process_gt_path(self):
         """Process ground truth path data."""
@@ -85,11 +91,13 @@ class SmallBowelEnv:
 
     def update_data(
         self,
-        image: np.ndarray,
-        seg: np.ndarray,
-        duodenum: np.ndarray,
-        colon: np.ndarray,
-        gt_path: Optional[np.ndarray] = None,
+        image: torch.Tensor,
+        seg: torch.Tensor,
+        duodenum: torch.Tensor,
+        colon: torch.Tensor,
+        gt_path: Optional[torch.Tensor] = None,
+        spacing: Optional[Tuple[float, float, float]] = None,
+        image_affine: Optional[np.ndarray] = None,
     ):
         """
         Update the environment with new data.
@@ -102,17 +110,20 @@ class SmallBowelEnv:
             gt_path: Optional ground truth path points array (Nx3)
         """
         # Store the raw data
-        self.image_np = image.astype(np.float32)
-        self.seg_np = (seg > 0.5).astype(np.uint8)
-        duodenum_np = (duodenum > 0.5).astype(np.uint8)
-        colon_np = (colon > 0.5).astype(np.uint8)
+        self.image_np = image.numpy()
+        self.seg_np = (seg.numpy() > 0.5).astype(np.uint8)
+        duodenum_np = (duodenum.numpy() > 0.5).astype(np.uint8)
+        colon_np = (colon.numpy() > 0.5).astype(np.uint8)
+        self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
+        self.image_affine = image_affine if image_affine is not None else np.eye(4)
+    
 
         # Generate wall map for the new image
-        self.wall_map_np = compute_wall_map(self.image_np, sigma=self.config.wall_map_sigma)
+        self.wall_map_np = compute_wall_map(self.image_np, sigmas=self.config.wall_map_sigmas).astype(np.float32)
 
         # Transfer data to device
-        self.image = torch.from_numpy(self.image_np).to(self.device)
-        self.seg = torch.from_numpy(self.seg_np).to(self.device)
+        self.image = image.to(self.device)
+        self.seg = seg.to(self.device)
         self.wall_map = torch.from_numpy(self.wall_map_np).to(self.device)
 
         # Update ground truth path if provided
@@ -174,6 +185,8 @@ class SmallBowelEnv:
     def reset(self, start_choice: str = "start") -> Dict[str, torch.Tensor]:
         """Reset the environment to start a new episode."""
         self.current_step = 0
+        self.gdt_computed = self.start_choice == start_choice and self.gdt_computed
+        self.start_choice = start_choice
         if start_choice == "end":
             self.current_pos_vox = self.end_coord
         else:
@@ -224,10 +237,10 @@ class SmallBowelEnv:
         )
         self.tracking_path_history = [self.current_pos_vox]
 
-        # Compute geodesic distance transform
-        self.gdt = torch.from_numpy(
-            compute_gdt(self.seg_np, self.current_pos_vox, self.config.gdt_cell_length)
-        ).to(self.device)
+        if not self.gdt_computed:
+            # Compute geodesic distance transform
+            self.gdt = compute_gdt(self.seg, self.current_pos_vox, self.spacing, device=self.device)
+            self.gdt_computed = True
 
         # Initialize current GDT value
         if self.gdt is not None and self._is_valid_pos(self.current_pos_vox):

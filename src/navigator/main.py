@@ -54,23 +54,17 @@ def main():
             print(f"Error initializing wandb: {e}. Wandb tracking disabled.")
             config.track_wandb = False  # Disable tracking if init fails
 
-    # --- Data Loading Strategy ---
-    dataset = None
-    start_end = None
-
     # --- Initialize Environment, Actor, Critic ---
-    print("Initializing environment and networks...")
-    env = SmallBowelEnv(config=config, start_end_coords=start_end)
+    env = SmallBowelEnv(config=config)
     actor = ActorNetwork(config=config, input_channels=3).to(config.device)
     critic = CriticNetwork(config=config, input_channels=4).to(config.device)
-    print("Initialization complete.")
 
-    print(f"Dataset loaded with {len(dataset)} samples.")
     dataset = SmallBowelDataset(
         data_dir=config.data_dir,
         preload=True,
         transform=None,
     )
+    print(f"Dataset loaded with {len(dataset)} samples.")
     # --- Watch model gradients with Wandb (optional) ---
     if config.track_wandb and run and wandb is not None:
         try:

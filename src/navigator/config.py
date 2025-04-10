@@ -29,10 +29,10 @@ class Config:
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.5
     patch_size_mm: int = 60
-    max_step_displacement_mm: float = 3.0  # Reduced default based on previous discussion
+    max_step_displacement_mm: float = 2.0  # Reduced default based on previous discussion
     max_episode_steps: int = 800
     cumulative_path_radius_mm: float = 6.0
-    wall_map_sigma: float = 1.0
+    wall_map_sigmas: Tuple[int, ...] = (1, 3)
 
     # --- Reward Hyperparameters ---
     r_wall: float = 4.0
@@ -48,8 +48,8 @@ class Config:
     num_epochs: int = 100  # Number of training epochs
     episodes_per_epoch: int = 10  # Number of episodes per epoch
     steps_per_episode: int = 800  # Max steps per episode (defaults to max_episode_steps)
-    batch_size: int = 64
-    update_epochs: int = 5  # Number of PPO update epochs
+    batch_size: int = 256
+    update_epochs: int = 10  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
@@ -102,14 +102,22 @@ def parse_args() -> Config:
             "gdt_max_increase_theta",
         ]:
             continue
+
+        if field_name == "wall_map_sigmas":
+            # Special case for wall_map_sigmas to accept a list of integers
+            parser.add_argument(
+                f"--{field_name.replace('_', '-')}",
+                type=int,
+                nargs="+",
+                default=default_config.wall_map_sigmas,
+                help=f"{field_name} (default: {default_config.wall_map_sigmas})",
+            )
+            continue
+
+        # Handle default values and types
         default_val = getattr(default_config, field_name)
         arg_type = field_type
         required = False
-        # Make duodenum/colon paths required if not using dummy defaults
-        if field_name in ["duodenum_seg_path", "colon_seg_path"] and "dummy_data" in default_val:
-            pass  # Keep dummy defaults optional
-        elif field_name in ["duodenum_seg_path", "colon_seg_path"]:
-            required = True  # Make required if default isn't dummy
 
         # Handle Optional type hint for argparse type
         if (

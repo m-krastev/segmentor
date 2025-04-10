@@ -10,6 +10,108 @@ from skimage.filters import meijering
 from skimage.draw import disk
 import skfmm
 from typing import Tuple
+import logging
+
+
+try:
+    import cupy
+    from cucim.core.operations.morphology import (
+        distance_transform_edt as _distance_transform_edt,
+    )
+    from cucim.skimage.feature import peak_local_max as _peak_local_max
+    from cucim.skimage.filters import (
+        meijering as _meijering,
+        gaussian as _gaussian,
+        median as _median,
+    )
+    from cucim.skimage.morphology import binary_dilation as _binary_dilation
+    from cucim.skimage.color import label2rgb as _label2rgb
+
+    def distance_transform_edt(image, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        return _distance_transform_edt(image, **kwargs).get()
+
+    def binary_dilation(image, iterations=None, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        if iterations is None:
+            image = _binary_dilation(image, **kwargs)
+        else:
+            for _ in range(iterations):
+                image = _binary_dilation(image, **kwargs)
+        return image.get()
+
+    def meijering(image, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        return _meijering(image, **kwargs).get()
+
+    def gaussian(image, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        return _gaussian(image, **kwargs).get()
+
+    def median(image, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        return _median(image, **kwargs).get()
+
+    def label2rgb(labels, image, **kwargs):
+        # Check if image is already a CuPy array
+        if not isinstance(labels, cupy.ndarray):
+            labels = cupy.array(labels, dtype=cupy.int32)
+        if not isinstance(image, cupy.ndarray):
+            image = cupy.array(image, dtype=cupy.float32)
+        return _label2rgb(labels, image, **kwargs).get()
+
+    # Significantly slower than skimage's implementation
+    # def peak_local_max(image, **kwargs):
+    #     # Check if image is already a CuPy array
+    #     if not isinstance(image, cupy.ndarray):
+    #         image = cupy.array(image, dtype=cupy.float32)
+
+    #     labels = kwargs.pop("labels", None)
+    #     if labels is not None:
+    #         labels = cupy.array(labels, dtype=cupy.int32)
+    #     return _peak_local_max(image, labels=labels, **kwargs).get()
+
+    logging.info("CuCIM/CuPy installed. Using GPU for graphics heavy operations.")
+
+except ImportError:
+    logging.error("CuCIM/CuPy not installed. Please install it to enable GPU acceleration.")
+    try:
+        from edt import edt as distance_transform_edt
+
+        logging.info("EDT installed. Using CPU for distance transform.")
+    except ImportError:
+        logging.error(
+            "EDT not installed. Please install it to enable fast distance transform: `pip install edt`."
+        )
+
+
+def seed_everything(seed: int = 42):
+    """
+    Set the seed for random number generation for reproducibility.
+
+    Args:
+        seed: Seed value to set
+    """
+    import random
+    import numpy as np
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
 
 
 def mm_to_vox(dist_mm: float, voxel_dim_mm: float) -> int:
@@ -30,13 +132,13 @@ def get_patch(
 ) -> torch.Tensor:
     """
     Extract a 3D patch from a volume centered at a specific voxel.
-    
+
     Args:
         volume: The source 3D volume
         center_vox: Center coordinates (z, y, x)
         patch_size_vox: Size of the patch (z, y, x)
         pad_value: Value used for padding if patch extends beyond volume bounds
-        
+
     Returns:
         A patch of the specified size centered at center_vox
     """
@@ -79,51 +181,63 @@ def get_patch(
     return patch
 
 
+# def compute_gdt(
+#     segmentation_mask: np.ndarray, start_voxel: Tuple[int, int, int], voxel_size: float
+# ) -> np.ndarray:
+#     """
+#     Compute a Geodesic Distance Transform from a start voxel through a segmentation mask.
+
+#     Args:
+#         segmentation_mask: Binary segmentation mask
+#         start_voxel: Starting point coordinates (z, y, x)
+#         voxel_size: Size of voxel in mm
+
+#     Returns:
+#         Distance map with geodesic distances from the start point
+#     """
+#     speed = np.ones_like(segmentation_mask, dtype=float)
+#     speed[segmentation_mask == 0] = 1e-5
+#     phi = np.ones_like(segmentation_mask, dtype=float) * np.inf
+#     if (
+#         0 <= start_voxel[0] < phi.shape[0]
+#         and 0 <= start_voxel[1] < phi.shape[1]
+#         and 0 <= start_voxel[2] < phi.shape[2]
+#     ):
+#         phi[start_voxel] = 0.0
+#     else:
+#         raise IndexError(f"Start voxel {start_voxel} outside mask bounds {phi.shape} for GDT.")
+#     masked_phi = np.ma.MaskedArray(phi, np.logical_not(segmentation_mask > 0))
+#     gdt = skfmm.travel_time(masked_phi, speed, dx=voxel_size)
+#     gdt = gdt.filled(np.inf)
+#     return gdt
+
+
+import FastGeodis as fg
+
+
 def compute_gdt(
-    segmentation_mask: np.ndarray, start_voxel: Tuple[int, int, int], voxel_size: float
-) -> np.ndarray:
-    """
-    Compute a Geodesic Distance Transform from a start voxel through a segmentation mask.
-    
-    Args:
-        segmentation_mask: Binary segmentation mask
-        start_voxel: Starting point coordinates (z, y, x)
-        voxel_size: Size of voxel in mm
-        
-    Returns:
-        Distance map with geodesic distances from the start point
-    """
-    speed = np.ones_like(segmentation_mask, dtype=float)
-    speed[segmentation_mask == 0] = 1e-5
-    phi = np.ones_like(segmentation_mask, dtype=float) * np.inf
-    if (
-        0 <= start_voxel[0] < phi.shape[0]
-        and 0 <= start_voxel[1] < phi.shape[1]
-        and 0 <= start_voxel[2] < phi.shape[2]
-    ):
-        phi[start_voxel] = 0.0
-    else:
-        raise IndexError(f"Start voxel {start_voxel} outside mask bounds {phi.shape} for GDT.")
-    masked_phi = np.ma.MaskedArray(phi, np.logical_not(segmentation_mask > 0))
-    gdt = skfmm.travel_time(masked_phi, speed, dx=voxel_size)
-    gdt = gdt.filled(np.inf)
-    return gdt
+    image: torch.Tensor, start: Tuple[int, int, int], spacing: Tuple[float, ...], device="cuda"
+):
+    image = image.unsqueeze(0).unsqueeze(0).to(device)
+    mask = torch.ones_like(image, dtype=torch.uint8)
+    mask[0, 0, start[0], start[1], start[2]] = 0
+    v, lambd = 1e10, 1
+    geodesic_dist = fg.generalised_geodesic3d(image.float(), mask, spacing, v, lambd)
+    return geodesic_dist.squeeze()
 
 
 def compute_wall_map(image: np.ndarray, sigmas: list[int] = (1, 3)) -> np.ndarray:
     """
     Compute a wall map highlighting vessel-like structures in the image.
-    
+
     Args:
         image: Input image
         sigmas: Scale parameter for Meijering filter
-        
+
     Returns:
         Wall map highlighting vessel-like structures
     """
-    wall_map = meijering(
-        image, sigmas=sigmas, black_ridges=False, mode="constant", cval=0
-    )
+    wall_map = meijering(image, sigmas=sigmas, black_ridges=False, mode="constant", cval=0)
     # max_val = np.max(wall_map)
     # if max_val > 1e-6:
     #     wall_map = wall_map / max_val
@@ -135,7 +249,7 @@ def draw_path_sphere(
 ):
     """
     Draw a sphere in a mask at the specified location.
-    
+
     Args:
         cumulative_path_mask: Tensor to modify
         center_vox: Center coordinates (z, y, x)
@@ -167,12 +281,12 @@ def find_start_end(
 ) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
     """
     Find start and end points for small bowel navigation based on anatomical structures.
-    
+
     Args:
         duodenum_volume: Duodenum segmentation
         colon_volume: Colon segmentation
         small_bowel_volume: Small bowel segmentation
-        
+
     Returns:
         Tuple containing start and end coordinates (each as z,y,x coordinates)
     """
@@ -290,23 +404,23 @@ def find_start_end(
 
     # Find approximate landmark points
     from scipy.spatial.distance import cdist
-    
+
     raw_start_coord_zyx = find_duodenojejunal_flexure(duodenum_volume)
     raw_end_coord_zyx = find_ileocecal_junction(colon_volume)
     print("  Mapping skeleton points to nearest small bowel voxel...")
     sb_coords_zyx = np.argwhere(small_bowel_volume > 0)
     if sb_coords_zyx.shape[0] == 0:
         raise ValueError("Small bowel segmentation empty.")
-    
+
     # Map to nearest small bowel voxels
     start_distances = cdist(raw_start_coord_zyx.reshape(1, 3), sb_coords_zyx)
     nearest_start_idx = np.argmin(start_distances)
     final_start_coord = tuple(sb_coords_zyx[nearest_start_idx].astype(int))
-    
+
     end_distances = cdist(raw_end_coord_zyx.reshape(1, 3), sb_coords_zyx)
     nearest_end_idx = np.argmin(end_distances)
     final_end_coord = tuple(sb_coords_zyx[nearest_end_idx].astype(int))
-    
+
     print(f"  Mapped DJ flexure to SB voxel: {final_start_coord}")
     print(f"  Mapped IC junction to SB voxel: {final_end_coord}")
     print("Start/end point finding finished.")

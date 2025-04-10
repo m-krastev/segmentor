@@ -69,7 +69,7 @@ class SmallBowelDataset(Dataset):
                 subject = {
                     "id": subject_id,
                     "image": image_file,
-                    "seg": patient_dir / "small_bowel.nii.gz",  # Updated to use specific file name
+                    "seg": segmentation_dir / "small_bowel.nii.gz",  # Updated to use specific file name
                 }
 
                 # Check for duodenum segmentation files
@@ -120,15 +120,12 @@ class SmallBowelDataset(Dataset):
             subject_id = subject["id"]
 
             # Check if we have this cached already
-            if self.preload and subject_id in self.cached_data:
+            if subject_id in self.cached_data:
                 data = self.cached_data[subject_id]
             else:
                 # Load the data
                 data = load_subject_data(subject)
-
-                # Cache it if we're preloading
-                if self.preload:
-                    self.cached_data[subject_id] = data
+                self.cached_data[subject_id] = data
 
             # Convert NumPy arrays to PyTorch tensors
             tensor_data = {
@@ -138,7 +135,7 @@ class SmallBowelDataset(Dataset):
                 "duodenum": torch.from_numpy(data["duodenum"]),
                 "colon": torch.from_numpy(data["colon"]),
                 "image_affine": data["image_affine"],  # Keep as numpy array
-                "image_header": data["image_header"],  # Keep nibabel header
+                "spacing": data["spacing"],  # Keep spacing in (Z, Y, X) order
             }
 
             # Add ground truth path if available
@@ -169,23 +166,24 @@ def load_subject_data(subject_data: Dict[str, str]) -> Dict[str, Any]:
 
     # Load image data
     image_nii = nib.load(subject_data["image"])
-    image_np = load_and_normalize_nifti(subject_data["image"])
+    image_np = load_and_normalize_nifti(subject_data["image"]).astype(np.float32)
+    image_np = np.transpose(image_np, (2, 1, 0))  # Change to (Z, Y, X) format
 
     result["image"] = image_np
     result["image_affine"] = image_nii.affine
-    result["image_header"] = image_nii.header
+    result["spacing"] = image_nii.header.get_zooms()[::-1]  # Get spacing in (Z, Y, X) order
 
     # Load segmentations
     sb_seg_nii = nib.load(subject_data["seg"])
     duodenum_seg_nii = nib.load(subject_data["duodenum"])
     colon_seg_nii = nib.load(subject_data["colon"])
 
-    result["seg"] = (sb_seg_nii.get_fdata() > 0.5).astype(np.uint8)
-    result["duodenum"] = (duodenum_seg_nii.get_fdata() > 0.5).astype(np.uint8)
-    result["colon"] = (colon_seg_nii.get_fdata() > 0.5).astype(np.uint8)
+    result["seg"] = np.transpose((sb_seg_nii.get_fdata() > 0.5).astype(np.uint8), (2, 1, 0))
+    result["duodenum"] = np.transpose((duodenum_seg_nii.get_fdata() > 0.5).astype(np.uint8), (2, 1, 0))
+    result["colon"] = np.transpose((colon_seg_nii.get_fdata() > 0.5).astype(np.uint8), (2, 1, 0))
 
     # Load ground truth path if available
-    if "path" in subject_data:
+    if "path" in subject_data and subject_data["path"] is not None:
         try:
             result["gt_path"] = np.load(subject_data["path"])
         except Exception as e:
