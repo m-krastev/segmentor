@@ -93,9 +93,9 @@ class ActorNetwork(nn.Module):
 
         # Output alpha/beta parameters
         ab_params = self.fc_out(x)
-        alpha_beta = F.softplus(ab_params) + 1.0  # Ensure alpha, beta > 1
+        # alpha_beta = F.softplus(ab_params) + 1.0  # Ensure alpha, beta > 1
 
-        return alpha_beta
+        return ab_params
 
     def get_action_dist(self, obs_actor: torch.Tensor) -> Beta:
         """

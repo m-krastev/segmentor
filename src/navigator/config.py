@@ -46,8 +46,8 @@ class Config:
     # --- Training Hyperparameters ---
     learning_rate: float = 1e-5
     num_epochs: int = 100  # Number of training epochs
-    steps_to_collect: int = 8192  # Number of steps to collect for PPO update
-    batch_size: int = 512  # Size of mini-batch for PPO update
+    steps_to_collect: int = 4096  # Number of steps to collect for PPO update
+    batch_size: int = 128  # Size of mini-batch for PPO update
     update_epochs: int = 10  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95

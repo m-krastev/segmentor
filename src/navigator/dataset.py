@@ -108,7 +108,7 @@ class SmallBowelDataset(Dataset):
         Returns:
             Dictionary with the loaded subject data (images as tensors)
         """
-        if isinstance(idx, int):
+        if isinstance(idx, int) or np.issubdtype(type(idx), np.integer):
             # Handle index out of bounds
             if idx < 0 or idx >= len(self.subjects):
                 raise IndexError(
