@@ -46,9 +46,8 @@ class Config:
     # --- Training Hyperparameters ---
     learning_rate: float = 1e-5
     num_epochs: int = 100  # Number of training epochs
-    episodes_per_epoch: int = 10  # Number of episodes per epoch
-    steps_per_episode: int = 800  # Max steps per episode (defaults to max_episode_steps)
-    batch_size: int = 256
+    steps_to_collect: int = 8192  # Number of steps to collect for PPO update
+    batch_size: int = 512  # Size of mini-batch for PPO update
     update_epochs: int = 10  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95
@@ -68,7 +67,9 @@ class Config:
     gdt_max_increase_theta: float = field(init=False)
 
     def __post_init__(self):
-        from .utils import mm_to_vox
+        def mm_to_vox(dist_mm: float, voxel_dim_mm: float) -> int:
+            """Convert millimeter distance to voxel units."""
+            return int(dist_mm // voxel_dim_mm)
 
         self.gdt_cell_length = self.voxel_size_mm
         self.max_step_vox = mm_to_vox(self.max_step_displacement_mm, self.voxel_size_mm)
