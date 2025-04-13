@@ -220,7 +220,7 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
 
     # --- Environment ---
     # Create an environment factory function needed for the collector
-    def env_factory(): return make_sb_env(config, train_iterator, device)
+    def env_factory(): return make_sb_env(config, train_iterator, device, num_episodes_per_sample=config.num_episodes_per_sample)
     # Create a single environment instance for initialization checks (optional)
     # test_env = env_factory()
     # print("Env specs:", test_env.specs)
@@ -414,7 +414,7 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
             if num_updates % config.eval_interval == 0:
                 # Run validation using the adapted loop
                 val_metrics = validation_loop_torchrl(
-                    env_factory=make_sb_env,  # Pass factory, not instance
+                    env_factory=env_factory(),  # Pass factory, not instance
                     actor_module=policy_module,
                     config=config,
                     device=device,

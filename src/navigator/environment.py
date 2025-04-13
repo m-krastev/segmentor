@@ -44,6 +44,7 @@ class SmallBowelEnv(EnvBase):
         self,
         config: Config,
         dataset_iterator: Iterator,  # Pass an iterator over your dataset
+        num_episodes_per_sample: int = 32,
         device: Optional[torch.device] = None,
         batch_size: Optional[torch.Size] = None,
     ):
@@ -60,6 +61,8 @@ class SmallBowelEnv(EnvBase):
         self.config = config
         self.dataset_iterator = dataset_iterator  # Store the iterator
         self._current_subject_data = None  # Store data for the current subject
+        self.num_episodes_per_sample = num_episodes_per_sample
+        self.episodes_on_current_subject = 0  # Counter for episodes on current subject
 
         # --- Define Specs ---
         observation_spec = CompositeSpec(
@@ -126,7 +129,7 @@ class SmallBowelEnv(EnvBase):
         self.max_gdt_achieved: float = 0.0
         self.tracking_path_history: List[Tuple[int, int, int]] = []
         self.current_gdt_val: float = 0.0
-        self.gdt_computed = False
+        # self.gdt_computed = False
         self.start_choice = "start"
 
         # --- TorchRL Internal State Flags (per-batch element) ---
@@ -145,23 +148,35 @@ class SmallBowelEnv(EnvBase):
         print(f"\n[Env {id(self)}] Loading subject: {subject_id}")
 
         # Call update_data - let it raise exceptions if issues occur
+        # Pass all relevant fields from the dataset output
         self.update_data(
             image=subject_data["image"],
             seg=subject_data["seg"],
-            duodenum=subject_data["duodenum"],
-            colon=subject_data["colon"],
-            gt_path=subject_data.get("gt_path"),
+            wall_map=subject_data["wall_map"],
+            gdt_start=subject_data["gdt_start"],
+            gdt_end=subject_data["gdt_end"],
+            start_coord=subject_data["start_coord"],
+            end_coord=subject_data["end_coord"],
+            gt_path=subject_data.get("gt_path"),  # Still optional
             spacing=subject_data.get("spacing"),
             image_affine=subject_data.get("image_affine"),
+            # Pass numpy versions if needed, or rely on tensor.cpu().numpy()
+            image_np=subject_data.get("image_np"),
+            seg_np=subject_data.get("seg_np"),
+            wall_map_np=subject_data.get("wall_map_np"),
         )
 
         # Check if critical data was loaded successfully by update_data
-        if self.image is None or self.seg is None or self.wall_map is None:
-            raise RuntimeError(
-                f"Critical data (image, seg, or wall_map) is None after loading subject {subject_id}."
-            )
+        if (
+            self.image is None
+            or self.seg is None
+            or self.wall_map is None
+            or self.gdt_start is None
+            or self.gdt_end is None
+        ):
+            raise RuntimeError(f"Critical data is None after loading subject {subject_id}.")
 
-        self.gdt_computed = False  # Need to recompute GDT for new subject
+        # self.gdt_computed = False # Removed
         print(f"[Env {id(self)}] Subject {subject_id} loaded successfully.")
         return True  # Indicate success
 
@@ -170,52 +185,63 @@ class SmallBowelEnv(EnvBase):
         self,
         image: torch.Tensor,
         seg: torch.Tensor,
-        duodenum: torch.Tensor,
-        colon: torch.Tensor,
+        wall_map: torch.Tensor,  # Receive wall_map tensor
+        gdt_start: torch.Tensor,  # Receive GDT tensors
+        gdt_end: torch.Tensor,
+        start_coord: Tuple[int, int, int],  # Receive coords
+        end_coord: Tuple[int, int, int],
         gt_path: Optional[torch.Tensor] = None,
         spacing: Optional[Tuple[float, float, float]] = None,
         image_affine: Optional[np.ndarray] = None,
+        # Receive numpy versions if provided by dataset
+        image_np: Optional[np.ndarray] = None,
+        seg_np: Optional[np.ndarray] = None,
+        wall_map_np: Optional[np.ndarray] = None,
     ):
         """
-        Updates the environment's internal data stores.
-        (Called internally by _load_next_subject).
+        Updates the environment's internal data stores using data from the dataset.
         """
-        # Store numpy versions for CPU-based calculations
-        self.image_np = image.cpu().numpy()
-        self.seg_np = (seg.cpu().numpy() > 0.5).astype(np.uint8)
-        duodenum_np = (duodenum.cpu().numpy() > 0.5).astype(np.uint8)
-        colon_np = (colon.cpu().numpy() > 0.5).astype(np.uint8)
+        # Store tensors directly
+        self.image = image.to(self.device)
+        self.seg = seg.to(device=self.device, dtype=torch.uint8)  # Ensure correct type
+        self.wall_map = wall_map.to(self.device)
+        self.gdt_start = gdt_start.to(self.device)
+        self.gdt_end = gdt_end.to(self.device)
+
+        # Store numpy versions (either passed in or derived)
+        self.image_np = image_np if image_np is not None else image.cpu().numpy()
+        self.seg_np = seg_np if seg_np is not None else seg.cpu().numpy().astype(np.uint8)
+        self.wall_map_np = wall_map_np if wall_map_np is not None else wall_map.cpu().numpy()
+
+        # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
         self.image_affine = image_affine if image_affine is not None else np.eye(4)
+        self.start_coord = start_coord
+        self.end_coord = end_coord
+        print(f"  Received start point {self.start_coord} and end point {self.end_coord}")
 
         # Basic sanity check on shapes before proceeding
-        if self.image_np.ndim != 3 or not all(s > 0 for s in self.image_np.shape):
-            raise ValueError(f"Invalid image shape received: {self.image_np.shape}")
-        if self.seg_np.shape != self.image_np.shape:
+        if self.image.ndim != 3 or not all(s > 0 for s in self.image.shape):
+            raise ValueError(f"Invalid image shape received: {self.image.shape}")
+        if self.seg.shape != self.image.shape:
             raise ValueError(
-                f"Segmentation shape {self.seg_np.shape} mismatch with image shape {self.image_np.shape}"
+                f"Segmentation shape {self.seg.shape} mismatch with image shape {self.image.shape}"
             )
+        if self.wall_map.shape != self.image.shape:
+            raise ValueError(
+                f"Wall map shape {self.wall_map.shape} mismatch with image shape {self.image.shape}"
+            )
+        if self.gdt_start.shape != self.image.shape or self.gdt_end.shape != self.image.shape:
+            raise ValueError(f"GDT shape mismatch with image shape {self.image.shape}")
 
-        # Generate wall map (CPU computation)
-        self.wall_map_np = compute_wall_map(
-            self.image_np, sigmas=self.config.wall_map_sigmas
-        ).astype(np.float32)
-
-        # Transfer data to device tensors
-        self.image = image.to(self.device)
-        self.seg = (seg > 0.5).to(device=self.device, dtype=torch.uint8)  # Threshold on device
-        self.wall_map = torch.from_numpy(self.wall_map_np).to(self.device)
+        # Remove wall map calculation
+        # self.wall_map_np = compute_wall_map(...)
+        # self.wall_map = torch.from_numpy(self.wall_map_np).to(self.device)
 
         # Update ground truth path if provided
+        # Convert gt_path tensor to numpy for _process_gt_path
         self.gt_path_voxels = gt_path.cpu().numpy() if gt_path is not None else None
         self._process_gt_path()  # Uses self.image_np, sets self.gt_path_vol (Tensor)
-
-        # Find new start and end coordinates (using NumPy arrays)
-        # Let find_start_end raise ValueError if it fails
-        self.start_coord, self.end_coord = find_start_end(
-            duodenum_volume=duodenum_np, colon_volume=colon_np, small_bowel_volume=self.seg_np
-        )
-        print(f"  Found start point at {self.start_coord} and end point at {self.end_coord}")
 
     # --- Internal Helper Methods (Simplified) ---
     def _process_gt_path(self):
@@ -412,39 +438,67 @@ class SmallBowelEnv(EnvBase):
 
     def _reset(self, tensordict: Optional[TensorDictBase] = None) -> TensorDictBase:
         """
-        Resets the environment. Loads next subject if needed.
+        Resets the environment. Loads next subject if needed based on episode count.
         Will raise exceptions if loading or initialization fails.
+        Selects appropriate GDT based on start_choice.
         """
-        if self._is_done.all():  # Load new data only if the episode was actually done
-            # Let StopIteration or other loading errors propagate up
-            load_successful = self._load_next_subject()
-            if not load_successful:  # Should not happen if exceptions are raised properly
-                raise RuntimeError(
-                    "Internal error: _load_next_subject returned False unexpectedly."
-                )
+        # Check if the *previous* state indicated 'done'. If so, an episode just finished.
+        # Increment counter only if an episode actually finished.
+        if self._is_done.all():
+            self.episodes_on_current_subject += 1
+
+        # Decide whether to load a new subject
+        should_load_new_subject = (
+            self._current_subject_data is None  # First time loading
+            or self.episodes_on_current_subject >= self.num_episodes_per_sample
+        )
+
+        if should_load_new_subject:
+            # Reset counter *before* loading, as loading signifies starting fresh
+            self.episodes_on_current_subject = 0
+            try:
+                load_successful = self._load_next_subject()
+                if not load_successful:  # Should not happen if _load_next_subject raises exceptions
+                    raise RuntimeError(
+                        "Internal error: _load_next_subject returned False unexpectedly."
+                    )
+            except StopIteration:
+                print("Dataset iterator exhausted. Cannot load new subject.")
+                # Decide how to handle this: raise error, loop dataset, etc.
+                # For now, raise an error to signal the training loop.
+                raise StopIteration("Dataset exhausted during environment reset.")
+            # Counter is now 0 for the first episode on the new subject
 
         # --- Reset internal episode state ---
         self.current_step_count = 0
 
-        # Assert that data necessary for reset exists
-        if self.image is None:
-            raise RuntimeError("Cannot reset, image tensor is None.")
-        if self.seg is None:
-            raise RuntimeError("Cannot reset, seg tensor is None.")
+        # Assert that data necessary for reset exists (checked in _load_next_subject if loaded)
+        if self.image is None or self.seg is None or self.gdt_start is None or self.gdt_end is None:
+            raise RuntimeError(
+                "Cannot reset, critical tensors are None. Data might not have been loaded."
+            )
 
-        # Determine start position
-        self.current_pos_vox = self.end_coord if self.start_choice == "end" else self.start_coord
+        # Determine start position and select appropriate GDT
+        # ... (existing start position and GDT selection logic) ...
+        if self.start_choice == "end":
+            self.current_pos_vox = self.end_coord
+            self.gdt = self.gdt_end  # Use GDT calculated from end point
+            print("Starting from END coordinate, using GDT_end.")
+        else:  # Default to start
+            self.current_pos_vox = self.start_coord
+            self.gdt = self.gdt_start  # Use GDT calculated from start point
+            print("Starting from START coordinate, using GDT_start.")
 
         # Validate start position (simplified check)
+        # ... (existing start position validation and fallback logic) ...
         if (
             not self._is_valid_pos(self.current_pos_vox)
             or self.seg[self.current_pos_vox].item() == 0
         ):
             print(
-                f"Warning: Start pos {self.current_pos_vox} invalid/outside seg. Searching nearby..."
+                f"Warning: Chosen start pos {self.current_pos_vox} invalid/outside seg. Searching nearby..."
             )
-            # (Keep existing fallback search logic - assumes self.seg exists)
-            # ... (fallback search logic) ...
+            # ... (existing fallback search logic) ...
             found_valid_start = False
             # (Code for searching nearby...)
             for dz in [-1, 0, 1]:
@@ -460,6 +514,7 @@ class SmallBowelEnv(EnvBase):
                         if self._is_valid_pos(new_pos) and self.seg[new_pos].item() > 0:
                             self.current_pos_vox = new_pos
                             found_valid_start = True
+                            print(f"  Found valid nearby start: {self.current_pos_vox}")
                             break
                     if found_valid_start:
                         break
@@ -472,37 +527,42 @@ class SmallBowelEnv(EnvBase):
                     raise ValueError("Cannot reset: No valid voxels found in segmentation mask.")
                 rand_idx = torch.randint(0, len(valid_voxels), (1,)).item()
                 self.current_pos_vox = tuple(valid_voxels[rand_idx].cpu().tolist())
-                print(f"Fallback start: {self.current_pos_vox}")
+                print(f"  Fallback random start: {self.current_pos_vox}")
 
         # Initialize path tracking
+        # ... (existing path tracking initialization) ...
         self.cumulative_path_mask = torch.zeros_like(
             self.image, dtype=torch.float32, device=self.device
         )
-        draw_path_sphere(
-            self.cumulative_path_mask, self.current_pos_vox, self.config.cumulative_path_radius_vox
-        )
+        # Ensure current_pos_vox is valid before drawing
+        if self._is_valid_pos(self.current_pos_vox):
+            draw_path_sphere(
+                self.cumulative_path_mask,
+                self.current_pos_vox,
+                self.config.cumulative_path_radius_vox,
+            )
+        else:
+            print(
+                f"Warning: Cannot draw initial path sphere at invalid position {self.current_pos_vox}"
+            )
         self.tracking_path_history = [self.current_pos_vox]
 
-        # Compute GDT if needed
-        if not self.gdt_computed:
-            print("Computing GDT...")
-            # compute_gdt assumes self.seg is valid
-            self.gdt = compute_gdt(self.seg, self.current_pos_vox, self.spacing, device=self.device)
-            self.gdt_computed = True
-            print("GDT computed.")
-
-        # Initialize current GDT value
+        # Initialize current GDT value using the selected GDT
+        # ... (existing GDT initialization) ...
         if self.gdt is not None and self._is_valid_pos(self.current_pos_vox):
             gdt_tensor = self.gdt[self.current_pos_vox]
+            # Handle potential inf values in GDT map
             self.current_gdt_val = gdt_tensor.item() if torch.isfinite(gdt_tensor) else 0.0
         else:
-            self.current_gdt_val = 0.0
+            self.current_gdt_val = 0.0  # If start is invalid or GDT is None
         self.max_gdt_achieved = self.current_gdt_val
+        print(f"Initial GDT value at {self.current_pos_vox}: {self.current_gdt_val}")
 
         # --- Get Initial State Patches ---
         obs_dict = self._get_state_patches()  # Let it raise RuntimeError if patches fail
 
         # --- Update Internal Done Flag and Package Output ---
+        # Set done to False for the *start* of the new episode
         self._is_done.fill_(False)
 
         reset_td = TensorDict(
@@ -650,11 +710,12 @@ class SmallBowelEnv(EnvBase):
 
 
 # --- Updated Helper function to create the environment ---
-def make_sb_env(config: Config, dataset_iterator: Iterator, device: torch.device):
+def make_sb_env(config: Config, dataset_iterator: Iterator, device: torch.device, num_episodes_per_sample: int = 32):
     """Factory function for the integrated SmallBowelEnv."""
     env = SmallBowelEnv(
         config=config,
         dataset_iterator=dataset_iterator,
+        num_episodes_per_sample=num_episodes_per_sample,
         device=device,
         batch_size=[1],  # Explicitly set batch size
     )

@@ -44,6 +44,7 @@ class Config:
     wall_penalty_scale: float = 0.2  # Scale factor for wall penalty
 
     # --- Training Hyperparameters ---
+    num_episodes_per_sample: int = 32  # Number of episodes to collect per sample
     learning_rate: float = 1e-5
     num_epochs: int = 100  # Number of training epochs
     steps_to_collect: int = 4096  # Number of steps to collect for PPO update
