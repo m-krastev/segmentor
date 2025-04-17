@@ -6,7 +6,7 @@ import torch
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from tensordict.nn.distributions import NormalParamExtractor
 from torchrl.modules import ProbabilisticActor, ValueOperator
-from torchrl.data import BoundedTensorSpec
+from torchrl.data import Bounded
 from torchrl.modules.distributions import TanhNormal  # Import TanhNormal directly
 
 from .actor import ActorNetwork
@@ -50,10 +50,10 @@ def create_ppo_modules(config: Config, device: torch.device):
             actor_cnn_module,  # Outputs TD with "dist_params"
             normal_param_extractor_module,  # Takes TD, uses "dist_params", outputs TD with "loc", "scale"
         ),
-        spec=BoundedTensorSpec(  # Action spec for the output distribution
+        spec=Bounded(  # Action spec for the output distribution
             low=ACTION_LOW,
             high=ACTION_HIGH,
-            shape=(ACTION_DIM,),  # Use constant ACTION_DIM
+            shape=torch.Size([ACTION_DIM]),  # Use constant ACTION_DIM
             dtype=torch.float32,
             device=device,  # Add device to spec
         ),

@@ -53,8 +53,7 @@ def main():
 
     dataset = SmallBowelDataset(
         data_dir=config.data_dir,
-        preload=True,
-        transform=None,
+        config=config,
     )
     print(f"Dataset loaded with {len(dataset)} samples.")
 

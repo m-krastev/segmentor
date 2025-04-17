@@ -182,3 +182,7 @@ wandb
 *.npy
 *.pkl
 *.obj
+result*
+output*
+checkpoints
+*.pth

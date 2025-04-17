@@ -44,11 +44,11 @@ class Config:
     wall_penalty_scale: float = 0.2  # Scale factor for wall penalty
 
     # --- Training Hyperparameters ---
-    num_episodes_per_sample: int = 32  # Number of episodes to collect per sample
+    num_episodes_per_sample: int = 16  # Number of episodes to collect per sample
+    frames_per_batch: int = 512  # Number of frames to collect per batch
     learning_rate: float = 1e-5
     num_epochs: int = 100  # Number of training epochs
-    steps_to_collect: int = 4096  # Number of steps to collect for PPO update
-    batch_size: int = 128  # Size of mini-batch for PPO update
+    batch_size: int = 64  # Size of mini-batch for PPO update
     update_epochs: int = 10  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95
@@ -56,6 +56,9 @@ class Config:
     ent_coef: float = 0.001
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
+    eval_interval: int = 16384  # Interval for evaluation
+    save_freq: int = 1000  # Frequency to save model checkpoints
+    metric_to_optimize: str = "validation/avg_coverage"
 
     # --- Training/Device ---
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -133,7 +136,7 @@ def parse_args() -> Config:
             else:
                 arg_type = field_type.__args__[0]
 
-        if arg_type == bool:
+        if arg_type is bool:
             # Use BooleanOptionalAction for flags like --track-wandb / --no-track-wandb
             parser.add_argument(
                 f"--{field_name.replace('_', '-')}",

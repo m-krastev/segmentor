@@ -5,15 +5,13 @@ import numpy as np
 import wandb  # Assuming wandb is used
 import os
 from tqdm import tqdm
-# Use IterableDataset concept
-from torch.utils.data import DataLoader, IterableDataset
 
-from tensordict import TensorDict
-from tensordict.nn import TensorDictSequential
+# Use IterableDataset concept
+from torch.utils.data import DataLoader, Subset
 
 # TorchRL components
 from torchrl.collectors import SyncDataCollector
-from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage
+from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage, SamplerWithoutReplacement
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
 from torchrl.envs.utils import ExplorationType, set_exploration_type
@@ -68,7 +66,6 @@ class SubjectIterator:
 
 # --- Validation Loop (Adaptation Needed) ---
 def validation_loop_torchrl(
-    env_factory,  # Pass a function to create validation env
     actor_module,  # Pass the trained policy module
     config: Config,
     device: torch.device,
@@ -90,7 +87,7 @@ def validation_loop_torchrl(
     )  # No shuffle for validation
     # Create a validation environment instance
     # Pass the validation iterator to this env instance
-    val_env = env_factory(config, val_iterator, device)
+    val_env = make_sb_env(config, val_iterator, device, 1)
 
     num_val_subjects = len(val_dataset)
 
@@ -131,8 +128,6 @@ def validation_loop_torchrl(
                     total_reward += current_td.get(("next", "reward")).item()
                     step_count += 1
                     episode_done = current_td.get(("next", "done")).item()
-                    # Retrieve coverage if info was added in _step (requires adding info keys)
-                    # final_coverage = current_td.get(("next", "info_coverage"), torch.tensor(0.0)).item()
 
                 # After episode ends (or max steps)
                 # Get final coverage from the *base* environment state if possible
@@ -144,8 +139,7 @@ def validation_loop_torchrl(
                 val_results["val_subject_id"].append(subject_id)
 
             except Exception as e:
-                print(
-                    f"  Error during validation for subject {subject_id} (attempt {i + 1}): {e}")
+                print(f"  Error during validation for subject {subject_id} (attempt {i + 1}): {e}")
                 # Optionally record failure
                 val_results["val_reward_sum"].append(0)
                 val_results["val_length"].append(0)
@@ -183,35 +177,22 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
     # --- Setup ---
     device = torch.device(config.device)
     os.makedirs(config.checkpoint_dir, exist_ok=True)
-    total_timesteps = getattr(
-        config, "total_timesteps", 1_000_000)  # Define total steps
-    # Steps collected per rollout
-    frames_per_batch = getattr(config, "frames_per_batch", 1024)
-    # steps_to_collect in original code maps roughly to frames_per_batch
+    total_timesteps = getattr(config, "total_timesteps", 1_000_000)  # Define total steps
+
     # Size of replay buffer
-    buffer_size = getattr(config, "buffer_size", frames_per_batch * 10)
-    # PPO update minibatch size
-    mini_batch_size = getattr(config, "batch_size", 64)
-    ppo_update_epochs = getattr(
-        config, "update_epochs", 10)  # PPO inner update loops
+    buffer_size = getattr(config, "buffer_size", config.frames_per_batch * 10)
 
     # --- Dataset Splitting and Iterators ---
     train_size = int(len(dataset) * config.train_val_split)
-    val_size = len(dataset) - train_size
-    # Note: random_split might load all data, consider indices if dataset is huge
     indices = np.arange(len(dataset))
     if config.shuffle_dataset:
         np.random.shuffle(indices)
     train_indices, val_indices = indices[:train_size], indices[train_size:]
 
-    # Use Subset if your dataset supports it, otherwise filter manually
-    from torch.utils.data import Subset
-
     train_set = Subset(dataset, train_indices)
     val_set = Subset(dataset, val_indices)
 
-    print(
-        f"Training: {len(train_set)} subjects, Validation: {len(val_set)} subjects.")
+    print(f"Training: {len(train_set)} subjects, Validation: {len(val_set)} subjects.")
     train_iterator = SubjectIterator(
         train_set,
         shuffle=config.shuffle_dataset,
@@ -220,7 +201,11 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
 
     # --- Environment ---
     # Create an environment factory function needed for the collector
-    def env_factory(): return make_sb_env(config, train_iterator, device, num_episodes_per_sample=config.num_episodes_per_sample)
+    def env_factory():
+        return make_sb_env(
+            config, train_iterator, device, num_episodes_per_sample=config.num_episodes_per_sample
+        )
+
     # Create a single environment instance for initialization checks (optional)
     # test_env = env_factory()
     # print("Env specs:", test_env.specs)
@@ -242,7 +227,7 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
         # Total frames (steps) to collect in training
         total_frames=total_timesteps,
         # Number of frames collected in each rollout() call
-        frames_per_batch=frames_per_batch,
+        frames_per_batch=config.frames_per_batch,
         # No initial random exploration phase needed if policy handles exploration
         init_random_frames=-1,
         split_trajs=False,  # Process rollouts as single batch
@@ -254,8 +239,9 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
 
     # --- Replay Buffer ---
     replay_buffer = TensorDictReplayBuffer(
-        storage=LazyTensorStorage(max_size=buffer_size, device=device),
-        batch_size=mini_batch_size,  # PPO minibatch size for sampling
+        storage=LazyTensorStorage(max_size=config.frames_per_batch, device=device),
+        sampler=SamplerWithoutReplacement(),
+        batch_size=config.batch_size,  # PPO minibatch size for sampling
     )
 
     # --- Loss Function ---
@@ -275,14 +261,20 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
         gamma=config.gamma,
         lmbda=config.gae_lambda,
         value_network=value_module,  # Pass the value module instance
-        # average_gae=False, # Keep as False usually
+        average_gae=True,
     )
 
     # --- Optimizer ---
     optimizer = optim.Adam(
         loss_module.parameters(),  # Get all parameters from the loss module (actor + critic)
         lr=config.learning_rate,
-        eps=1e-5,  # PPO stability
+        eps=1e-4,  # PPO stability
+    )
+    # Cosine annealing scheduler (optional)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=total_timesteps // config.frames_per_batch,  # Number of epochs for the scheduler
+        eta_min=1e-6,  # Minimum learning rate
     )
 
     # --- Training Loop ---
@@ -299,59 +291,41 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
         pbar.update(current_frames)
         collected_frames += current_frames
 
-        # --- Compute Advantages ---
-        # GAE expects ["next"]["state_value"] and ["state_value"]
-        # Ensure value_module runs on the 'next' observations if not already done by collector
-        with torch.no_grad():
-            # Run value module on the 'next' observations stored by the collector
-            # Collector usually stores obs in batch_data["next"]["observation"] etc.
-            # Need to ensure our "critic" obs is there.
-            # Let's manually add the 'next' state value if collector didn't
-            if ("next", "state_value") not in batch_data.keys(True, True):
-                # Get observations for next step
-                next_obs_td = batch_data.get("next").clone()
-                value_module(next_obs_td)  # Calculate value for next step
-                batch_data.set(("next", "state_value"),
-                               next_obs_td.get("state_value"))
-
-        # Computes advantages and value targets (returns) in-place
-        adv_module(batch_data)
-
-        # Reshape data for buffer (Time x Batch dims -> single Batch dim)
-        batch_data_view = batch_data.reshape(-1)
-        replay_buffer.extend(batch_data_view)  # Add collected data to buffer
-
         # --- PPO Update Phase ---
-        if (
-            collected_frames >= config.min_buffer_fill
-        ):  # Start updates only after buffer has enough data
-            actor_losses, critic_losses, entropy_losses = [], [], []
-            for _ in range(ppo_update_epochs):
-                for _ in range(
-                    frames_per_batch // mini_batch_size
-                ):  # Iterate over minibatches in the collected batch
-                    minibatch = replay_buffer.sample()  # Sample a minibatch
-                    loss_dict = loss_module(minibatch)  # Calculate PPO losses
+        actor_losses, critic_losses, entropy_losses = [], [], []
+        for _ in range(config.update_epochs):
+            # Computes advantages and value targets (returns) in-place
+            adv_module(batch_data)
 
-                    # Sum losses
-                    loss = (
-                        loss_dict["loss_objective"]
-                        + loss_dict["loss_critic"]
-                        + loss_dict["loss_entropy"]
-                    )
+            # Add collected data to the replay buffer
+            batch_data = batch_data.reshape(-1)
+            replay_buffer.extend(batch_data)
+            for _ in range(
+                config.frames_per_batch // config.batch_size
+            ):  # Iterate over minibatches in the collected batch
+                minibatch = replay_buffer.sample()  # Sample a minibatch
+                minibatch = minibatch.squeeze(0)  # Remove batch dim
+                loss_dict = loss_module(minibatch)  # Calculate PPO losses
 
-                    # Optimization step
-                    optimizer.zero_grad()
-                    loss.backward()
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        loss_module.parameters(), config.max_grad_norm
-                    )
-                    optimizer.step()
+                # Sum losses
+                loss = (
+                    loss_dict["loss_objective"]
+                    + loss_dict["loss_critic"]
+                    + loss_dict["loss_entropy"]
+                )
 
-                    # Log losses for this minibatch update
-                    actor_losses.append(loss_dict["loss_objective"].item())
-                    critic_losses.append(loss_dict["loss_critic"].item())
-                    entropy_losses.append(loss_dict["loss_entropy"].item())
+                # Optimization step
+                optimizer.zero_grad()
+                loss.backward()
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    loss_module.parameters(), config.max_grad_norm
+                )
+                optimizer.step()
+
+                # Log losses for this minibatch update
+                actor_losses.append(loss_dict["loss_objective"].item())
+                critic_losses.append(loss_dict["loss_critic"].item())
+                entropy_losses.append(loss_dict["loss_entropy"].item())
 
             num_updates += 1  # Count PPO update cycles
 
@@ -361,35 +335,10 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
             avg_entropy_loss = np.mean(entropy_losses)
 
             # Log episode stats from collected batch_data
-            ep_rewards = []
-            ep_lengths = []
-            ep_coverages = []  # Need to extract from info if stored
-            # TorchRL collectors store episode stats under "next" -> "episode_reward" etc. when done
-            # Check the batch_data structure after collection to confirm keys
-            done_indices = batch_data.get(
-                ("next", "done")).squeeze(-1).nonzero().squeeze(-1)
-            if len(done_indices) > 0:
-                ep_rewards = (
-                    batch_data.get(("next", "episode_reward"))[
-                        done_indices].cpu().numpy().tolist()
-                )
-                ep_lengths = (
-                    batch_data.get(("next", "episode_length"))[
-                        done_indices].cpu().numpy().tolist()
-                )
-                # ep_coverages = batch_data.get(("next", "info_coverage"))[done_indices].cpu().numpy().tolist() # If stored
-
-            avg_ep_reward = np.mean(ep_rewards) if ep_rewards else np.nan
-            avg_ep_length = np.mean(ep_lengths) if ep_lengths else np.nan
-            avg_ep_coverage = np.mean(ep_coverages) if ep_coverages else np.nan
-
             log_data = {
                 "train/epoch": i,  # Or calculate epoch based on collected_frames
                 "train/collected_frames": collected_frames,
                 "train/num_updates": num_updates,
-                "rollout/avg_reward": avg_ep_reward,
-                "rollout/avg_length": avg_ep_length,
-                "rollout/avg_coverage": avg_ep_coverage,  # If available
                 "losses/policy_loss": avg_actor_loss,
                 "losses/value_loss": avg_critic_loss,
                 "losses/entropy": avg_entropy_loss,
@@ -397,14 +346,12 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
                 "charts/learning_rate": optimizer.param_groups[0]["lr"],
             }
 
-            pbar.set_postfix(
-                {
-                    "R": f"{avg_ep_reward:.1f}",
-                    "L": f"{avg_ep_length:.0f}",
-                    "loss_P": f"{avg_actor_loss:.2f}",
-                    "loss_V": f"{avg_critic_loss:.2f}",
-                }
-            )
+            pbar.set_postfix({
+                # "R": f"{avg_ep_reward:.1f}",
+                # "L": f"{avg_ep_length:.0f}",
+                "loss_P": f"{avg_actor_loss:.2f}",
+                "loss_V": f"{avg_critic_loss:.2f}",
+            })
 
             if config.track_wandb and wandb is not None:
                 log_wandb(log_data, step=collected_frames)
@@ -414,11 +361,10 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
             if num_updates % config.eval_interval == 0:
                 # Run validation using the adapted loop
                 val_metrics = validation_loop_torchrl(
-                    env_factory=env_factory(),  # Pass factory, not instance
                     actor_module=policy_module,
                     config=config,
                     device=device,
-                    val_dataset=val_set,  # Pass the validation dataset view
+                    val_dataset=val_set,
                 )
                 if config.track_wandb and wandb is not None:
                     log_wandb(val_metrics, step=collected_frames)
@@ -433,8 +379,7 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
                     print(
                         f"  New best validation metric ({config.metric_to_optimize}): {best_val_metric:.4f}"
                     )
-                    best_model_path = os.path.join(
-                        config.checkpoint_dir, "best_model_torchrl.pth")
+                    best_model_path = os.path.join(config.checkpoint_dir, "best_model_torchrl.pth")
                     save_dict = {
                         # Save TorchRL modules' state_dicts
                         "policy_module_state_dict": policy_module.state_dict(),
@@ -469,8 +414,7 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
     collector.shutdown()  # Clean up collector resources
     print("Training finished.")
     # Final save?
-    final_model_path = os.path.join(
-        config.checkpoint_dir, "final_model_torchrl.pth")
+    final_model_path = os.path.join(config.checkpoint_dir, "final_model_torchrl.pth")
     # save_dict = {...}  # Same structure as checkpoints
     torch.save(save_dict, final_model_path)
     print(f"Final model saved to {final_model_path}")

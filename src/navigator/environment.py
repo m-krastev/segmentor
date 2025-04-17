@@ -9,10 +9,10 @@ from typing import Tuple, Optional, Dict, Any, List, Iterator
 
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import (
-    CompositeSpec,
-    UnboundedContinuousTensorSpec,
-    DiscreteTensorSpec,
-    BoundedTensorSpec,
+    BoundedContinuous,
+    UnboundedContinuous,
+    Binary,
+    Composite,
 )
 from torchrl.envs import EnvBase
 from torchrl.envs.utils import check_env_specs  # For checking implementation
@@ -34,9 +34,7 @@ ACTION_DIM = 3  # 3D movement delta
 class SmallBowelEnv(EnvBase):
     """
     TorchRL-compatible environment for RL-based small bowel path tracking.
-    (Simplified version without internal try-except blocks).
 
-    Inherits from EnvBase and handles data loading via an iterator during resets.
     Relies on upstream data validity and will raise exceptions on errors.
     """
 
@@ -65,58 +63,61 @@ class SmallBowelEnv(EnvBase):
         self.episodes_on_current_subject = 0  # Counter for episodes on current subject
 
         # --- Define Specs ---
-        observation_spec = CompositeSpec(
-            actor=UnboundedContinuousTensorSpec(
-                shape=torch.Size([*batch_size, 3, *config.patch_size_vox]),  # B, C, D, H, W
+        # Set the specs *after* calling super().__init__
+        self.observation_spec = Composite(
+            actor=UnboundedContinuous(
+                shape=torch.Size([*batch_size, 3, *config.patch_size_vox]),  # B, C, D, H, W, Z
                 dtype=torch.float32,
                 device=device,
             ),
-            critic=UnboundedContinuousTensorSpec(
-                shape=torch.Size([*batch_size, 4, *config.patch_size_vox]),  # B, C, D, H, W
+            critic=UnboundedContinuous(
+                shape=torch.Size([*batch_size, 4, *config.patch_size_vox]),  # B, C, D, H, W, Z
                 dtype=torch.float32,
                 device=device,
             ),
             shape=batch_size,
             device=device,
         )
-
-        action_spec = BoundedTensorSpec(
+        self.state_spec = self.observation_spec.clone()
+        self.action_spec = BoundedContinuous(
             low=ACTION_LOW,
             high=ACTION_HIGH,
             shape=torch.Size([*batch_size, ACTION_DIM]),  # B, ActionDim
             dtype=torch.float32,
             device=device,
         )
-
-        reward_spec = UnboundedContinuousTensorSpec(
+        self.reward_spec = UnboundedContinuous(
             shape=torch.Size([*batch_size, 1]),  # B, 1
             dtype=torch.float32,
             device=device,
         )
-
-        done_spec = DiscreteTensorSpec(
-            n=2,  # boolean done state (0 or 1)
-            shape=torch.Size([*batch_size, 1]),  # B, 1
-            dtype=torch.bool,
+        self.done_spec = Composite(
+            done=Binary(
+                shape=torch.Size([*batch_size, 1]),  # boolean done state (0 or 1)
+                dtype=torch.bool,
+                device=device,
+            ),
+            terminated=Binary(
+                shape=torch.Size([*batch_size, 1]),  # boolean terminated state (0 or 1)
+                dtype=torch.bool,
+                device=device,
+            ),
+            truncated=Binary(
+                shape=torch.Size([*batch_size, 1]),  # boolean truncated state (0 or 1)
+                dtype=torch.bool,
+                device=device,
+            ),
+            shape=batch_size,
             device=device,
         )
-
-        # Set the specs *after* calling super().__init__
-        self.observation_spec = observation_spec
-        self.action_spec = action_spec
-        self.reward_spec = reward_spec
-        self.done_spec = done_spec
+        # self.info_spec = Composite()
 
         # --- Initialize Internal State (per-instance, not per-batch element) ---
         self.current_pos_vox: Tuple[int, int, int] = (0, 0, 0)
         self.start_coord: Tuple[int, int, int] = (0, 0, 0)
         self.end_coord: Tuple[int, int, int] = (0, 0, 0)
-        self.image_np = None
-        self.seg_np = None
-        self.wall_map_np = None
         self.gt_path_voxels = None
         self.gt_path_available = False
-        self.gt_path_vol_np = None
         self.image: Optional[torch.Tensor] = None
         self.seg: Optional[torch.Tensor] = None
         self.wall_map: Optional[torch.Tensor] = None
@@ -145,7 +146,6 @@ class SmallBowelEnv(EnvBase):
         subject_data = next(self.dataset_iterator)  # Let StopIteration propagate
         self._current_subject_data = subject_data
         subject_id = subject_data.get("id", "N/A")
-        print(f"\n[Env {id(self)}] Loading subject: {subject_id}")
 
         # Call update_data - let it raise exceptions if issues occur
         # Pass all relevant fields from the dataset output
@@ -160,10 +160,6 @@ class SmallBowelEnv(EnvBase):
             gt_path=subject_data.get("gt_path"),  # Still optional
             spacing=subject_data.get("spacing"),
             image_affine=subject_data.get("image_affine"),
-            # Pass numpy versions if needed, or rely on tensor.cpu().numpy()
-            image_np=subject_data.get("image_np"),
-            seg_np=subject_data.get("seg_np"),
-            wall_map_np=subject_data.get("wall_map_np"),
         )
 
         # Check if critical data was loaded successfully by update_data
@@ -176,49 +172,38 @@ class SmallBowelEnv(EnvBase):
         ):
             raise RuntimeError(f"Critical data is None after loading subject {subject_id}.")
 
-        # self.gdt_computed = False # Removed
-        print(f"[Env {id(self)}] Subject {subject_id} loaded successfully.")
-        return True  # Indicate success
+        return True
 
     # --- Internal Data Update Method ---
     def update_data(
         self,
-        image: torch.Tensor,
-        seg: torch.Tensor,
-        wall_map: torch.Tensor,  # Receive wall_map tensor
-        gdt_start: torch.Tensor,  # Receive GDT tensors
-        gdt_end: torch.Tensor,
+        image: np.ndarray,
+        seg: np.ndarray,
+        wall_map: np.ndarray,  # Receive wall_map tensor
+        gdt_start: np.ndarray,  # Receive GDT tensors
+        gdt_end: np.ndarray,
         start_coord: Tuple[int, int, int],  # Receive coords
         end_coord: Tuple[int, int, int],
-        gt_path: Optional[torch.Tensor] = None,
+        gt_path: Optional[np.ndarray] = None,
         spacing: Optional[Tuple[float, float, float]] = None,
         image_affine: Optional[np.ndarray] = None,
         # Receive numpy versions if provided by dataset
-        image_np: Optional[np.ndarray] = None,
-        seg_np: Optional[np.ndarray] = None,
-        wall_map_np: Optional[np.ndarray] = None,
     ):
         """
         Updates the environment's internal data stores using data from the dataset.
         """
         # Store tensors directly
-        self.image = image.to(self.device)
-        self.seg = seg.to(device=self.device, dtype=torch.uint8)  # Ensure correct type
-        self.wall_map = wall_map.to(self.device)
-        self.gdt_start = gdt_start.to(self.device)
-        self.gdt_end = gdt_end.to(self.device)
-
-        # Store numpy versions (either passed in or derived)
-        self.image_np = image_np if image_np is not None else image.cpu().numpy()
-        self.seg_np = seg_np if seg_np is not None else seg.cpu().numpy().astype(np.uint8)
-        self.wall_map_np = wall_map_np if wall_map_np is not None else wall_map.cpu().numpy()
+        self.image = torch.from_numpy(image).to(self.device)
+        self.seg = torch.from_numpy(seg).to(device=self.device, dtype=torch.uint8)  # Ensure correct type
+        self.wall_map = torch.from_numpy(wall_map).to(self.device)
+        self.gdt_start = torch.from_numpy(gdt_start).to(self.device)
+        self.gdt_end = torch.from_numpy(gdt_end).to(self.device)
 
         # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
         self.image_affine = image_affine if image_affine is not None else np.eye(4)
         self.start_coord = start_coord
         self.end_coord = end_coord
-        print(f"  Received start point {self.start_coord} and end point {self.end_coord}")
 
         # Basic sanity check on shapes before proceeding
         if self.image.ndim != 3 or not all(s > 0 for s in self.image.shape):
@@ -234,61 +219,36 @@ class SmallBowelEnv(EnvBase):
         if self.gdt_start.shape != self.image.shape or self.gdt_end.shape != self.image.shape:
             raise ValueError(f"GDT shape mismatch with image shape {self.image.shape}")
 
-        # Remove wall map calculation
-        # self.wall_map_np = compute_wall_map(...)
-        # self.wall_map = torch.from_numpy(self.wall_map_np).to(self.device)
-
         # Update ground truth path if provided
-        # Convert gt_path tensor to numpy for _process_gt_path
-        self.gt_path_voxels = gt_path.cpu().numpy() if gt_path is not None else None
-        self._process_gt_path()  # Uses self.image_np, sets self.gt_path_vol (Tensor)
+        self.gt_path_voxels = gt_path if gt_path is not None else None
+        self._process_gt_path()
 
-    # --- Internal Helper Methods (Simplified) ---
     def _process_gt_path(self):
-        """Process ground truth path data. Assumes self.image_np is valid."""
-        if self.gt_path_voxels is None or self.image_np is None:
-            self._create_empty_gt_path()
-            return
-
-        # Basic check
-        if self.image_np.ndim != 3 or not all(s > 0 for s in self.image_np.shape):
-            print("Warning: Cannot process GT path, image_np is invalid. Creating empty path.")
+        """Process ground truth path data."""
+        if self.gt_path_voxels is None:
             self._create_empty_gt_path()
             return
 
         self.gt_path_available = True
-        self.gt_path_vol_np = np.zeros_like(self.image_np, dtype=np.float32)
+        self.gt_path_vol = torch.zeros_like(self.image)
         valid_indices = (
             (self.gt_path_voxels[:, 0] >= 0)
-            & (self.gt_path_voxels[:, 0] < self.image_np.shape[0])
+            & (self.gt_path_voxels[:, 0] < self.image.shape[0])
             & (self.gt_path_voxels[:, 1] >= 0)
-            & (self.gt_path_voxels[:, 1] < self.image_np.shape[1])
+            & (self.gt_path_voxels[:, 1] < self.image.shape[1])
             & (self.gt_path_voxels[:, 2] >= 0)
-            & (self.gt_path_voxels[:, 2] < self.image_np.shape[2])
+            & (self.gt_path_voxels[:, 2] < self.image.shape[2])
         )
         valid_gt_path = self.gt_path_voxels[valid_indices]
         if valid_gt_path.shape[0] > 0:
-            self.gt_path_vol_np[valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]] = 1.0
+            self.gt_path_vol[valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]] = 1.0
         else:
             print("Warning: No valid GT path voxels found within image bounds.")
-
-        self.gt_path_vol = torch.from_numpy(self.gt_path_vol_np).to(self.device)
 
     def _create_empty_gt_path(self):
         """Create an empty ground truth path tensor."""
         self.gt_path_available = False
-        if (
-            self.image_np is not None
-            and self.image_np.ndim == 3
-            and all(s > 0 for s in self.image_np.shape)
-        ):
-            self.gt_path_vol_np = np.zeros_like(self.image_np, dtype=np.float32)
-            self.gt_path_vol = torch.from_numpy(self.gt_path_vol_np).to(self.device)
-        else:
-            # Cannot create based on image, set to None
-            print("Warning: Cannot create empty GT path, image_np is None or invalid.")
-            self.gt_path_vol_np = None
-            self.gt_path_vol = None
+        self.gt_path_vol = torch.zeros_like(self.image)
 
     def _get_state_patches(self) -> Dict[str, torch.Tensor]:
         """Get state patches centered at current position. Assumes tensors are valid."""
@@ -303,10 +263,8 @@ class SmallBowelEnv(EnvBase):
             )
         # GT path can be None if not available, handle it
         if self.gt_path_vol is None:
-            print("Warning: GT path volume is None during patch extraction. Using zeros.")
             # Create a zero patch matching the spec, assuming self.image exists for shape/device
-            _zero_patch_shape = self.config.patch_size_vox
-            gt_path_patch = torch.zeros(_zero_patch_shape, dtype=torch.float32, device=self.device)
+            gt_path_patch = torch.zeros(self.config.patch_size_vox, dtype=torch.float32, device=self.device)
         else:
             gt_path_patch = get_patch(
                 self.gt_path_vol, self.current_pos_vox, self.config.patch_size_vox
@@ -357,14 +315,12 @@ class SmallBowelEnv(EnvBase):
         self, action_vox: Tuple[int, int, int], next_pos_vox: Tuple[int, int, int]
     ) -> float:
         """Calculate the reward for the current step. Assumes tensors are valid."""
-        # Add assertions for required tensors at the start
         if self.wall_map is None:
             raise RuntimeError("Cannot calculate reward, wall_map is None.")
         if self.cumulative_path_mask is None:
             raise RuntimeError("Cannot calculate reward, cumulative_path_mask is None.")
         if self.seg is None:
             raise RuntimeError("Cannot calculate reward, seg is None.")
-        # GDT can be None if computation failed, handle gracefully
 
         rt = 0.0
         current_pos_np = np.array(self.current_pos_vox)
@@ -374,7 +330,7 @@ class SmallBowelEnv(EnvBase):
         # --- 1. Zero movement penalty ---
         if np.all(action_np == 0):
             # Update GDT value even if not moving
-            if self.gdt is not None and self._is_valid_pos(self.current_pos_vox):
+            if self._is_valid_pos(self.current_pos_vox):
                 gdt_tensor = self.gdt[self.current_pos_vox]
                 self.current_gdt_val = gdt_tensor.item() if torch.isfinite(gdt_tensor) else 0.0
             else:
@@ -397,7 +353,7 @@ class SmallBowelEnv(EnvBase):
                         rt += self.config.r_val2 * (
                             immediate_delta_gdt / max(1.0, self.config.max_step_vox)
                         )
-                else:  # Original logic
+                else:
                     delta_gdt = next_gdt_val - self.max_gdt_achieved
                     if delta_gdt > 0:
                         gain = delta_gdt
@@ -405,7 +361,7 @@ class SmallBowelEnv(EnvBase):
                             gain = min(delta_gdt, self.config.gdt_max_increase_theta)
                             rt += (gain / self.config.gdt_max_increase_theta) * self.config.r_val2
                         else:  # If theta is ~0, reward any positive change?
-                            rt += self.config.r_val2  # Or scale differently? Check config
+                            rt += self.config.r_val2  # Or scale differently?
 
         # --- 3. Wall-based penalty ---
         wall_sum = 0.0
@@ -435,7 +391,6 @@ class SmallBowelEnv(EnvBase):
         return rt
 
     # --- TorchRL Methods Implementation (Simplified) ---
-
     def _reset(self, tensordict: Optional[TensorDictBase] = None) -> TensorDictBase:
         """
         Resets the environment. Loads next subject if needed based on episode count.
@@ -472,65 +427,29 @@ class SmallBowelEnv(EnvBase):
         # --- Reset internal episode state ---
         self.current_step_count = 0
 
-        # Assert that data necessary for reset exists (checked in _load_next_subject if loaded)
-        if self.image is None or self.seg is None or self.gdt_start is None or self.gdt_end is None:
-            raise RuntimeError(
-                "Cannot reset, critical tensors are None. Data might not have been loaded."
-            )
-
         # Determine start position and select appropriate GDT
-        # ... (existing start position and GDT selection logic) ...
         if self.start_choice == "end":
             self.current_pos_vox = self.end_coord
             self.gdt = self.gdt_end  # Use GDT calculated from end point
-            print("Starting from END coordinate, using GDT_end.")
+            # print("Starting from END coordinate, using GDT_end.")
         else:  # Default to start
             self.current_pos_vox = self.start_coord
             self.gdt = self.gdt_start  # Use GDT calculated from start point
-            print("Starting from START coordinate, using GDT_start.")
+            # print("Starting from START coordinate, using GDT_start.")
 
         # Validate start position (simplified check)
-        # ... (existing start position validation and fallback logic) ...
-        if (
-            not self._is_valid_pos(self.current_pos_vox)
-            or self.seg[self.current_pos_vox].item() == 0
-        ):
+        if not self._is_valid_pos(self.current_pos_vox) or self.seg[self.current_pos_vox] == 0:
             print(
                 f"Warning: Chosen start pos {self.current_pos_vox} invalid/outside seg. Searching nearby..."
             )
-            # ... (existing fallback search logic) ...
-            found_valid_start = False
-            # (Code for searching nearby...)
-            for dz in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
-                    for dx in [-1, 0, 1]:
-                        if dz == 0 and dy == 0 and dx == 0:
-                            continue
-                        new_pos = (
-                            self.current_pos_vox[0] + dz,
-                            self.current_pos_vox[1] + dy,
-                            self.current_pos_vox[2] + dx,
-                        )
-                        if self._is_valid_pos(new_pos) and self.seg[new_pos].item() > 0:
-                            self.current_pos_vox = new_pos
-                            found_valid_start = True
-                            print(f"  Found valid nearby start: {self.current_pos_vox}")
-                            break
-                    if found_valid_start:
-                        break
-                if found_valid_start:
-                    break
-
-            if not found_valid_start:
-                valid_voxels = torch.nonzero(self.seg > 0)
-                if len(valid_voxels) == 0:
-                    raise ValueError("Cannot reset: No valid voxels found in segmentation mask.")
-                rand_idx = torch.randint(0, len(valid_voxels), (1,)).item()
-                self.current_pos_vox = tuple(valid_voxels[rand_idx].cpu().tolist())
-                print(f"  Fallback random start: {self.current_pos_vox}")
+            valid_voxels = torch.nonzero(self.seg > 0)
+            if len(valid_voxels) == 0:
+                raise ValueError("Cannot reset: No valid voxels found in segmentation mask.")
+            rand_idx = torch.randint(0, len(valid_voxels), (1,)).item()
+            self.current_pos_vox = tuple(valid_voxels[rand_idx].cpu().tolist())
+            print(f"  Fallback random start: {self.current_pos_vox}")
 
         # Initialize path tracking
-        # ... (existing path tracking initialization) ...
         self.cumulative_path_mask = torch.zeros_like(
             self.image, dtype=torch.float32, device=self.device
         )
@@ -548,7 +467,6 @@ class SmallBowelEnv(EnvBase):
         self.tracking_path_history = [self.current_pos_vox]
 
         # Initialize current GDT value using the selected GDT
-        # ... (existing GDT initialization) ...
         if self.gdt is not None and self._is_valid_pos(self.current_pos_vox):
             gdt_tensor = self.gdt[self.current_pos_vox]
             # Handle potential inf values in GDT map
@@ -556,7 +474,6 @@ class SmallBowelEnv(EnvBase):
         else:
             self.current_gdt_val = 0.0  # If start is invalid or GDT is None
         self.max_gdt_achieved = self.current_gdt_val
-        print(f"Initial GDT value at {self.current_pos_vox}: {self.current_gdt_val}")
 
         # --- Get Initial State Patches ---
         obs_dict = self._get_state_patches()  # Let it raise RuntimeError if patches fail
@@ -663,36 +580,25 @@ class SmallBowelEnv(EnvBase):
         _truncated = torch.tensor([[truncated]], dtype=torch.bool, device=self.device)
         _next_actor_obs = next_obs_dict["actor"].unsqueeze(0)
         _next_critic_obs = next_obs_dict["critic"].unsqueeze(0)
-        _next_ep_reward = torch.tensor(
-            [[reward if done else 0.0]], dtype=torch.float32, device=self.device
-        )
-        _next_ep_length = torch.tensor(
-            [[self.current_step_count if done else 0]], dtype=torch.int, device=self.device
-        )
-        _next_ep_coverage = torch.tensor(
-            [[final_coverage if done else 0.0]], dtype=torch.float32, device=self.device
-        )
-
-        # Package Output TensorDict (Using explicit nested construction)
-        next_state_td = TensorDict(
+        # _next_ep_reward = torch.tensor(
+        #     [[reward if done else 0.0]], dtype=torch.float32, device=self.device
+        # )
+        # _next_ep_length = torch.tensor(
+        #     [[self.current_step_count if done else 0]], dtype=torch.int, device=self.device
+        # )
+        # _next_ep_coverage = torch.tensor(
+        #     [[final_coverage if done else 0.0]], dtype=torch.float32, device=self.device
+        # )
+        output_td = TensorDict(
             {
                 "actor": _next_actor_obs,
                 "critic": _next_critic_obs,
-                "episode_reward": _next_ep_reward,
-                "episode_length": _next_ep_length,
-                "info_coverage": _next_ep_coverage,
-            },
-            batch_size=self.batch_size,
-            device=self.device,
-        )
-
-        output_td = TensorDict(
-            {
                 "reward": _reward,
                 "done": _done,
                 "terminated": _terminated,
                 "truncated": _truncated,
-                "next": next_state_td,
+                # "next": next_state_td,
+                # "info_coverage": _next_ep_coverage,
             },
             batch_size=self.batch_size,
             device=self.device,
@@ -710,7 +616,12 @@ class SmallBowelEnv(EnvBase):
 
 
 # --- Updated Helper function to create the environment ---
-def make_sb_env(config: Config, dataset_iterator: Iterator, device: torch.device, num_episodes_per_sample: int = 32):
+def make_sb_env(
+    config: Config,
+    dataset_iterator: Iterator,
+    device: torch.device,
+    num_episodes_per_sample: int = 32,
+):
     """Factory function for the integrated SmallBowelEnv."""
     env = SmallBowelEnv(
         config=config,
@@ -722,7 +633,7 @@ def make_sb_env(config: Config, dataset_iterator: Iterator, device: torch.device
 
     # Check specs - let it raise error if checks fail
     print("Checking environment specs...")
-    # check_env_specs(env)
+    check_env_specs(env)
     print("Environment specs check passed.")
 
     return env

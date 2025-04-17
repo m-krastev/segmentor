@@ -8,9 +8,11 @@ import torch.nn.functional as F
 import math
 from skimage.filters import meijering
 from skimage.draw import disk
-import skfmm
 from typing import Tuple
 import logging
+import skfmm
+# import FastGeodis as fg
+
 
 
 try:
@@ -181,52 +183,54 @@ def get_patch(
     return patch
 
 
-# def compute_gdt(
-#     segmentation_mask: np.ndarray, start_voxel: Tuple[int, int, int], voxel_size: float
-# ) -> np.ndarray:
-#     """
-#     Compute a Geodesic Distance Transform from a start voxel through a segmentation mask.
-
-#     Args:
-#         segmentation_mask: Binary segmentation mask
-#         start_voxel: Starting point coordinates (z, y, x)
-#         voxel_size: Size of voxel in mm
-
-#     Returns:
-#         Distance map with geodesic distances from the start point
-#     """
-#     speed = np.ones_like(segmentation_mask, dtype=float)
-#     speed[segmentation_mask == 0] = 1e-5
-#     phi = np.ones_like(segmentation_mask, dtype=float) * np.inf
-#     if (
-#         0 <= start_voxel[0] < phi.shape[0]
-#         and 0 <= start_voxel[1] < phi.shape[1]
-#         and 0 <= start_voxel[2] < phi.shape[2]
-#     ):
-#         phi[start_voxel] = 0.0
-#     else:
-#         raise IndexError(f"Start voxel {start_voxel} outside mask bounds {phi.shape} for GDT.")
-#     masked_phi = np.ma.MaskedArray(phi, np.logical_not(segmentation_mask > 0))
-#     gdt = skfmm.travel_time(masked_phi, speed, dx=voxel_size)
-#     gdt = gdt.filled(np.inf)
-#     return gdt
-
-
-import FastGeodis as fg
-
-
 def compute_gdt(
-    image: torch.Tensor, start: Tuple[int, int, int], spacing: Tuple[float, ...], device="cuda"
-):
-    image = image.unsqueeze(0).unsqueeze(0).to(device)
-    mask = torch.ones_like(image, dtype=torch.uint8)
-    mask[0, 0, start[0], start[1], start[2]] = 0
-    v, lambd = 1e10, 1
-    geodesic_dist = fg.generalised_geodesic3d(image.float(), mask, spacing, v, lambd)
-    return geodesic_dist.squeeze()
+    segmentation_mask: np.ndarray, start_voxel: Tuple[int, int, int], voxel_size: float | list[float] = 1.
+) -> np.ndarray:
+    """
+    Compute a Geodesic Distance Transform from a start voxel through a segmentation mask.
+
+    Args:
+        segmentation_mask: Binary segmentation mask
+        start_voxel: Starting point coordinates (z, y, x)
+        voxel_size: Size of voxel in mm
+
+    Returns:
+        Distance map with geodesic distances from the start point
+    """
+    speed = np.ones_like(segmentation_mask, dtype=float)
+    speed[segmentation_mask == 0] = 1e-5
+    phi = np.ones_like(segmentation_mask, dtype=float) * np.inf
+    if (
+        0 <= start_voxel[0] < phi.shape[0]
+        and 0 <= start_voxel[1] < phi.shape[1]
+        and 0 <= start_voxel[2] < phi.shape[2]
+    ):
+        phi[start_voxel] = 0.0
+    else:
+        raise IndexError(f"Start voxel {start_voxel} outside mask bounds {phi.shape} for GDT.")
+    masked_phi = np.ma.MaskedArray(phi, np.logical_not(segmentation_mask > 0))
+    gdt = skfmm.travel_time(masked_phi, speed, dx=voxel_size)
+    gdt = gdt.filled(-np.inf)
+    return gdt
 
 
-def compute_wall_map(image: np.ndarray, sigmas: list[int] = (1, 3)) -> np.ndarray:
+
+
+# def compute_gdt(
+#     image: np.ndarray, start: Tuple[int, int, int], spacing: Tuple[float, ...] = None, device="cuda"
+# ):
+#     if spacing is None:
+#         spacing = (1.0, 1.0, 1.0)
+#     image = torch.from_numpy(image).to(device)
+#     image = image.unsqueeze(0).unsqueeze(0).to(device)
+#     mask = torch.ones_like(image, dtype=torch.uint8)
+#     mask[0, 0, start[0], start[1], start[2]] = 0
+#     v, lambd = 1e10, 1
+#     geodesic_dist = fg.signed_generalised_geodesic3d(image.float(), mask.float(), spacing, v, lambd)
+#     return geodesic_dist.squeeze().cpu().numpy()
+
+
+def compute_wall_map(image: np.ndarray, sigmas: list[int] = (1, 3), black_ridges=True, **kwargs) -> np.ndarray:
     """
     Compute a wall map highlighting vessel-like structures in the image.
 
@@ -237,10 +241,7 @@ def compute_wall_map(image: np.ndarray, sigmas: list[int] = (1, 3)) -> np.ndarra
     Returns:
         Wall map highlighting vessel-like structures
     """
-    wall_map = meijering(image, sigmas=sigmas, black_ridges=False, mode="constant", cval=0)
-    # max_val = np.max(wall_map)
-    # if max_val > 1e-6:
-    #     wall_map = wall_map / max_val
+    wall_map = meijering(image, sigmas=sigmas, black_ridges=black_ridges, mode="constant", **kwargs)
     return wall_map
 
 
@@ -290,7 +291,6 @@ def find_start_end(
     Returns:
         Tuple containing start and end coordinates (each as z,y,x coordinates)
     """
-    print("Finding start/end points using skeletonization...")
 
     def find_duodenojejunal_flexure(start_volume: np.ndarray) -> np.ndarray:
         """Find the duodenojejunal flexure as a start point."""
@@ -298,7 +298,6 @@ def find_start_end(
         import networkx as nx
         from scipy.ndimage import binary_dilation
 
-        print("  Skeletonizing duodenum...")
         start_volume_xyz = np.transpose(start_volume, (2, 1, 0))
         duodenum_skeleton = kimimaro.skeletonize(
             binary_dilation(start_volume_xyz, iterations=5),
@@ -326,7 +325,6 @@ def find_start_end(
             raise RuntimeError("Duodenum skeleton graph empty.")
         ends = [node for node, degree in duodenum_graph.degree() if degree == 1]
         if not ends:
-            print("Warning: Duodenum skeleton no ends. Using lowest node.")
             start_node = max(
                 duodenum_graph.nodes, key=lambda n: duodenum_graph.nodes[n]["location"][0]
             )
@@ -340,7 +338,6 @@ def find_start_end(
         import networkx as nx
         from scipy.ndimage import binary_dilation
 
-        print("  Skeletonizing colon...")
         end_volume_xyz = np.transpose(end_volume, (2, 1, 0))
         colon_skeleton = kimimaro.skeletonize(
             binary_dilation(end_volume_xyz, iterations=5),
@@ -407,7 +404,6 @@ def find_start_end(
 
     raw_start_coord_zyx = find_duodenojejunal_flexure(duodenum_volume)
     raw_end_coord_zyx = find_ileocecal_junction(colon_volume)
-    print("  Mapping skeleton points to nearest small bowel voxel...")
     sb_coords_zyx = np.argwhere(small_bowel_volume > 0)
     if sb_coords_zyx.shape[0] == 0:
         raise ValueError("Small bowel segmentation empty.")
@@ -421,7 +417,4 @@ def find_start_end(
     nearest_end_idx = np.argmin(end_distances)
     final_end_coord = tuple(sb_coords_zyx[nearest_end_idx].astype(int))
 
-    print(f"  Mapped DJ flexure to SB voxel: {final_start_coord}")
-    print(f"  Mapped IC junction to SB voxel: {final_end_coord}")
-    print("Start/end point finding finished.")
     return final_start_coord, final_end_coord

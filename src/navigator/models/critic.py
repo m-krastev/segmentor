@@ -73,7 +73,9 @@ class CriticNetwork(nn.Module):
         self.fc_out = nn.Linear(64, 1)
 
     def forward(self, x):
-        """Forward pass through the network."""
+        b, *shape = x.shape
+        if len(shape) == 5:
+            x = x.view(-1, *shape[1:])
         x = self.pool1(F.relu(self.gn1(self.conv1(x))))
         x = self.pool2(F.relu(self.gn2(self.conv2(x))))
         x = self.pool3(F.relu(self.gn3(self.conv3(x))))
@@ -93,5 +95,6 @@ class CriticNetwork(nn.Module):
 
         # Output value
         value = self.fc_out(x)
-
+        if len(shape) == 5:
+            value = value.view(1, -1, 1)
         return value
