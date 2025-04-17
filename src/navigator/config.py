@@ -35,26 +35,30 @@ class Config:
     wall_map_sigmas: Tuple[int, ...] = (1, 3)
 
     # --- Reward Hyperparameters ---
-    r_wall: float = 4.0
+    # Typically a penalty related to the game mechanics, e.g. zero movement, crossing walls, out of segmentation, etc.
+    r_val1: float = 4.0
+    # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
     r_final: float = 100.0
     # Reward for passing through must-pass nodes?
     # r_must_pass: float = 0.0
-    use_immediate_gdt_reward: bool = True  # Flag for the denser reward
-    wall_penalty_scale: float = 0.2  # Scale factor for wall penalty
 
     # --- Training Hyperparameters ---
-    num_episodes_per_sample: int = 16  # Number of episodes to collect per sample
-    frames_per_batch: int = 512  # Number of frames to collect per batch
-    learning_rate: float = 1e-5
-    num_epochs: int = 100  # Number of training epochs
+    # For each subject, how many episodes to run before switching to the next one
+    num_episodes_per_sample: int = 16
+    # Size of the buffer to store transitions
+    frames_per_batch: int = 512
+    learning_rate: float = 1e-4
     batch_size: int = 64  # Size of mini-batch for PPO update
     update_epochs: int = 10  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
+    # Entropy coefficient for exploration (higher values encourage exploration)
     ent_coef: float = 0.001
+    # Value function coefficient (higher values encourage accurate value estimates)
     vf_coef: float = 0.5
+
     max_grad_norm: float = 0.5
     eval_interval: int = 16384  # Interval for evaluation
     save_freq: int = 1000  # Frequency to save model checkpoints

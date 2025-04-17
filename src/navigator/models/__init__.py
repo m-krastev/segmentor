@@ -61,7 +61,6 @@ def create_ppo_modules(config: Config, device: torch.device):
         out_keys=["action"],  # Standard output key for sampled action
         distribution_class=TanhNormal,  # Bounded distribution
         return_log_prob=True,
-        log_prob_key="sample_log_prob",
     ).to(device)
 
     # Critic Network Base

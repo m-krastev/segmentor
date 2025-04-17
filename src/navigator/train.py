@@ -265,14 +265,24 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
     )
 
     # --- Optimizer ---
-    optimizer = optim.Adam(
-        loss_module.parameters(),  # Get all parameters from the loss module (actor + critic)
+    optimizer = optim.AdamW(
+        policy_module.parameters(),  # Get all parameters from the actor module
         lr=config.learning_rate,
+        eps=1e-4,  # PPO stability
+    )
+    optimizer_critic = optim.AdamW(
+        value_module.parameters(),  # Get all parameters from the critic module
+        lr=config.learning_rate / 10,
         eps=1e-4,  # PPO stability
     )
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
+        T_max=total_timesteps // config.frames_per_batch,  # Number of epochs for the scheduler
+        eta_min=1e-6,  # Minimum learning rate
+    )
+    scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer_critic,
         T_max=total_timesteps // config.frames_per_batch,  # Number of epochs for the scheduler
         eta_min=1e-6,  # Minimum learning rate
     )
@@ -316,11 +326,17 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
 
                 # Optimization step
                 optimizer.zero_grad()
+                optimizer_critic.zero_grad()
+
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     loss_module.parameters(), config.max_grad_norm
                 )
                 optimizer.step()
+                optimizer_critic.step()
+
+                scheduler.step()
+                scheduler_c.step()
 
                 # Log losses for this minibatch update
                 actor_losses.append(loss_dict["loss_objective"].item())

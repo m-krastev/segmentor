@@ -11,6 +11,7 @@ from skimage.draw import disk
 from typing import Tuple
 import logging
 import skfmm
+from scipy.ndimage import binary_dilation
 # import FastGeodis as fg
 
 
@@ -296,7 +297,6 @@ def find_start_end(
         """Find the duodenojejunal flexure as a start point."""
         import kimimaro
         import networkx as nx
-        from scipy.ndimage import binary_dilation
 
         start_volume_xyz = np.transpose(start_volume, (2, 1, 0))
         duodenum_skeleton = kimimaro.skeletonize(
@@ -336,7 +336,6 @@ def find_start_end(
         """Find the ileocecal junction as an end point."""
         import kimimaro
         import networkx as nx
-        from scipy.ndimage import binary_dilation
 
         end_volume_xyz = np.transpose(end_volume, (2, 1, 0))
         colon_skeleton = kimimaro.skeletonize(
