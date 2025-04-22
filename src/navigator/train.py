@@ -26,7 +26,6 @@ from .environment import make_sb_env, SmallBowelEnv
 # Use the TorchRL module creation function
 from .models import create_ppo_modules
 
-
 def log_wandb(data: dict, **kwargs):
     """Log data to wandb."""
     if wandb is not None:
@@ -56,7 +55,6 @@ class SubjectIterator:
         try:
             return next(self.iterator)
         except StopIteration:
-            print("\n[SubjectIterator] Restarting DataLoader...")
             self.iterator = iter(self.dataloader)  # Restart iterator
             return next(self.iterator)
 
@@ -179,9 +177,6 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
     os.makedirs(config.checkpoint_dir, exist_ok=True)
     total_timesteps = getattr(config, "total_timesteps", 1_000_000)  # Define total steps
 
-    # Size of replay buffer
-    buffer_size = getattr(config, "buffer_size", config.frames_per_batch * 10)
-
     # --- Dataset Splitting and Iterators ---
     train_size = int(len(dataset) * config.train_val_split)
     indices = np.arange(len(dataset))
@@ -205,11 +200,6 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
         return make_sb_env(
             config, train_iterator, device, num_episodes_per_sample=config.num_episodes_per_sample
         )
-
-    # Create a single environment instance for initialization checks (optional)
-    # test_env = env_factory()
-    # print("Env specs:", test_env.specs)
-    # test_env.close()
 
     # --- Models ---
     policy_module, value_module = create_ppo_modules(config, device)
@@ -278,12 +268,14 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_max=total_timesteps // config.frames_per_batch,  # Number of epochs for the scheduler
+        T_max=(
+            total_timesteps * config.update_epochs // config.batch_size
+        ),  # Number of epochs for the scheduler
         eta_min=1e-6,  # Minimum learning rate
     )
     scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
         optimizer_critic,
-        T_max=total_timesteps // config.frames_per_batch,  # Number of epochs for the scheduler
+        T_max=(total_timesteps * config.update_epochs // config.batch_size),  # Number of epochs for the scheduler
         eta_min=1e-6,  # Minimum learning rate
     )
 

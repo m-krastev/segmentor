@@ -5,9 +5,8 @@ Data loading utilities for Navigator's small bowel tracking.
 from pathlib import Path
 import nibabel as nib
 import numpy as np
-import torch
 from torch.utils.data import Dataset
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any
 
 from segmentor.utils.medutils import load_and_normalize_nifti
 
@@ -16,18 +15,19 @@ from .utils import find_start_end, compute_wall_map, compute_gdt
 from .config import Config  # Example: Assuming Config holds wall_map_sigmas
 
 FILE_PATTERNS = {
-    "seg": "small_bowel.nii.gz",
-    "duodenum": "duodenum.nii.gz",
-    "colon": "colon.nii.gz",
+    "ct": "ct.nii",
+    "small_bowel": "segmentations/small_bowel.nii",
+    "duodenum": "segmentations/duodenum.nii",
+    "colon": "segmentations/colon.nii",
     "path": "path.npy",
 }
 
 # Define cache filenames
 CACHE_FILES = {
     "start_end": "start_end.npy",
-    "wall_map": "wall_map.nii.gz",
-    "gdt_start": "gdt_start.nii.gz",
-    "gdt_end": "gdt_end.nii.gz",
+    "wall_map": "wall_map.nii",
+    "gdt_start": "gdt_start.nii",
+    "gdt_end": "gdt_end.nii",
 }
 
 
@@ -72,46 +72,28 @@ class SmallBowelDataset(Dataset):
         for patient_dir in patient_dirs:
             subject_id = patient_dir.name  # Use directory name as subject ID
 
-            image_file = patient_dir / "ct.nii.gz"
-            segmentation_dir = patient_dir / "segmentations"
+            image_file = patient_dir / FILE_PATTERNS["ct"]
 
             # Check if required files exist
-            if image_file.exists() and segmentation_dir.exists():
+            if image_file.exists():
                 subject = {
                     "id": subject_id,
                     "image": image_file,
-                    "seg": segmentation_dir
-                    / "small_bowel.nii.gz",  # Updated to use specific file name
                     "patient_dir": patient_dir,  # Store patient dir for caching
                 }
-
-                # Check for duodenum segmentation files
-                duodenum_file = segmentation_dir / "duodenum.nii.gz"
-                if not duodenum_file.exists():
-                    print(f"Warning: Duodenum file missing for subject {subject_id}. Skipping.")
-                    continue  # Skip subject if essential files are missing
-                subject["duodenum"] = duodenum_file
-
-                # Check for colon segmentation file
-                colon_file = segmentation_dir / "colon.nii.gz"
-                if not colon_file.exists():
-                    print(f"Warning: Colon file missing for subject {subject_id}. Skipping.")
-                    continue  # Skip subject if essential files are missing
-                subject["colon"] = colon_file
+                for organ in ["small_bowel", "duodenum", "colon"]:
+                    # Check for small bowel segmentation file
+                    seg_file = patient_dir / FILE_PATTERNS[organ]
+                    if not seg_file.exists():
+                        print(f"Warning: {organ.capitalize()} file missing for subject {subject_id}. Skipping.")
+                        continue
+                    subject[organ] = seg_file
 
                 # Check for ground truth path file (optional)
-                path_file = patient_dir / "path.npy"
+                path_file = patient_dir / FILE_PATTERNS["path"]
                 subject["path"] = path_file if path_file.exists() else None
-
-                # Check base segmentation file exists
-                if not subject["seg"].exists():
-                    print(
-                        f"Warning: Small bowel seg file missing for subject {subject_id}. Skipping."
-                    )
-                    continue
-
+                
                 subjects.append(subject)
-
         return subjects
 
     def __len__(self) -> int:
@@ -177,8 +159,8 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config) -> Dict[str,
     cache_dir.mkdir(exist_ok=True)  # Ensure cache directory exists
 
     # --- Load Base Data ---
-    image_nii = nib.load(subject_data["image"])
-    image_np = load_and_normalize_nifti(subject_data["image"]).astype(np.float32)
+    image_nii: nib.nifti1.Nifti1Image = nib.load(subject_data["image"])
+    image_np = image_nii.get_fdata(dtype=np.float32)
     image_np = np.transpose(image_np, (2, 1, 0))  # Change to (Z, Y, X) format
 
     result["image"] = image_np
@@ -186,13 +168,13 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config) -> Dict[str,
     result["spacing"] = image_nii.header.get_zooms()[::-1]  # Get spacing in (Z, Y, X) order
 
     # Load segmentations (ensure they exist before loading)
-    sb_seg_nii = nib.load(subject_data["seg"])
-    duodenum_seg_nii = nib.load(subject_data["duodenum"])
-    colon_seg_nii = nib.load(subject_data["colon"])
+    sb_seg_nii = np.asanyarray(nib.load(subject_data["small_bowel"]).dataobj)
+    duodenum_seg_nii = np.asanyarray(nib.load(subject_data["duodenum"]).dataobj)
+    colon_seg_nii = np.asanyarray(nib.load(subject_data["colon"]).dataobj)
 
-    seg_np = np.transpose((sb_seg_nii.get_fdata() > 0.5).astype(np.uint8), (2, 1, 0))
-    duodenum_np = np.transpose((duodenum_seg_nii.get_fdata() > 0.5).astype(np.uint8), (2, 1, 0))
-    colon_np = np.transpose((colon_seg_nii.get_fdata() > 0.5).astype(np.uint8), (2, 1, 0))
+    seg_np = np.transpose(sb_seg_nii, (2, 1, 0))
+    duodenum_np = np.transpose(duodenum_seg_nii, (2, 1, 0))
+    colon_np = np.transpose(colon_seg_nii, (2, 1, 0))
 
     result["seg"] = seg_np
     result["duodenum"] = duodenum_np
@@ -208,7 +190,7 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config) -> Dict[str,
     # --- Load/Calculate Start/End Coordinates ---
     start_end_cache_path = cache_dir / CACHE_FILES["start_end"]
     if start_end_cache_path.exists():
-        start_coord_np, end_coord_np = np.loadtxt(start_end_cache_path).astype(int)
+        start_coord_np, end_coord_np = np.loadtxt(start_end_cache_path, dtype=int)
         start_coord = tuple(start_coord_np)
         end_coord = tuple(end_coord_np)
     else:
@@ -223,11 +205,9 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config) -> Dict[str,
     wall_map_cache_path = cache_dir / CACHE_FILES["wall_map"]
     if wall_map_cache_path.exists():
         wall_map_nii = nib.load(wall_map_cache_path)
-        wall_map_np = np.transpose(wall_map_nii.get_fdata(), (2, 1, 0)).astype(np.float32)
+        wall_map_np = np.transpose(wall_map_nii.get_fdata(dtype=np.float32), (2, 1, 0))
     else:
-        wall_map_np = compute_wall_map(result["image"], sigmas=config.wall_map_sigmas).astype(
-            np.float32
-        )
+        wall_map_np = compute_wall_map(result["image"], sigmas=config.wall_map_sigmas)
         # Save in Nifti format (preserving original orientation for saving)
         wall_map_to_save = np.transpose(wall_map_np, (2, 1, 0))
         wall_map_nii_save = nib.Nifti1Image(wall_map_to_save, result["image_affine"])
@@ -238,7 +218,7 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config) -> Dict[str,
     gdt_start_cache_path = cache_dir / CACHE_FILES["gdt_start"]
     if gdt_start_cache_path.exists():
         gdt_start_nii = nib.load(gdt_start_cache_path)
-        gdt_start_np = np.transpose(gdt_start_nii.get_fdata(), (2, 1, 0)).astype(np.float32)
+        gdt_start_np = np.transpose(gdt_start_nii.get_fdata(dtype=np.float32), (2, 1, 0))
     else:
         # Use numpy seg and start_coord for calculation
         gdt_start_tensor = compute_gdt(result["seg"], result["start_coord"], result["spacing"])
@@ -254,7 +234,7 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config) -> Dict[str,
     gdt_end_cache_path = cache_dir / CACHE_FILES["gdt_end"]
     if gdt_end_cache_path.exists():
         gdt_end_nii = nib.load(gdt_end_cache_path)
-        gdt_end_np = np.transpose(gdt_end_nii.get_fdata(), (2, 1, 0)).astype(np.float32)
+        gdt_end_np = np.transpose(gdt_end_nii.get_fdata(dtype=np.float32), (2, 1, 0))
     else:
         # Use numpy seg and end_coord for calculation
         gdt_end_tensor = compute_gdt(result["seg"], result["end_coord"], result["spacing"])

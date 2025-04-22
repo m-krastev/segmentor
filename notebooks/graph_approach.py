@@ -32,7 +32,7 @@ import shutil
 from dataclasses import dataclass, field, replace
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple 
+from typing import Any, Dict, List, Optional, Tuple
 
 import kimimaro
 import networkx as nx
@@ -100,18 +100,19 @@ try:
         # Check if image is already a CuPy array
         if not isinstance(image, cupy.ndarray):
             image = cupy.array(image, dtype=cupy.float32)
-        
+
         labels = kwargs.pop("labels", None)
         if labels is not None:
             labels = cupy.array(labels, dtype=cupy.int32)
         return cupy.asnumpy(_peak_local_max(image, labels=labels, **kwargs).get())
-    
+
     logging.info("CuCIM/CuPy installed. Using GPU for graphics heavy operations.")
 
 except ImportError:
     logging.error("CuCIM/CuPy not installed. Please install it to enable GPU acceleration.")
     try:
         from edt import edt as distance_transform_edt
+
         logging.info("EDT installed. Using CPU for distance transform.")
     except ImportError:
         logging.error(
@@ -265,15 +266,15 @@ class SmallBowelSegmentor:
 
     def compute_supervoxels(self) -> int:
         """Calculate the number of supervoxels needed based on desired physical size.
-        
+
         This function determines how many supervoxels to create based on:
         - The desired physical supervoxel size (in mm³)
         - The actual voxel size from the CT scan
         - The total volume of the image
-        
+
         Returns:
             int: The number of supervoxels needed to achieve the desired physical size
-        
+
         Example:
             If desired_size = 216mm³, voxel_size = 1mm³, image_size = 512x512x512
             Then num_supervoxels = (512*512*512 * 1) / 216 ≈ 625,777
@@ -290,7 +291,7 @@ class SmallBowelSegmentor:
 
     def compute_edges(self) -> np.ndarray:
         """Compute edge map of the CT scan using Meijering filter.
-        
+
         Algorithm steps:
         1. Check for cached results to avoid recomputation
         2. Apply Meijering filter to detect tubular structures:
@@ -299,10 +300,10 @@ class SmallBowelSegmentor:
         3. Remove false positives from air bubbles
         4. Apply median filter to reduce noise
         5. Cache results for future use
-        
+
         Returns:
             np.ndarray: Edge map where higher values indicate stronger edges
-            
+
         Note:
             The Meijering filter is particularly good at detecting tubular structures
             like blood vessels and intestines, making it ideal for bowel tracking.
@@ -376,13 +377,13 @@ class SmallBowelSegmentor:
 
     def compute_distance_map(self) -> np.ndarray:
         """Compute Euclidean distance transform of the segmentation mask.
-        
+
         The distance transform assigns to each voxel the distance to the nearest
         boundary of the segmentation mask. This is useful for:
         1. Finding the centerline of the bowel
         2. Identifying potential must-pass points
         3. Ensuring the path stays within the segmentation
-        
+
         Returns:
             np.ndarray: Distance map where each value is the distance to the nearest boundary
         """
@@ -397,22 +398,22 @@ class SmallBowelSegmentor:
 
     def compute_peaks(self, distance_map: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Identify must-pass nodes as local maxima in the distance map.
-        
+
         Parameters:
             distance_map (np.ndarray): Distance transform of the segmentation mask
-            
+
         Algorithm:
         1. Find local maxima in the distance map that are:
             - At least thetad voxels apart (minimum distance)
             - Above thetav threshold (minimum peak height)
             - Within valid supervoxel regions
         2. Convert peak coordinates to supervoxel indices
-        
+
         Returns:
-            Tuple[np.ndarray, np.ndarray]: 
+            Tuple[np.ndarray, np.ndarray]:
                 - Array of peak coordinates (N x 3)
                 - Array of unique supervoxel indices containing peaks
-                
+
         Note:
             These peaks will serve as waypoints that the final path must visit
         """
@@ -557,10 +558,10 @@ class SmallBowelSegmentor:
 
     def simplify_graph(self, peaks: np.ndarray) -> nx.Graph:
         """Create a simplified graph connecting must-pass points.
-        
+
         Parameters:
             peaks (np.ndarray): Array of supervoxel indices containing peaks
-            
+
         Algorithm:
         1. Create new graph with peaks as nodes
         2. Create mappings between peak indices and supervoxel indices
@@ -569,13 +570,13 @@ class SmallBowelSegmentor:
             - If distance <= delta: Add edge with normalized cost based on Dijkstra path
             - If distance > delta: Add edge with cost proportional to Euclidean distance
         5. Normalize all costs to [0,1] range
-        
+
         Returns:
             nx.Graph: Simplified graph where:
                 - Nodes are supervoxels containing peaks
                 - Edges represent possible paths between peaks
                 - Edge weights represent normalized path costs
-                
+
         Note:
             This simplification is crucial for making the TSP problem tractable
         """
@@ -599,7 +600,7 @@ class SmallBowelSegmentor:
 
         # Process all possible peak pairs
         allpairs = combinations(nodes, 2)
-        
+
         # Load or compute path lengths
         if (self.cache_dir / "lengths.pkl").exists():
             logging.info("Cache for Dijkstra distances found. Loading precomputed distances...")
