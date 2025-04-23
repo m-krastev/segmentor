@@ -148,10 +148,9 @@ class SmallBowelEnv(EnvBase):
         self.current_step_count: int = 0
         self.cumulative_path_mask: Optional[torch.Tensor] = None
         self.gdt: Optional[torch.Tensor] = None
-        self.max_gdt_achieved: float = 0.0
         self.tracking_path_history: List[Tuple[int, int, int]] = []
-        self.current_gdt_val: float = 0.0
-        # self.gdt_computed = False
+        self.max_gdt_achieved = torch.tensor(0.0, device=self.device)
+        self.current_gdt_val = torch.tensor(0.0, device=self.device)
         self.start_choice = "start"
 
         # --- TorchRL Internal State Flags (per-batch element) ---
@@ -160,9 +159,7 @@ class SmallBowelEnv(EnvBase):
         )
 
         self.transform = torch.jit.script(ClipTransform(-150, 250))
-        self.zeros_patch = torch.zeros(
-            self.config.patch_size_vox, dtype=torch.float32, device=self.device
-        )
+        self.zeros_patch = torch.zeros(self.config.patch_size_vox, device=self.device)
 
     # --- Data Loading Method (Internal) ---
     def _load_next_subject(self) -> bool:
@@ -173,7 +170,6 @@ class SmallBowelEnv(EnvBase):
         """
         subject_data = next(self.dataset_iterator)  # Let StopIteration propagate
         self._current_subject_data = subject_data
-        subject_id = subject_data.get("id", "N/A")
 
         # Call update_data - let it raise exceptions if issues occur
         # Pass all relevant fields from the dataset output
@@ -191,16 +187,9 @@ class SmallBowelEnv(EnvBase):
         )
 
         # Check if critical data was loaded successfully by update_data
-        if (
-            self.image is None
-            or self.seg is None
-            or self.wall_map is None
-            or self.gdt_start is None
-            or self.gdt_end is None
-        ):
-            raise RuntimeError(
-                f"Critical data is None after loading subject {subject_id}."
-            )
+        assert self.image and self.seg and self.wall_map and self.gdt, (
+            f"Critical data is None after loading subject {subject_data.get('id', 'N/A')}."
+        )
 
         return True
 
@@ -241,17 +230,17 @@ class SmallBowelEnv(EnvBase):
         self.end_coord = end_coord
 
         # Update ground truth path if provided
-        self.gt_path_voxels = gt_path if gt_path is not None else None
+        self.gt_path_voxels = gt_path
         self._process_gt_path()
 
     def _process_gt_path(self):
         """Process ground truth path data."""
+        self.gt_path_vol = torch.zeros_like(self.image)
         if self.gt_path_voxels is None:
-            self._create_empty_gt_path()
+            self.gt_path_available = False
             return
 
         self.gt_path_available = True
-        self.gt_path_vol = torch.zeros_like(self.image)
         valid_indices = (
             (self.gt_path_voxels[:, 0] >= 0)
             & (self.gt_path_voxels[:, 0] < self.image.shape[0])
@@ -261,17 +250,8 @@ class SmallBowelEnv(EnvBase):
             & (self.gt_path_voxels[:, 2] < self.image.shape[2])
         )
         valid_gt_path = self.gt_path_voxels[valid_indices]
-        if valid_gt_path.shape[0] > 0:
-            self.gt_path_vol[
-                valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]
-            ] = 1.0
-        else:
-            print("Warning: No valid GT path voxels found within image bounds.")
-
-    def _create_empty_gt_path(self):
-        """Create an empty ground truth path tensor."""
-        self.gt_path_available = False
-        self.gt_path_vol = torch.zeros_like(self.image)
+        assert valid_gt_path.shape[0] > 0, "No valid GT path voxels found within image bounds."
+        self.gt_path_vol[valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]] = 1.0
 
     def _get_state_patches(self) -> Dict[str, torch.Tensor]:
         """Get state patches centered at current position. Assumes tensors are valid."""
@@ -313,15 +293,15 @@ class SmallBowelEnv(EnvBase):
     def _get_final_coverage(self) -> float:
         """Calculate coverage. Assumes tensors are valid."""
 
-
-        path_mask = torch.as_tensor(
-            grey_dilation(
-                cp.asarray(self.cumulative_path_mask),
-                footprint=generate_binary_structure(3, 2),
-            ),
-            device=self.device,
-        )
-        intersection = torch.sum(self.cumulative_path_mask * self.seg).item()
+        # path_mask = torch.as_tensor(
+        #     grey_dilation(
+        #         cp.asarray(self.cumulative_path_mask),
+        #         footprint=generate_binary_structure(3, 2),
+        #     ),
+        #     device=self.device,
+        # )
+        # Not sure if we actually need the above since the path mask itself should lead to some coverage
+        intersection = torch.sum(self.cumulative_path_mask * self.seg)
         return intersection / self.seg_volume
 
     def get_tracking_history(self) -> np.ndarray:
@@ -333,16 +313,12 @@ class SmallBowelEnv(EnvBase):
     ) -> float:
         """Calculate the reward for the current step. Assumes tensors are valid."""
 
-        rt = 0.0
+        rt = torch.tensor(0.0, device=self.device)
         # Set of voxels S on the line segment
         S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
-        # from segmentor.utils.medutils import plotLine3d
-        # a = self.current_pos_vox
-        # b = next_pos_vox
-        # S = plotLine3d(a[0], a[1], a[2], b[0], b[1], b[2])
 
         # --- 1. Zero movement or goes out of the image penalty ---
-        if np.all(action_vox == 0) or not self._is_valid_pos(next_pos_vox):
+        if not any(action_vox) or not self._is_valid_pos(next_pos_vox):
             return -self.config.r_val1
 
         # --- 2. GDT-based reward ---
@@ -357,7 +333,7 @@ class SmallBowelEnv(EnvBase):
                 rt = self.config.r_val2 * delta / self.config.gdt_max_increase_theta
             self.max_gdt_achieved = next_gdt_val
         # --- 3. Wall-based penalty ---
-        rt -= self.config.r_val2 * self.wall_map[S].mean().item()
+        rt -= self.config.r_val2 * self.wall_map[S].mean()
 
         # --- 4. Revisiting penalty ---
         if self.cumulative_path_mask[S].sum() > 0:
@@ -369,7 +345,9 @@ class SmallBowelEnv(EnvBase):
 
         return rt
 
-    def _reset(self, tensordict: Optional[TensorDictBase] = None) -> TensorDictBase:
+    def _reset(
+        self, tensordict: Optional[TensorDictBase] = None, must_load_new_subject=False
+    ) -> TensorDictBase:
         """
         Resets the environment. Loads next subject if needed based on episode count.
         Will raise exceptions if loading or initialization fails.
@@ -386,7 +364,7 @@ class SmallBowelEnv(EnvBase):
             or self.episodes_on_current_subject >= self.num_episodes_per_sample
         )
 
-        if should_load_new_subject:
+        if should_load_new_subject or must_load_new_subject:
             # Reset counter *before* loading, as loading signifies starting fresh
             self.episodes_on_current_subject = 0
             self._load_next_subject()
@@ -395,7 +373,7 @@ class SmallBowelEnv(EnvBase):
         self.current_step_count = 0
 
         # Determine start position and select appropriate GDT
-        if not self.episodes_on_current_subject % 2:
+        if self.episodes_on_current_subject % 2 == 0:
             self.current_pos_vox = self.start_coord
             self.gdt = self.gdt_start
         else:  # Default to start
@@ -421,7 +399,7 @@ class SmallBowelEnv(EnvBase):
 
         # Initialize path tracking
         self.cumulative_path_mask = torch.zeros_like(
-            self.image, dtype=torch.float32, device=self.device
+            self.image, device=self.device
         )
 
         # Draw initial path sphere
@@ -433,7 +411,7 @@ class SmallBowelEnv(EnvBase):
         self.tracking_path_history = [self.current_pos_vox]
 
         # Initialize current GDT value using the selected GDT
-        self.current_gdt_val = self.gdt[self.current_pos_vox].item()
+        self.current_gdt_val = self.gdt[self.current_pos_vox]
         self.max_gdt_achieved = self.current_gdt_val
 
         # --- Get Initial State Patches ---
@@ -467,7 +445,7 @@ class SmallBowelEnv(EnvBase):
         action_normalized = tensordict.get("action").squeeze(0)
 
         # Map Action
-        action_mapped = (2* action_normalized - 1)* self.config.max_step_vox
+        action_mapped = (action_normalized) * self.config.max_step_vox
         action_vox_delta = tuple(torch.round(action_mapped).int().cpu().tolist())
 
         # Execute Step Logic
@@ -522,7 +500,7 @@ class SmallBowelEnv(EnvBase):
             final_reward_adjustment = (
                 (final_coverage * self.config.r_final)
                 if termination_reason == "reached_end"
-                else ((1 - final_coverage) * abs(self.config.r_final))
+                else ((final_coverage - 1) * self.config.r_final)
             )
             reward += final_reward_adjustment
 
@@ -533,7 +511,7 @@ class SmallBowelEnv(EnvBase):
         self._is_done[0] = done
 
         # Prepare Tensors for Output TensorDict (Shape [1, ...])
-        _reward = torch.tensor([[reward]], dtype=torch.float32, device=self.device)
+        _reward = reward.view(1, 1, 1)
         _done = torch.tensor([[done]], dtype=torch.bool, device=self.device)
         _terminated = torch.tensor([[terminated]], dtype=torch.bool, device=self.device)
         _truncated = torch.tensor([[truncated]], dtype=torch.bool, device=self.device)
@@ -567,11 +545,9 @@ class SmallBowelEnv(EnvBase):
 
     def _set_seed(self, seed: Optional[int] = None):
         """Sets the seed for the environment's random number generator(s)."""
-        # Add seeding for np.random if used in fallbacks or utils
-        # np.random.seed(seed)
-        # Add seeding for torch.random if used directly
-        # torch.manual_seed(seed)
-        pass
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.manual_seed_all(seed)
 
 
 # --- Updated Helper function to create the environment ---
@@ -591,8 +567,7 @@ def make_sb_env(
     )
 
     # Check specs - let it raise error if checks fail
-    print("Checking environment specs...")
-    check_env_specs(env)
-    print("Environment specs check passed.")
+    # Assertion with "is None" since the function returns nothing and asserts otherwise
+    # assert check_env_specs(env) is None
 
     return env

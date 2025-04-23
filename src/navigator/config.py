@@ -49,8 +49,8 @@ class Config:
     # Size of the buffer to store transitions
     frames_per_batch: int = 512
     learning_rate: float = 1e-4
-    batch_size: int = 64  # Size of mini-batch for PPO update
-    update_epochs: int = 10  # Number of PPO update epochs
+    batch_size: int = 128  # Size of mini-batch for PPO update
+    update_epochs: int = 5  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
