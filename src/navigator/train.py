@@ -7,7 +7,7 @@ import os
 from tqdm import tqdm
 
 # Use IterableDataset concept
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 
 # TorchRL components
 from torchrl.collectors import SyncDataCollector
@@ -23,8 +23,6 @@ from .dataset import SmallBowelDataset  # Keep for creating the iterator
 # Use the TorchRL environment wrapper and factory function
 from .environment import make_sb_env, SmallBowelEnv
 
-# Use the TorchRL module creation function
-from .models import create_ppo_modules
 
 def log_wandb(data: dict, **kwargs):
     """Log data to wandb."""
@@ -66,8 +64,8 @@ class SubjectIterator:
 def validation_loop_torchrl(
     actor_module,  # Pass the trained policy module
     config: Config,
-    device: torch.device,
     val_dataset: SmallBowelDataset,  # Pass the validation subset
+    device: torch.device = None,
 ):
     """Validation loop adapted for TorchRL env and modules."""
     actor_module.eval()  # Set actor to evaluation mode
@@ -103,6 +101,8 @@ def validation_loop_torchrl(
                 step_count = rollout["step_count"].max().item()
                 final_coverage = val_env._get_final_coverage().item()
 
+                val_env.save_path()
+
             except Exception as e:
                 print(f"Exception raised: {e}")
                 reward, step_count, final_coverage = 0, 0, 0
@@ -129,32 +129,18 @@ def validation_loop_torchrl(
 
 
 # --- Main Training Function ---
-def train_torchrl(config: Config, dataset: SmallBowelDataset):
+def train_torchrl(policy_module, value_module, config: Config, train_set: SmallBowelDataset, val_set: SmallBowelDataset, device: torch.device = None):
     """Main PPO training loop using TorchRL."""
     # --- Setup ---
-    device = torch.device(config.device)
-    os.makedirs(config.checkpoint_dir, exist_ok=True)
-    total_timesteps = getattr(config, "total_timesteps", 1_000_000)  # Define total steps
-
-    # --- Dataset Splitting and Iterators ---
-    train_size = int(len(dataset) * config.train_val_split)
-    indices = np.arange(len(dataset))
-    if config.shuffle_dataset:
-        np.random.shuffle(indices)
-    train_indices, val_indices = indices[:train_size], indices[train_size:]
-
-    train_set = Subset(dataset, train_indices)
-    val_set = Subset(dataset, val_indices)
-
-    print(f"Training: {len(train_set)} subjects, Validation: {len(val_set)} subjects.")
+    total_timesteps = getattr(config, "total_timesteps", 1_000_000)
+    device = device or torch.device(config.device)
+    
     train_iterator = SubjectIterator(
         train_set,
         shuffle=config.shuffle_dataset,
         num_workers=getattr(config, "num_workers", 0),
     )
 
-    # --- Models ---
-    policy_module, value_module = create_ppo_modules(config, device)
     print("Policy Module:", policy_module)
     print("Value Module:", value_module)
     print(
@@ -326,8 +312,8 @@ def train_torchrl(config: Config, dataset: SmallBowelDataset):
             val_metrics = validation_loop_torchrl(
                 actor_module=policy_module,
                 config=config,
-                device=device,
                 val_dataset=val_set,
+                device=device,
             )
             policy_module.train()
             if config.track_wandb and wandb is not None:

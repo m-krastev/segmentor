@@ -15,6 +15,9 @@ class Config:
     data_dir: str = "data"  # Directory containing dataset
     save_path: str = "ppo_small_bowel_tracker.pth"
     checkpoint_dir: str = "checkpoints"  # Directory to save checkpoints
+    eval_only: bool = False  # Flag to run evaluation only
+    load_from_checkpoint: Optional[str] = None  # Path to checkpoint for evaluation
+    seed: int = 42 # Random seed for reproducibility
 
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training

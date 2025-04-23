@@ -3,10 +3,13 @@ Environment implementation for Navigator's small bowel path tracking,
 integrated with TorchRL. Simplified version without try-except blocks.
 """
 
+import nibabel as nib
 import numpy as np
 import torch
 from typing import Tuple, Optional, Dict, Any, List, Iterator
+import pyvista as pv
 
+from segmentor.utils.plotting import path3d
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import (
     BoundedContinuous,
@@ -308,6 +311,31 @@ class SmallBowelEnv(EnvBase):
         """Get the history of tracked positions."""
         return np.array(self.tracking_path_history)
 
+
+    def save_path(self):
+        cache_dir = self._current_subject_data["wall_map"].parent
+        nif = nib.nifti1.Nifti1Image(
+            self.cumulative_path_mask.numpy(force=True),
+            affine=self.image_affine,
+            header=nib.Nifti1Header(),
+        )
+        nif.header.set_zooms(self.spacing)
+        nib.save(nif, cache_dir / "cumulative_path_mask.nii.gz")
+
+        # Save the tracking history
+        tracking_history_path = cache_dir / "tracking_history.npy"
+        np.save(tracking_history_path, self.tracking_path_history)
+
+        # PyVista visualization
+        plotter = pv.Plotter()
+        plotter.add_volume(self.seg_np * 20, cmap="viridis", opacity="linear")
+        lines: pv.PolyData = pv.lines_from_points(self.tracking_path_history)
+        plotter.add_mesh(lines, line_width=10, cmap="viridis")
+        plotter.add_points(self.tracking_path_history, color="blue", point_size=10)
+        plotter.export_html(cache_dir / "path.html")
+
+
+
     def _calculate_reward(
         self, action_vox: Tuple[int, int, int], next_pos_vox: Tuple[int, int, int]
     ) -> float:
@@ -554,10 +582,13 @@ class SmallBowelEnv(EnvBase):
 def make_sb_env(
     config: Config,
     dataset_iterator: Iterator,
-    device: torch.device,
+    device: torch.device = None,
     num_episodes_per_sample: int = 32,
 ):
     """Factory function for the integrated SmallBowelEnv."""
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     env = SmallBowelEnv(
         config=config,
         dataset_iterator=dataset_iterator,
