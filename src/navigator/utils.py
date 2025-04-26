@@ -247,7 +247,7 @@ def compute_wall_map(image: np.ndarray, sigmas: list[int] = (1, 3), black_ridges
 
 
 def draw_path_sphere(
-    cumulative_path_mask: torch.Tensor, center_vox: Tuple[int, int, int], radius_vox: int
+    cumulative_path_mask: torch.Tensor, center_vox: Tuple[int, int, int], radius_vox: int = 1
 ):
     """
     Draw a sphere in a mask at the specified location.
@@ -259,23 +259,18 @@ def draw_path_sphere(
     """
     z, y, x = center_vox
     shape = cumulative_path_mask.shape
-    radius_vox = max(0, radius_vox)
     for dz in range(-radius_vox, radius_vox + 1):
         current_z = z + dz
         if 0 <= current_z < shape[0]:
             slice_radius_sq = radius_vox**2 - dz**2
             if slice_radius_sq >= 0:
-                slice_radius = int(math.sqrt(slice_radius_sq))
-                try:
-                    rr, cc = disk((y, x), radius=slice_radius + 0.5, shape=(shape[1], shape[2]))
-                    rr = np.clip(rr, 0, shape[1] - 1)
-                    cc = np.clip(cc, 0, shape[2] - 1)
-                    if rr.size > 0 and cc.size > 0:
-                        cumulative_path_mask[current_z, rr, cc] = 1.0
-                except Exception:
-                    # Less verbose error handling
-                    if 0 <= y < shape[1] and 0 <= x < shape[2]:
-                        cumulative_path_mask[current_z, y, x] = 1.0
+                slice_radius = math.sqrt(slice_radius_sq)
+                rr, cc = disk((y, x), radius=slice_radius + 0.5, shape=(shape[1], shape[2]))
+                rr = np.clip(rr, 0, shape[1] - 1)
+                cc = np.clip(cc, 0, shape[2] - 1)
+                if rr.size > 0 and cc.size > 0:
+                    cumulative_path_mask[current_z, rr, cc] = 1.0
+
 
 
 def find_start_end(

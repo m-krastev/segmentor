@@ -32,16 +32,17 @@ class Config:
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.5
     patch_size_mm: int = 60
-    max_step_displacement_mm: float = 2.0  # Reduced default based on previous discussion
-    max_episode_steps: int = 800
+    max_step_displacement_mm: float = 12.0
+    max_episode_steps: int = 1024
     cumulative_path_radius_mm: float = 6.0
     wall_map_sigmas: Tuple[int, ...] = (1, 3)
 
     # --- Reward Hyperparameters ---
     # Typically a penalty related to the game mechanics, e.g. zero movement, crossing walls, out of segmentation, etc.
-    r_val1: float = 4.0
+    r_val1: float = 8.0
     # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
+    r_zero_mov: float = 400
     r_final: float = 100.0
     # Reward for passing through must-pass nodes?
     # r_must_pass: float = 0.0
@@ -51,9 +52,9 @@ class Config:
     num_episodes_per_sample: int = 16
     # Size of the buffer to store transitions
     frames_per_batch: int = 512
-    learning_rate: float = 1e-4
+    learning_rate: float = 3e-4
     batch_size: int = 128  # Size of mini-batch for PPO update
-    update_epochs: int = 5  # Number of PPO update epochs
+    update_epochs: int = 10  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
@@ -90,7 +91,7 @@ class Config:
             self.cumulative_path_radius_mm, self.voxel_size_mm
         )
         step_dist_gdt = self.max_step_displacement_mm / self.gdt_cell_length
-        self.gdt_max_increase_theta = max(0.0, math.sqrt(3) * (step_dist_gdt**2))
+        self.gdt_max_increase_theta = max(0.0, math.sqrt(3 * (step_dist_gdt**2)))
 
 
 def parse_args() -> Config:

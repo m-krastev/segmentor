@@ -74,7 +74,7 @@ def main():
 
     train_set = Subset(dataset, train_indices)
     val_set = Subset(dataset, val_indices)
-    print(f"Val indices: {val_indices}, subjects: {[obj['id'] for obj in dataset.subjects[val_indices]]}")
+    print(f"Val indices: {val_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in val_indices]}")
 
     print(f"Training: {len(train_set)} subjects, Validation: {len(val_set)} subjects.")
 
@@ -88,7 +88,7 @@ def main():
         assert config.load_from_checkpoint, "Checkpoint must be provided for evaluation."
 
         data = torch.load(config.load_from_checkpoint)
-        policy_module.load_state_dict(data["policy_state_dict"])
+        policy_module.load_state_dict(data["policy_module_state_dict"])
         validation_loop_torchrl(policy_module, config, val_set, config.device)
     else:
         train_torchrl(policy_module, value_module, config, train_set, val_set)

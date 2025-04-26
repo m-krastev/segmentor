@@ -98,14 +98,14 @@ def validation_loop_torchrl(
                 )
 
                 reward = rollout["next", "reward"].mean().item()
-                step_count = rollout["step_count"].max().item()
+                step_count = rollout["action"].shape[1]
                 final_coverage = val_env._get_final_coverage().item()
 
                 val_env.save_path()
 
             except Exception as e:
-                print(f"Exception raised: {e}")
                 reward, step_count, final_coverage = 0, 0, 0
+                raise e
             finally:
                 val_results["val_reward_sum"].append(reward)
                 val_results["val_length"].append(step_count)
@@ -281,7 +281,7 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
             avg_actor_loss = np.mean(actor_losses)
             avg_critic_loss = np.mean(critic_losses)
             avg_entropy_loss = np.mean(entropy_losses)
-
+            avg_reward = batch_data["next", "reward"].mean().item()
             # Log episode stats from collected batch_data
             log_data = {
                 "train/epoch": i,  # Or calculate epoch based on collected_frames
@@ -292,12 +292,14 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
                 "losses/entropy": avg_entropy_loss,
                 "losses/grad_norm": grad_norm.item(),
                 "charts/learning_rate": optimizer.param_groups[0]["lr"],
-                "train/reward": batch_data["next", "reward"].mean().item(),
+                "train/reward": avg_reward,
+                "train/action_0": batch_data["action"][:,0].mean().item(),
+                "train/action_1": batch_data["action"][:,1].mean().item(),
+                "train/action_2": batch_data["action"][:,2].mean().item(),
             }
 
             pbar.set_postfix({
-                # "R": f"{avg_ep_reward:.1f}",
-                # "L": f"{avg_ep_length:.0f}",
+                "R": f"{avg_reward:.1f}",
                 "loss_P": f"{avg_actor_loss:.2f}",
                 "loss_V": f"{avg_critic_loss:.2f}",
             })
