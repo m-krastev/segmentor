@@ -141,10 +141,8 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
         num_workers=getattr(config, "num_workers", 0),
     )
 
-    print("Policy Module:", policy_module)
-    print("Value Module:", value_module)
     print(
-        f"Total parameters: {sum(p.numel() for p in policy_module.parameters()) + sum(p.numel() for p in value_module.parameters())}"
+        f"Total trainable parameters: {sum(p.numel() for p in policy_module.parameters()) + sum(p.numel() for p in value_module.parameters())}"
     )
 
     # --- Collector ---
@@ -168,11 +166,11 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
     )
 
     # --- Replay Buffer ---
-    replay_buffer = TensorDictReplayBuffer(
-        storage=LazyTensorStorage(max_size=config.frames_per_batch, device=device),
-        sampler=SamplerWithoutReplacement(),
-        batch_size=config.batch_size,  # PPO minibatch size for sampling
-    )
+    # replay_buffer = TensorDictReplayBuffer(
+    #     storage=LazyTensorStorage(max_size=config.frames_per_batch, device=device),
+    #     sampler=SamplerWithoutReplacement(),
+    #     batch_size=config.batch_size,  # PPO minibatch size for sampling
+    # )
 
     # --- Loss Function ---
     loss_module = ClipPPOLoss(
@@ -191,7 +189,7 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
         gamma=config.gamma,
         lmbda=config.gae_lambda,
         value_network=value_module,  # Pass the value module instance
-        average_gae=True,
+        average_gae=False,
     )
 
     # --- Optimizer ---
@@ -241,13 +239,15 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
 
             # Add collected data to the replay buffer
             batch_data = batch_data.reshape(-1)
-            replay_buffer.extend(batch_data)
-            for _ in range(
-                config.frames_per_batch // config.batch_size
+            # replay_buffer.extend(batch_data)
+            for i in range(
+                0, config.frames_per_batch, config.batch_size
             ):  # Iterate over minibatches in the collected batch
-                minibatch = replay_buffer.sample()  # Sample a minibatch
-                minibatch = minibatch.squeeze(0)  # Remove batch dim
-                loss_dict = loss_module(minibatch)  # Calculate PPO losses
+                # minibatch = replay_buffer.sample()  # Sample a minibatch
+                # minibatch = minibatch.squeeze(0)  # Remove batch dim
+                # loss_dict = loss_module(minibatch)  # Calculate PPO losses
+                minibatch = batch_data[i : i + config.batch_size]
+                loss_dict = loss_module(minibatch)
 
                 # Sum losses
                 loss = (
@@ -284,15 +284,17 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
             avg_reward = batch_data["next", "reward"].mean().item()
             # Log episode stats from collected batch_data
             log_data = {
-                "train/epoch": i,  # Or calculate epoch based on collected_frames
-                "train/collected_frames": collected_frames,
-                "train/num_updates": num_updates,
+                # "train/epoch": i,  # Or calculate epoch based on collected_frames
+                # "train/collected_frames": collected_frames,
                 "losses/policy_loss": avg_actor_loss,
                 "losses/value_loss": avg_critic_loss,
                 "losses/entropy": avg_entropy_loss,
                 "losses/grad_norm": grad_norm.item(),
+                "losses/std": batch_data["scale"].mean(),
                 "charts/learning_rate": optimizer.param_groups[0]["lr"],
+                "train/num_updates": num_updates,
                 "train/reward": avg_reward,
+                "train/episode_len": batch_data["done"].float().mean().reciprocal().item(),
                 "train/action_0": batch_data["action"][:,0].mean().item(),
                 "train/action_1": batch_data["action"][:,1].mean().item(),
                 "train/action_2": batch_data["action"][:,2].mean().item(),

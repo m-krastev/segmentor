@@ -189,6 +189,7 @@ class SmallBowelEnv(EnvBase):
             gt_path=subject_data.get("gt_path"),  # Still optional
             spacing=subject_data.get("spacing"),
             image_affine=subject_data.get("image_affine"),
+            local_peaks=subject_data.get("local_peaks")
         )
 
         # Check if critical data was loaded successfully by update_data
@@ -211,6 +212,7 @@ class SmallBowelEnv(EnvBase):
         gt_path: Optional[np.ndarray] = None,
         spacing: Optional[Tuple[float, float, float]] = None,
         image_affine: Optional[np.ndarray] = None,
+        local_peaks: Optional[np.ndarray] = None,
         # Receive numpy versions if provided by dataset
     ):
         """
@@ -227,6 +229,8 @@ class SmallBowelEnv(EnvBase):
         self.wall_map = torch.from_numpy(wall_map).to(self.device)
         self.gdt_start = torch.from_numpy(gdt_start).to(self.device)
         self.gdt_end = torch.from_numpy(gdt_end).to(self.device)
+        self.reward_map = torch.zeros_like(self.seg)
+        self.reward_map[tuple(local_peaks.T)] = 1
 
         # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
@@ -349,7 +353,8 @@ class SmallBowelEnv(EnvBase):
 
         # --- 1. Zero movement or goes out of the image penalty ---
         if not any(action_vox) or not self._is_valid_pos(next_pos_vox):
-            return rt.fill_(-self.config.r_zero_mov)
+            rt -= self.config.r_zero_mov
+            return rt
 
         # --- 2. GDT-based reward ---
         next_gdt_val = self.gdt[next_pos_vox]
@@ -358,10 +363,16 @@ class SmallBowelEnv(EnvBase):
             delta = next_gdt_val - self.max_gdt_achieved
             # Penalty if too large
             if delta > self.config.gdt_max_increase_theta:
-                rt.fill_(-self.config.r_val2)
+                rt -= self.config.r_val2
             else:
-                rt.fill_(self.config.r_val2 * delta / self.config.gdt_max_increase_theta)
+                rt += self.config.r_val2 * delta / self.config.gdt_max_increase_theta
             self.max_gdt_achieved = next_gdt_val
+
+        # 2.5 Peaks-based reward
+        rt += self.reward_map[S].sum() * self.config.r_peaks
+        # Discard the reward for visited nodes
+        self.reward_map[S] = 0
+
         # --- 3. Wall-based penalty ---
         rt -= self.config.r_val2 * self.wall_map[S].mean()
 
@@ -475,7 +486,7 @@ class SmallBowelEnv(EnvBase):
         action_normalized = tensordict.get("action").squeeze(0)
 
         # Map Action
-        action_mapped = (action_normalized) * self.config.max_step_vox
+        action_mapped = (action_normalized)
         action_vox_delta = tuple(torch.round(action_mapped).int().cpu().tolist())
 
         # Execute Step Logic
@@ -528,7 +539,8 @@ class SmallBowelEnv(EnvBase):
             reward += (
                 (final_coverage * self.config.r_final)
                 if termination_reason == "reached_end"
-                else ((1-final_coverage) * self.config.r_final)
+                else 0.0
+                # else ((1-final_coverage) * self.config.r_final)
             )
 
 

@@ -21,7 +21,6 @@ try:
     from cucim.core.operations.morphology import (
         distance_transform_edt as _distance_transform_edt,
     )
-    from cucim.skimage.feature import peak_local_max as _peak_local_max
     from cucim.skimage.filters import (
         meijering as _meijering,
         gaussian as _gaussian,
@@ -74,6 +73,7 @@ try:
         return _label2rgb(labels, image, **kwargs).get()
 
     # Significantly slower than skimage's implementation
+    # from cucim.skimage.feature import peak_local_max as _peak_local_max
     # def peak_local_max(image, **kwargs):
     #     # Check if image is already a CuPy array
     #     if not isinstance(image, cupy.ndarray):

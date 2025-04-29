@@ -12,7 +12,9 @@ from segmentor.utils.medutils import load_and_normalize_nifti
 
 # Import necessary calculation functions
 from .utils import find_start_end, compute_wall_map, compute_gdt
-from .config import Config  # Example: Assuming Config holds wall_map_sigmas
+from .config import Config
+from skimage.feature import peak_local_max
+from cupyx.scipy.ndimage import grey_dilation, generate_binary_structure
 
 FILE_PATTERNS = {
     "ct": "ct.nii",
@@ -28,6 +30,7 @@ CACHE_FILES = {
     "wall_map": "wall_map.nii",
     "gdt_start": "gdt_start.nii",
     "gdt_end": "gdt_end.nii",
+    "local_peaks": "local_peaks.npy"
 }
 
 
@@ -134,6 +137,7 @@ class SmallBowelDataset(Dataset):
                 "spacing": data["spacing"],  # Keep spacing in (Z, Y, X) order
                 "start_coord": data["start_coord"],  # Keep as tuple/numpy
                 "end_coord": data["end_coord"],  # Keep as tuple/numpy
+                "local_peaks": data["local_peaks"],
             }
 
             return data
@@ -142,7 +146,7 @@ class SmallBowelDataset(Dataset):
             return [self[i] for i in range(*idx.indices(len(self)))]
 
 
-def load_subject_data(subject_data: Dict[str, Any], config: Config) -> Dict[str, Any]:
+def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> Dict[str, Any]:
     """
     Load data for a single subject, calculating and caching derived data if needed.
 
@@ -244,5 +248,17 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config) -> Dict[str,
         gdt_end_nii_save = nib.Nifti1Image(gdt_end_to_save, result["image_affine"])
         nib.save(gdt_end_nii_save, gdt_end_cache_path)
     result["gdt_end"] = gdt_end_np
+
+    local_peaks_cache_path = cache_dir / CACHE_FILES["local_peaks"]
+    if local_peaks_cache_path.exists():
+        local_peaks_np = np.load(local_peaks_cache_path)
+    else:
+        from .utils import distance_transform_edt, binary_dilation
+        distances = distance_transform_edt(
+            binary_dilation(result["seg"], iterations=3)
+        )
+        local_peaks_np = peak_local_max(distances, min_distance=6, threshold_abs=4, num_peaks=512)
+        np.save(local_peaks_cache_path, local_peaks_np)
+    result["local_peaks"] = local_peaks_np
 
     return result

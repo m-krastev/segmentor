@@ -17,7 +17,7 @@ from ..config import Config
 __all__ = ["ActorNetwork", "CriticNetwork", "create_ppo_modules"]
 
 # Define action spec constants
-ACTION_LOW = 0.0
+ACTION_LOW = 0
 ACTION_HIGH = 1.0
 ACTION_DIM = 3  # Assuming 3D action space based on previous context
 
@@ -47,8 +47,7 @@ def create_ppo_modules(config: Config, device: torch.device):
     # Actor Network Base
     actor_cnn_base = ActorNetwork(
         config=config,
-        input_channels=3,  # From environment spec["actor"]
-        # Ensure ActorNetwork outputs 2 * ACTION_DIM features for loc and scale
+        input_channels=3,
     ).to(device)
 
     # Wrap CNN base to extract "actor" obs and output "dist_params"
@@ -57,50 +56,58 @@ def create_ppo_modules(config: Config, device: torch.device):
         in_keys=["actor"],  # Input key from observation spec
         out_keys=["dist_params"],  # Intermediate output key
     )
-    normal_param_extractor_module = TensorDictModule(
-        module=NormalParamExtractor(),  # The nn.Module to wrap
-        in_keys=["dist_params"],  # Key containing the raw parameters
-        out_keys=["loc", "scale"],  # Keys for the split outputs
+
+    action_spec = Bounded(
+        low=-config.max_step_vox,
+        high=config.max_step_vox,
+        shape=torch.Size([ACTION_DIM]),  # Use constant ACTION_DIM
+        dtype=torch.float32,
+        device=device,
     )
-
-    # beta_param_extractor_module = TensorDictModule(
-    #     module=BetaParamExtractor("biased_softplus", bias=1, min_val=1.0001),  # The nn.Module to wrap
-    #     in_keys=["dist_params"],  # Key containing the raw parameters
-    #     out_keys=["concentration1", "concentration0"],  # Keys for the split outputs
-    #     # out_keys=["loc", "scale"],  # Keys for the split outputs
-    # )
-
-    # distribution_builder = lambda concentration1, concentration0: Independent(
-    #     Beta(concentration1=concentration1, concentration0=concentration0),
-    #     reinterpreted_batch_ndims=1
-    # )
 
     # Define the policy module using ProbabilisticActor
     policy_module = ProbabilisticActor(
         module=TensorDictSequential(
             actor_cnn_module,  # Outputs TD with "dist_params"
-            normal_param_extractor_module,
-            # beta_param_extractor_module,
+            TensorDictModule(
+                module=NormalParamExtractor(),  # The nn.Module to wrap
+                in_keys=["dist_params"],  # Key containing the raw parameters
+                out_keys=["loc", "scale"],  # Keys for the split outputs
+            ),
         ),
-        spec=Bounded(  # Action spec for the output distribution
-            low=ACTION_LOW,
-            high=ACTION_HIGH,
-            shape=torch.Size([ACTION_DIM]),  # Use constant ACTION_DIM
-            dtype=torch.float32,
-            device=device,  # Add device to spec
-        ),
+        spec=action_spec,
         in_keys=["loc", "scale"],  # Keys needed to create the distribution
-        # in_keys=["concentration1", "concentration0"],  # Keys needed to create the distribution
         out_keys=["action"],
         distribution_class=TanhNormal,
-        # distribution_class=distribution_builder,
+        distribution_kwargs=dict(low=-config.max_step_vox, high=config.max_step_vox),
         return_log_prob=True,
     ).to(device)
+    # policy_module = ProbabilisticActor(
+    #     module=TensorDictSequential(
+    #         actor_cnn_module,  # Outputs TD with "dist_params"
+    #         TensorDictModule(
+    #             module=BetaParamExtractor(
+    #                 "biased_softplus", bias=1, min_val=1.0001
+    #             ),  # The nn.Module to wrap
+    #             in_keys=["dist_params"],  # Key containing the raw parameters
+    #             out_keys=["concentration1", "concentration0"],  # Keys for the split outputs
+    #             # out_keys=["loc", "scale"],  # Keys for the split outputs
+    #         ),
+    #     ),
+    #     spec=action_spec,
+    #     in_keys=["concentration1", "concentration0"],
+    #     out_keys=["action"],
+    #     distribution_class=lambda concentration1, concentration0: Independent(
+    #         Beta(concentration1=concentration1, concentration0=concentration0),
+    #         reinterpreted_batch_ndims=1,
+    #     ),
+    #     return_log_prob=True,
+    # ).to(device)
 
     # Critic Network Base
     critic_base = CriticNetwork(
         config=config,
-        input_channels=4,  # From environment spec["critic"]
+        input_channels=4,
     ).to(device)
 
     # Wrap critic using ValueOperator
