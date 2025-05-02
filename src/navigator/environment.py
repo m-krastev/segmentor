@@ -27,8 +27,6 @@ from .utils import BinaryDilation3D, ClipTransform, compute_gdt, get_patch
 
 
 # Define action spec constants
-ACTION_LOW = -1.0
-ACTION_HIGH = 1.0
 ACTION_DIM = 3  # 3D movement delta
 
 
@@ -107,9 +105,9 @@ class SmallBowelEnv(EnvBase):
         )
         self.state_spec = self.observation_spec.clone()
         self.action_spec = BoundedContinuous(
-            low=ACTION_LOW,
-            high=ACTION_HIGH,
-            shape=torch.Size([*batch_size, ACTION_DIM]),  # B, ActionDim
+            low=-config.max_step_vox,
+            high=config.max_step_vox,
+            shape=torch.Size([*batch_size, 3]),  # B, ActionDim
             dtype=torch.float32,
             device=device,
         )
@@ -120,17 +118,17 @@ class SmallBowelEnv(EnvBase):
         )
         self.done_spec = Composite(
             done=Binary(
-                shape=torch.Size([*batch_size, 1]),  # boolean done state (0 or 1)
+                shape=torch.Size([*batch_size, 1]),
                 dtype=torch.bool,
                 device=device,
             ),
             terminated=Binary(
-                shape=torch.Size([*batch_size, 1]),  # boolean terminated state (0 or 1)
+                shape=torch.Size([*batch_size, 1]),
                 dtype=torch.bool,
                 device=device,
             ),
             truncated=Binary(
-                shape=torch.Size([*batch_size, 1]),  # boolean truncated state (0 or 1)
+                shape=torch.Size([*batch_size, 1]),
                 dtype=torch.bool,
                 device=device,
             ),
@@ -146,11 +144,15 @@ class SmallBowelEnv(EnvBase):
         # --- TorchRL Internal State Flags (per-batch element) ---
         self._is_done = torch.zeros(self.batch_size[0], 1, dtype=torch.bool, device=self.device)
 
-        self.transform = torch.compile(ClipTransform(-150, 250))
+        self.transform = ClipTransform(-150, 250).compile()
         self.zeros_patch = torch.zeros(self.config.patch_size_vox, device=self.device)
-        self.dilation = torch.compile(torch.nn.Sequential(*[
-            BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 3)
-        ]))
+        self.dilation = (
+            torch.nn.Sequential(*[
+                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 3)
+            ])
+            .compile()
+            .to(self.device)
+        )
 
     # --- Data Loading Method (Internal) ---
     def _load_next_subject(self) -> bool:
@@ -324,16 +326,12 @@ class SmallBowelEnv(EnvBase):
         """Calculate the reward for the current step."""
 
         rt = torch.tensor(0.0, device=self.device)
-        # Set of voxels S on the line segment (cache it)
+        # Set of voxels S on the line segment
         S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
 
-        # --- 1. Zero movement or goes out of the image penalty ---
-        if (
-            not any(action_vox)
-            or not self._is_valid_pos(next_pos_vox)
-            or not self.seg_np[next_pos_vox]
-        ):
-            rt -= self.config.r_zero_mov
+        # --- 1. Zero movement or goes out of the segmentation penalty ---
+        if not any(action_vox) or not self.seg_np[next_pos_vox]:
+            rt -= self.config.r_val1
             return rt, S
 
         # --- 2. GDT-based reward ---
@@ -346,7 +344,7 @@ class SmallBowelEnv(EnvBase):
                 rt -= self.config.r_val2
             else:
                 rt += self.config.r_val2 * delta / self.config.gdt_max_increase_theta
-            self.max_gdt_achieved = next_gdt_val
+            self.max_gdt_achieved.fill_(next_gdt_val)
 
         # 2.5 Peaks-based reward
         rt += self.reward_map[S].sum() * self.config.r_peaks
@@ -414,13 +412,15 @@ class SmallBowelEnv(EnvBase):
 
         # Draw initial path sphere
         self.cumulative_path_mask[self.current_pos_vox] = 1
-        self.cumulative_path_mask = self.dilation(self.cumulative_path_mask)
+        self.cumulative_path_mask = self.dilation(
+            self.cumulative_path_mask.unsqueeze(0).unsqueeze(0)
+        ).squeeze()
 
         self.tracking_path_history = [self.current_pos_vox]
 
         # Initialize current GDT value using the selected GDT
-        self.current_gdt_val = self.gdt[self.current_pos_vox]
-        self.max_gdt_achieved = self.current_gdt_val
+        self.current_gdt_val.fill_(self.gdt[self.current_pos_vox])
+        self.max_gdt_achieved.fill_(self.gdt[self.current_pos_vox])
 
         # --- Get Initial State Patches ---
         obs_dict = self._get_state_patches()  # Let it raise RuntimeError if patches fail
@@ -433,8 +433,8 @@ class SmallBowelEnv(EnvBase):
                 "actor": obs_dict["actor"].unsqueeze(0),  # Add batch dim
                 "critic": obs_dict["critic"].unsqueeze(0),  # Add batch dim
                 "done": self._is_done.clone(),
-                "terminated": self._is_done.clone(),  # False after reset
-                "truncated": torch.zeros_like(self._is_done),  # False after reset
+                "terminated": self._is_done.clone(),
+                "truncated": self._is_done.clone(),
             },
             batch_size=self.batch_size,
             device=self.device,
@@ -462,7 +462,7 @@ class SmallBowelEnv(EnvBase):
         )
 
         # Calculate reward (needs to be before moving to the next pos)
-        reward = self._calculate_reward(action_vox_delta, next_pos_vox)
+        reward, S = self._calculate_reward(action_vox_delta, next_pos_vox)
         self.current_pos_vox = next_pos_vox
 
         # Check validity and update cumulative path
@@ -471,11 +471,13 @@ class SmallBowelEnv(EnvBase):
         )
         if is_next_pos_valid_seg:
             self.cumulative_path_mask[self.current_pos_vox] = 1
-            self.cumulative_path_mask[self.S] = 1
-            self.cumulative_path_mask = self.dilation(self.cumulative_path_mask)
+            self.cumulative_path_mask[S] = 1
+            self.cumulative_path_mask = self.dilation(
+                self.cumulative_path_mask.unsqueeze(0).unsqueeze(0)
+            ).squeeze()
 
             self.tracking_path_history.append(self.current_pos_vox)
-            self.current_gdt_val = self.gdt[next_pos_vox]
+            self.current_gdt_val.fill_(self.gdt[next_pos_vox])
 
         # Check Termination Conditions
         done, terminated, truncated = False, False, False
@@ -483,11 +485,7 @@ class SmallBowelEnv(EnvBase):
         if self.current_step_count >= self.config.max_episode_steps:
             done, truncated, termination_reason = True, True, "max_steps"
         elif not is_next_pos_valid_seg:
-            done, terminated, termination_reason = (
-                True,
-                True,
-                "out_of_bounds_or_segmentation",
-            )
+            done, terminated, termination_reason = True, True, "out_of_bounds",
         elif dist(self.current_pos_vox, self.goal) < self.config.max_step_vox:
             done, terminated, termination_reason = True, True, "reached_goal"
 

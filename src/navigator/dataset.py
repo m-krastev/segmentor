@@ -14,7 +14,6 @@ from segmentor.utils.medutils import load_and_normalize_nifti
 from .utils import find_start_end, compute_wall_map, compute_gdt
 from .config import Config
 from skimage.feature import peak_local_max
-from cupyx.scipy.ndimage import grey_dilation, generate_binary_structure
 
 FILE_PATTERNS = {
     "ct": "ct.nii",

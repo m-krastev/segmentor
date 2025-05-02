@@ -16,7 +16,7 @@ except ImportError:
     print("Warning: wandb not found. Wandb tracking will be disabled.")
     wandb = None
 
-from .config import parse_args
+from .config import parse_args, Config
 from .dataset import SmallBowelDataset
 from .train import train_torchrl, validation_loop_torchrl
 from .models import create_ppo_modules
@@ -81,7 +81,7 @@ def main():
 
     # --- Models ---
     policy_module, value_module = create_ppo_modules(config, config.device)
-
+    torch.serialization.add_safe_globals([Config])
     # --- Start Training ---
     if config.eval_only:
         print("Evaluation mode: skipping training.")
@@ -91,6 +91,12 @@ def main():
         policy_module.load_state_dict(data["policy_module_state_dict"])
         validation_loop_torchrl(policy_module, config, val_set, config.device)
     else:
+        if config.load_from_checkpoint:
+            print(f"Loading data from {config.load_from_checkpoint}")
+            data = torch.load(config.load_from_checkpoint, weights_only=False)
+            policy_module.load_state_dict(data["policy_module_state_dict"])
+            value_module.load_state_dict(data["value_module_state_dict"])
+
         train_torchrl(policy_module, value_module, config, train_set, val_set)
     # try:
     #     train_torchrl(config, dataset)

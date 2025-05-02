@@ -93,7 +93,7 @@ class ActorNetwork(nn.Module):
 
         # Output alpha/beta parameters
         ab_params = self.fc_out(x)
-        # alpha_beta = F.softplus(ab_params, threshold=5) + 1.0  # Ensure alpha, beta > 1
+        ab_params = F.softplus(ab_params, threshold=5) + 1.0  # Ensure alpha, beta > 1
 
         return ab_params
 

@@ -8,7 +8,7 @@ from tensordict.nn.distributions import NormalParamExtractor
 from tensordict.nn.utils import biased_softplus
 from torchrl.modules import ProbabilisticActor, ValueOperator
 from torchrl.data import Bounded
-from torchrl.modules.distributions import TanhNormal  # Import TanhNormal directly
+from torchrl.modules.distributions import TanhNormal
 from torch.distributions import Beta, Independent
 from .actor import ActorNetwork
 from .critic import CriticNetwork
@@ -65,44 +65,42 @@ def create_ppo_modules(config: Config, device: torch.device):
         device=device,
     )
 
-    # Define the policy module using ProbabilisticActor
-    policy_module = ProbabilisticActor(
-        module=TensorDictSequential(
-            actor_cnn_module,  # Outputs TD with "dist_params"
-            TensorDictModule(
-                module=NormalParamExtractor(),  # The nn.Module to wrap
-                in_keys=["dist_params"],  # Key containing the raw parameters
-                out_keys=["loc", "scale"],  # Keys for the split outputs
-            ),
-        ),
-        spec=action_spec,
-        in_keys=["loc", "scale"],  # Keys needed to create the distribution
-        out_keys=["action"],
-        distribution_class=TanhNormal,
-        distribution_kwargs=dict(low=-config.max_step_vox, high=config.max_step_vox),
-        return_log_prob=True,
-    ).to(device)
+    # # Define the policy module using ProbabilisticActor
     # policy_module = ProbabilisticActor(
     #     module=TensorDictSequential(
     #         actor_cnn_module,  # Outputs TD with "dist_params"
     #         TensorDictModule(
-    #             module=BetaParamExtractor(
-    #                 "biased_softplus", bias=1, min_val=1.0001
-    #             ),  # The nn.Module to wrap
+    #             module=NormalParamExtractor(),  # The nn.Module to wrap
     #             in_keys=["dist_params"],  # Key containing the raw parameters
-    #             out_keys=["concentration1", "concentration0"],  # Keys for the split outputs
-    #             # out_keys=["loc", "scale"],  # Keys for the split outputs
+    #             out_keys=["loc", "scale"],  # Keys for the split outputs
     #         ),
     #     ),
     #     spec=action_spec,
-    #     in_keys=["concentration1", "concentration0"],
+    #     in_keys=["loc", "scale"],  # Keys needed to create the distribution
     #     out_keys=["action"],
-    #     distribution_class=lambda concentration1, concentration0: Independent(
-    #         Beta(concentration1=concentration1, concentration0=concentration0),
-    #         reinterpreted_batch_ndims=1,
-    #     ),
+    #     distribution_class=TanhNormal,
+    #     distribution_kwargs=dict(low=-config.max_step_vox, high=config.max_step_vox),
     #     return_log_prob=True,
     # ).to(device)
+    policy_module = ProbabilisticActor(
+        module=TensorDictSequential(
+            actor_cnn_module,  # Outputs TD with "dist_params"
+            TensorDictModule(
+                module=BetaParamExtractor(),  # The nn.Module to wrap
+                in_keys=["dist_params"],  # Key containing the raw parameters
+                out_keys=["concentration1", "concentration0"],  # Keys for the split outputs
+                # out_keys=["loc", "scale"],  # Keys for the split outputs
+            ),
+        ),
+        spec=action_spec,
+        in_keys=["concentration1", "concentration0"],
+        out_keys=["action"],
+        distribution_class=lambda concentration1, concentration0: Independent(
+            Beta(concentration1=concentration1, concentration0=concentration0),
+            reinterpreted_batch_ndims=1,
+        ),
+        return_log_prob=True,
+    ).to(device)
 
     # Critic Network Base
     critic_base = CriticNetwork(

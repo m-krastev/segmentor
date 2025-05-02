@@ -178,6 +178,7 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
         critic_network=value_module,
         clip_epsilon=config.clip_epsilon,
         entropy_coef=config.ent_coef,
+        # entropy_bonus=True,
         critic_coef=config.vf_coef,
         # value_loss_type="huber", # Or "mse"
         loss_critic_type="smooth_l1",  # TorchRL standard
@@ -189,19 +190,17 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
         gamma=config.gamma,
         lmbda=config.gae_lambda,
         value_network=value_module,  # Pass the value module instance
-        average_gae=False,
+        average_gae=True,
     )
 
     # --- Optimizer ---
-    optimizer = optim.AdamW(
+    optimizer = optim.Adam(
         policy_module.parameters(),
         lr=config.learning_rate,
-        eps=1e-4,  # PPO stability
     )
-    optimizer_critic = optim.AdamW(
+    optimizer_critic = optim.Adam(
         value_module.parameters(),
-        lr=config.learning_rate / 10,
-        eps=1e-4,  # PPO stability
+        lr=config.learning_rate,
     )
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
@@ -232,7 +231,7 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
         collected_frames += current_frames
 
         # --- PPO Update Phase ---
-        actor_losses, critic_losses, entropy_losses = [], [], []
+        actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
         for _ in range(config.update_epochs):
             # Computes advantages and value targets (returns) in-place
             adv_module(batch_data)
@@ -267,20 +266,22 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
                 optimizer.step()
                 optimizer_critic.step()
 
-                scheduler.step()
-                scheduler_c.step()
+                # scheduler.step()
+                # scheduler_c.step()
 
                 # Log losses for this minibatch update
-                actor_losses.append(loss_dict["loss_objective"].item())
-                critic_losses.append(loss_dict["loss_critic"].item())
-                entropy_losses.append(loss_dict["loss_entropy"].item())
+                actor_losses.append(loss_dict["loss_objective"])
+                critic_losses.append(loss_dict["loss_critic"])
+                entropy_losses.append(loss_dict["loss_entropy"])
+                kl_div.append(loss_dict["kl_approx"])
 
             num_updates += 1  # Count PPO update cycles
 
             # --- Logging ---
-            avg_actor_loss = np.mean(actor_losses)
-            avg_critic_loss = np.mean(critic_losses)
-            avg_entropy_loss = np.mean(entropy_losses)
+            avg_actor_loss = torch.mean(torch.cat(actor_losses)).item()
+            avg_critic_loss = torch.mean(torch.cat(critic_losses)).item()
+            avg_entropy_loss = torch.mean(torch.cat(entropy_losses)).item()
+            avg_kldiv = torch.mean(torch.cat(kl_div)).item()
             avg_reward = batch_data["next", "reward"].mean().item()
             # Log episode stats from collected batch_data
             log_data = {
@@ -289,15 +290,19 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
                 "losses/policy_loss": avg_actor_loss,
                 "losses/value_loss": avg_critic_loss,
                 "losses/entropy": avg_entropy_loss,
+                "losses/kl_div": avg_kldiv,
                 "losses/grad_norm": grad_norm.item(),
-                "losses/std": batch_data["scale"].mean(),
+                # "losses/std": batch_data["scale"].mean(),
+                "losses/concentration1": batch_data["concentration1"].mean(),
+                "losses/concentration0": batch_data["concentration0"].mean(),
+                "losses/dist_params_0": batch_data["dist_params"].mean().item(),
                 "charts/learning_rate": optimizer.param_groups[0]["lr"],
                 "train/num_updates": num_updates,
                 "train/reward": avg_reward,
-                "train/episode_len": batch_data["done"].float().mean().reciprocal().item(),
-                "train/action_0": batch_data["action"][:,0].mean().item(),
-                "train/action_1": batch_data["action"][:,1].mean().item(),
-                "train/action_2": batch_data["action"][:,2].mean().item(),
+                "train/episode_len": batch_data["done"].sum(),
+                "train/action_0": batch_data["action"][:,0].mean(),
+                "train/action_1": batch_data["action"][:,1].mean(),
+                "train/action_2": batch_data["action"][:,2].mean(),
             }
 
             pbar.set_postfix({
