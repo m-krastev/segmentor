@@ -35,12 +35,12 @@ class Config:
     max_step_displacement_mm: float = 9.0
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 1024
-    cumulative_path_radius_mm: float = 4.0
+    cumulative_path_radius_mm: float = 6.0
     wall_map_sigmas: Tuple[int, ...] = (1, 3)
 
     # --- Reward Hyperparameters ---
     # Typically a penalty related to the game mechanics, e.g. zero movement, crossing walls, out of segmentation, etc.
-    r_val1: float = 8.0
+    r_val1: float = 4.0
     # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
     r_zero_mov: float = 400
@@ -50,23 +50,23 @@ class Config:
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one
-    num_episodes_per_sample: int = 500_000
+    num_episodes_per_sample: int = 32_768
     total_timesteps: int = 10_000_000
     # Size of the buffer to store transitions
     frames_per_batch: int = 512
     learning_rate: float = 3e-5
-    batch_size: int = 64  # Size of mini-batch for PPO update
+    batch_size: int = 128  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
     # Entropy coefficient for exploration (higher values encourage exploration)
-    ent_coef: float = 0.003
+    ent_coef: float = 0.001
     # Value function coefficient (higher values encourage accurate value estimates)
     vf_coef: float = 0.5
 
     max_grad_norm: float = 0.5
-    eval_interval: int = 16384  # Interval for evaluation
+    eval_interval: int = 1000  # Interval for evaluation
     save_freq: int = 1000  # Frequency to save model checkpoints
     metric_to_optimize: str = "validation/avg_coverage"
 
@@ -92,7 +92,7 @@ class Config:
         self.cumulative_path_radius_vox = mm_to_vox(
             self.cumulative_path_radius_mm, self.voxel_size_mm
         )
-        step_dist_gdt = self.max_step_displacement_mm / self.gdt_cell_length
+        step_dist_gdt = self.max_step_displacement_mm // self.gdt_cell_length
         self.gdt_max_increase_theta = max(0.0, math.sqrt(3 * (step_dist_gdt**2)))
 
 

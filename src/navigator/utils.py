@@ -72,9 +72,9 @@ try:
     def label2rgb(labels, image, **kwargs):
         # Check if image is already a CuPy array
         if not isinstance(labels, cupy.ndarray):
-            labels = cupy.array(labels, dtype=cupy.int32)
+            labels = cupy.asarray(labels, dtype=cupy.int32)
         if not isinstance(image, cupy.ndarray):
-            image = cupy.array(image, dtype=cupy.float32)
+            image = cupy.asarray(image, dtype=cupy.float32)
         return _label2rgb(labels, image, **kwargs).get()
 
     # Significantly slower than skimage's implementation
@@ -92,13 +92,13 @@ try:
     logging.info("CuCIM/CuPy installed. Using GPU for graphics heavy operations.")
 
 except ImportError:
-    logging.error("CuCIM/CuPy not installed. Please install it to enable GPU acceleration.")
+    logging.warning("CuCIM/CuPy not installed. Please install it to enable GPU acceleration.")
     try:
         from edt import edt as distance_transform_edt
 
         logging.info("EDT installed. Using CPU for distance transform.")
     except ImportError:
-        logging.error(
+        logging.warning(
             "EDT not installed. Please install it to enable fast distance transform: `pip install edt`."
         )
 

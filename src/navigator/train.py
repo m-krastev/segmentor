@@ -118,7 +118,6 @@ def validation_loop_torchrl(
         "validation/avg_reward": np.mean(val_results["val_reward_sum"]),
         "validation/avg_length": np.mean(val_results["val_length"]),
         "validation/avg_coverage": np.mean(val_results["val_coverage"]),
-        "validation/num_subjects": num_val_subjects,
     }
 
     print(
@@ -219,8 +218,7 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
     # --- Training Loop ---
     print(f"Starting training for {total_timesteps} total steps...")
     pbar = tqdm(total=total_timesteps)
-    collected_frames = 0
-    num_updates = 0
+    collected_frames, num_updates = 0, 0
     # Use a specific metric like coverage or reward
     best_val_metric = float("-inf")
 
@@ -239,9 +237,8 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
             # Add collected data to the replay buffer
             batch_data = batch_data.reshape(-1)
             # replay_buffer.extend(batch_data)
-            for i in range(
-                0, config.frames_per_batch, config.batch_size
-            ):  # Iterate over minibatches in the collected batch
+            for _ in range(0, config.frames_per_batch, config.batch_size):
+                # Iterate over minibatches in the collected batch
                 # minibatch = replay_buffer.sample()  # Sample a minibatch
                 # minibatch = minibatch.squeeze(0)  # Remove batch dim
                 # loss_dict = loss_module(minibatch)  # Calculate PPO losses
@@ -275,44 +272,44 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
                 entropy_losses.append(loss_dict["loss_entropy"])
                 kl_div.append(loss_dict["kl_approx"])
 
-            num_updates += 1  # Count PPO update cycles
+        num_updates += 1  # Count PPO update cycles
 
-            # --- Logging ---
-            avg_actor_loss = torch.mean(torch.cat(actor_losses)).item()
-            avg_critic_loss = torch.mean(torch.cat(critic_losses)).item()
-            avg_entropy_loss = torch.mean(torch.cat(entropy_losses)).item()
-            avg_kldiv = torch.mean(torch.cat(kl_div)).item()
-            avg_reward = batch_data["next", "reward"].mean().item()
-            # Log episode stats from collected batch_data
-            log_data = {
-                # "train/epoch": i,  # Or calculate epoch based on collected_frames
-                # "train/collected_frames": collected_frames,
-                "losses/policy_loss": avg_actor_loss,
-                "losses/value_loss": avg_critic_loss,
-                "losses/entropy": avg_entropy_loss,
-                "losses/kl_div": avg_kldiv,
-                "losses/grad_norm": grad_norm.item(),
-                # "losses/std": batch_data["scale"].mean(),
-                "losses/concentration1": batch_data["concentration1"].mean(),
-                "losses/concentration0": batch_data["concentration0"].mean(),
-                "losses/dist_params_0": batch_data["dist_params"].mean().item(),
-                "charts/learning_rate": optimizer.param_groups[0]["lr"],
-                "train/num_updates": num_updates,
-                "train/reward": avg_reward,
-                "train/episode_len": batch_data["done"].sum(),
-                "train/action_0": batch_data["action"][:,0].mean(),
-                "train/action_1": batch_data["action"][:,1].mean(),
-                "train/action_2": batch_data["action"][:,2].mean(),
-            }
+        # --- Logging ---
+        avg_actor_loss = torch.stack(actor_losses).mean().item()
+        avg_critic_loss = torch.stack(critic_losses).mean().item()
+        avg_entropy_loss = torch.stack(entropy_losses).mean().item()
+        avg_kldiv = torch.stack(kl_div).mean().item()
+        avg_reward = batch_data["next", "reward"].mean().item()
+        # Log episode stats from collected batch_data
+        log_data = {
+            # "train/epoch": i,  # Or calculate epoch based on collected_frames
+            # "train/collected_frames": collected_frames,
+            "losses/policy_loss": avg_actor_loss,
+            "losses/value_loss": avg_critic_loss,
+            "losses/entropy": avg_entropy_loss,
+            "losses/kl_div": avg_kldiv,
+            "losses/grad_norm": grad_norm.item(),
+            # "losses/std": batch_data["scale"].mean(),
+            "losses/concentration1": batch_data["concentration1"].mean(),
+            "losses/concentration0": batch_data["concentration0"].mean(),
+            "charts/learning_rate": optimizer.param_groups[0]["lr"],
+            "charts/max_gdt_achieved": collector.env.max_gdt_achieved.item(),
+            "train/num_updates": num_updates,
+            "train/reward": avg_reward,
+            "train/episode_len": batch_data["done"].sum(),
+            "train/action_0": batch_data["action"][:,0].mean(),
+            "train/action_1": batch_data["action"][:,1].mean(),
+            "train/action_2": batch_data["action"][:,2].mean(),
+        }
 
-            pbar.set_postfix({
-                "R": f"{avg_reward:.1f}",
-                "loss_P": f"{avg_actor_loss:.2f}",
-                "loss_V": f"{avg_critic_loss:.2f}",
-            })
+        pbar.set_postfix({
+            "R": f"{avg_reward:.1f}",
+            "loss_P": f"{avg_actor_loss:.2f}",
+            "loss_V": f"{avg_critic_loss:.2f}",
+        })
 
-            if config.track_wandb and wandb is not None:
-                log_wandb(log_data, step=collected_frames)
+        if config.track_wandb and wandb is not None:
+            log_wandb(log_data, step=collected_frames)
 
         # --- Validation and Checkpointing (Periodically) ---
         # Use num_updates or collected_frames to trigger validation/saving
