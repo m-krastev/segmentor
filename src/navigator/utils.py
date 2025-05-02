@@ -2,18 +2,19 @@
 Utility functions for the Navigator system.
 """
 
+import logging
+import math
+from typing import Tuple, Union
+
 import numpy as np
+import skfmm
 import torch
 import torch.nn.functional as F
-import math
-from skimage.filters import meijering
-from skimage.draw import disk
-from typing import Tuple
-import logging
-import skfmm
 from scipy.ndimage import binary_dilation
+from skimage.draw import disk
+from skimage.filters import meijering
+from torch import nn
 # import FastGeodis as fg
-
 
 
 try:
@@ -21,13 +22,17 @@ try:
     from cucim.core.operations.morphology import (
         distance_transform_edt as _distance_transform_edt,
     )
+    from cucim.skimage.color import label2rgb as _label2rgb
     from cucim.skimage.filters import (
-        meijering as _meijering,
         gaussian as _gaussian,
+    )
+    from cucim.skimage.filters import (
         median as _median,
     )
+    from cucim.skimage.filters import (
+        meijering as _meijering,
+    )
     from cucim.skimage.morphology import binary_dilation as _binary_dilation
-    from cucim.skimage.color import label2rgb as _label2rgb
 
     def distance_transform_edt(image, **kwargs):
         # Check if image is already a CuPy array
@@ -106,6 +111,7 @@ def seed_everything(seed: int = 42):
         seed: Seed value to set
     """
     import random
+
     import numpy as np
     import torch
 
@@ -185,7 +191,9 @@ def get_patch(
 
 
 def compute_gdt(
-    segmentation_mask: np.ndarray, start_voxel: Tuple[int, int, int], voxel_size: float | list[float] = 1.
+    segmentation_mask: np.ndarray,
+    start_voxel: Tuple[int, int, int],
+    voxel_size: float | list[float] = 1.0,
 ) -> np.ndarray:
     """
     Compute a Geodesic Distance Transform from a start voxel through a segmentation mask.
@@ -215,8 +223,6 @@ def compute_gdt(
     return gdt
 
 
-
-
 # def compute_gdt(
 #     image: np.ndarray, start: Tuple[int, int, int], spacing: Tuple[float, ...] = None, device="cuda"
 # ):
@@ -231,7 +237,9 @@ def compute_gdt(
 #     return geodesic_dist.squeeze().cpu().numpy()
 
 
-def compute_wall_map(image: np.ndarray, sigmas: list[int] = (1, 3), black_ridges=True, **kwargs) -> np.ndarray:
+def compute_wall_map(
+    image: np.ndarray, sigmas: list[int] = (1, 3), black_ridges=True, **kwargs
+) -> np.ndarray:
     """
     Compute a wall map highlighting vessel-like structures in the image.
 
@@ -270,7 +278,6 @@ def draw_path_sphere(
                 cc = np.clip(cc, 0, shape[2] - 1)
                 if rr.size > 0 and cc.size > 0:
                     cumulative_path_mask[current_z, rr, cc] = 1.0
-
 
 
 def find_start_end(
@@ -412,3 +419,111 @@ def find_start_end(
     final_end_coord = tuple(sb_coords_zyx[nearest_end_idx].astype(int))
 
     return final_start_coord, final_end_coord
+
+
+class ClipTransform(torch.nn.Module):
+    def __init__(self, _min=-1, _max=1):
+        super().__init__()
+        self.min = _min
+        self.max = _max
+
+    def forward(self, x):
+        return (torch.clamp(x, self.min, self.max) - self.min) / (self.max - self.min)
+
+
+class BinaryDilation3D(nn.Module):
+    """
+    Performs 3D binary morphological dilation using convolution with a
+    pre-defined structuring element kernel, leveraging broadcasting.
+
+    The structuring element shape is chosen during initialization.
+
+    Args:
+        kernel_shape (str): The shape of the structuring element.
+                            Currently supports:
+                            - "star" (default): A 3x3x3 kernel with 1s at the center and
+                                      face-connected neighbors (3D cross).
+                            - "cube": A cubic kernel of ones. Requires kernel_size.
+        kernel_size (Union[int, Tuple[int, int, int]], optional): The size of the
+                      cubic or cuboid structuring element if kernel_shape is "cube".
+                      If int, uses a cubic kernel (k, k, k). If tuple (kD, kH, kW),
+                      uses a cuboid kernel. Required if kernel_shape is "cube".
+                      Defaults to None.
+    """
+
+    def __init__(
+        self, kernel_shape: str = "star", kernel_size: Union[int, Tuple[int, int, int], None] = None
+    ):
+        super().__init__()
+        self.kernel_shape = kernel_shape.lower()
+        self.kernel_size = kernel_size
+
+        # Define the kernel based on the chosen shape.
+        # Kernel shape for broadcasting with groups=C should be (1, 1, kD, kH, kW)
+        # The first '1' is for the output channel dimension (will be broadcast to C)
+        # The second '1' is for the in_channels/groups dimension when groups=C
+
+        if self.kernel_shape == "star":
+            # Base 3x3x3 kernel for the spatial dimensions
+            kernel = torch.zeros(1, 1, 3, 3, 3, dtype=torch.float)
+            kernel[0, 0, 1, 1, 1] = 1.0  # Center
+            kernel[0, 0, 0, 1, 1] = 1.0  # Down (Z-axis)
+            kernel[0, 0, 2, 1, 1] = 1.0  # Up (Z-axis)
+            kernel[0, 0, 1, 0, 1] = 1.0  # Left (Y-axis)
+            kernel[0, 0, 1, 2, 1] = 1.0  # Right (Y-axis)
+            kernel[0, 0, 1, 1, 0] = 1.0  # Backward (X-axis)
+            kernel[0, 0, 1, 1, 2] = 1.0  # Forward (X-axis)
+            self.padding = (1, 1, 1)  # Padding for a 3x3x3 kernel
+
+        elif self.kernel_shape == "cube":
+            if self.kernel_size is None:
+                raise ValueError("kernel_size must be provided for 'cube' kernel_shape")
+
+            if isinstance(self.kernel_size, int):
+                k_d = k_h = k_w = self.kernel_size
+                self.padding = (k_d - 1) // 2
+            elif isinstance(self.kernel_size, tuple) and len(self.kernel_size) == 3:
+                k_d, k_h, k_w = self.kernel_size
+                self.padding = ((k_d - 1) // 2, (k_h - 1) // 2, (k_w - 1) // 2)
+            else:
+                raise ValueError(
+                    "kernel_size must be an int or a tuple of three ints for 'cube' kernel_shape"
+                )
+
+            # Base kernel for the spatial dimensions
+            kernel = torch.ones(1, 1, k_d, k_h, k_w, dtype=torch.float32)
+
+        else:
+            raise ValueError(
+                f"Unsupported kernel_shape: {kernel_shape}. Supported shapes: 'star', 'cube'"
+            )
+
+        # Register the kernel as a buffer. It has shape (1, 1, kD, kH, kW)
+        # and will be broadcast to (C, 1, kD, kH, kW) by F.conv3d when groups=C.
+        self.register_buffer("dilation_kernel", kernel)
+
+    def forward(self, binary_volume: torch.Tensor) -> torch.Tensor:
+        """
+        Applies 3D binary dilation to the input volume.
+
+        Args:
+            binary_volume (torch.Tensor): A binary tensor (0s and 1s, or booleans)
+                                          of shape (B, C, D, H, W).
+
+        Returns:
+            torch.Tensor: The dilated binary tensor (float 0.0 or 1.0).
+        """
+        # Ensure input is float for convolution operation
+        if not torch.is_floating_point(binary_volume):
+            binary_volume = binary_volume.float()
+
+        # The dilation_kernel (shape 1, 1, kD, kH, kW) will be broadcast by F.conv3d
+        dilated_volume_sum = F.conv3d(
+            binary_volume, self.dilation_kernel, padding=self.padding, groups=binary_volume.size(1)
+        )
+
+        # Threshold the result: any sum > 0 means there was at least one '1' under the kernel
+        # Convert the boolean result back to float (0.0 or 1.0)
+        dilated_volume = (dilated_volume_sum > 0).float()
+
+        return dilated_volume
