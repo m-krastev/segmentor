@@ -40,17 +40,17 @@ class Config:
 
     # --- Reward Hyperparameters ---
     # Typically a penalty related to the game mechanics, e.g. zero movement, crossing walls, out of segmentation, etc.
-    r_val1: float = 4.0
+    r_val1: float = 12.0
     # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
     r_zero_mov: float = 400
     r_final: float = 100.0
     # Reward for passing through must-pass nodes?
-    r_peaks: float = 8.0
+    r_peaks: float = 16.0
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one
-    num_episodes_per_sample: int = 32_768
+    num_episodes_per_sample: int = 3_332_768
     total_timesteps: int = 10_000_000
     # Size of the buffer to store transitions
     frames_per_batch: int = 512
@@ -65,7 +65,7 @@ class Config:
     # Value function coefficient (higher values encourage accurate value estimates)
     vf_coef: float = 0.5
 
-    max_grad_norm: float = 0.5
+    max_grad_norm: float = 0.25
     eval_interval: int = 1000  # Interval for evaluation
     save_freq: int = 1000  # Frequency to save model checkpoints
     metric_to_optimize: str = "validation/avg_coverage"
@@ -92,8 +92,7 @@ class Config:
         self.cumulative_path_radius_vox = mm_to_vox(
             self.cumulative_path_radius_mm, self.voxel_size_mm
         )
-        step_dist_gdt = self.max_step_displacement_mm // self.gdt_cell_length
-        self.gdt_max_increase_theta = max(0.0, math.sqrt(3 * (step_dist_gdt**2)))
+        self.gdt_max_increase_theta = max(0.0, self.max_step_displacement_mm * 10 * math.sqrt(3))
 
 
 def parse_args() -> Config:

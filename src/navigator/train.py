@@ -128,12 +128,20 @@ def validation_loop_torchrl(
 
 
 # --- Main Training Function ---
-def train_torchrl(policy_module, value_module, config: Config, train_set: SmallBowelDataset, val_set: SmallBowelDataset, device: torch.device = None):
+def train_torchrl(
+    policy_module,
+    value_module,
+    config: Config,
+    train_set: SmallBowelDataset,
+    val_set: SmallBowelDataset,
+    device: torch.device = None,
+):
     """Main PPO training loop using TorchRL."""
     # --- Setup ---
     total_timesteps = getattr(config, "total_timesteps", 1_000_000)
     device = device or torch.device(config.device)
-    
+    batch_size = getattr(config, "batch_size", 32)
+
     train_iterator = SubjectIterator(
         train_set,
         shuffle=config.shuffle_dataset,
@@ -168,7 +176,7 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
     # replay_buffer = TensorDictReplayBuffer(
     #     storage=LazyTensorStorage(max_size=config.frames_per_batch, device=device),
     #     sampler=SamplerWithoutReplacement(),
-    #     batch_size=config.batch_size,  # PPO minibatch size for sampling
+    #     batch_size=batch_size,  # PPO minibatch size for sampling
     # )
 
     # --- Loss Function ---
@@ -204,14 +212,12 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_max=(
-            total_timesteps * config.update_epochs // config.batch_size
-        ), 
+        T_max=(total_timesteps * config.update_epochs // batch_size),
         eta_min=1e-6,
     )
     scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
         optimizer_critic,
-        T_max=(total_timesteps * config.update_epochs // config.batch_size), 
+        T_max=(total_timesteps * config.update_epochs // batch_size),
         eta_min=1e-6,
     )
 
@@ -231,18 +237,18 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
         # --- PPO Update Phase ---
         actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
         for _ in range(config.update_epochs):
+            batch_data = batch_data.reshape(-1)
             # Computes advantages and value targets (returns) in-place
             adv_module(batch_data)
 
             # Add collected data to the replay buffer
-            batch_data = batch_data.reshape(-1)
             # replay_buffer.extend(batch_data)
-            for _ in range(0, config.frames_per_batch, config.batch_size):
+            for _ in range(0, config.frames_per_batch, batch_size):
                 # Iterate over minibatches in the collected batch
                 # minibatch = replay_buffer.sample()  # Sample a minibatch
                 # minibatch = minibatch.squeeze(0)  # Remove batch dim
                 # loss_dict = loss_module(minibatch)  # Calculate PPO losses
-                minibatch = batch_data[i : i + config.batch_size]
+                minibatch = batch_data[i: i + batch_size]
                 loss_dict = loss_module(minibatch)
 
                 # Sum losses
@@ -281,9 +287,13 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
         avg_kldiv = torch.stack(kl_div).mean().item()
         avg_reward = batch_data["next", "reward"].mean().item()
         # Log episode stats from collected batch_data
+        final_coverage = batch_data["next", "final_coverage"]
+        final_coverage = final_coverage[final_coverage.nonzero()].mean()
+        ep_len = batch_data["next", "final_step_count"]
+        ep_len = ep_len[ep_len.nonzero()].float().mean()
+        total_reward = batch_data["next", "total_reward"]
+        total_reward = total_reward[total_reward.nonzero()].mean()
         log_data = {
-            # "train/epoch": i,  # Or calculate epoch based on collected_frames
-            # "train/collected_frames": collected_frames,
             "losses/policy_loss": avg_actor_loss,
             "losses/value_loss": avg_critic_loss,
             "losses/entropy": avg_entropy_loss,
@@ -293,20 +303,28 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
             "losses/concentration1": batch_data["concentration1"].mean(),
             "losses/concentration0": batch_data["concentration0"].mean(),
             "charts/learning_rate": optimizer.param_groups[0]["lr"],
-            "charts/max_gdt_achieved": collector.env.max_gdt_achieved.item(),
+            "charts/max_gdt_achieved": batch_data["next", "max_gdt_achieved"].mean(),
             "train/num_updates": num_updates,
             "train/reward": avg_reward,
-            "train/episode_len": batch_data["done"].sum(),
-            "train/action_0": batch_data["action"][:,0].mean(),
-            "train/action_1": batch_data["action"][:,1].mean(),
-            "train/action_2": batch_data["action"][:,2].mean(),
+            "train/episode_len": ep_len,
+            "train/final_coverage": final_coverage,
+            "train/total_reward": total_reward,
+            "train/action_0": batch_data["action"][:, 0].mean(),
+            "train/action_1": batch_data["action"][:, 1].mean(),
+            "train/action_2": batch_data["action"][:, 2].mean(),
+            "train/action_0_std": batch_data["action"][:, 0].std(),
+            "train/action_1_std": batch_data["action"][:, 1].std(),
+            "train/action_2_std": batch_data["action"][:, 2].std(),
         }
 
-        pbar.set_postfix({
-            "R": f"{avg_reward:.1f}",
-            "loss_P": f"{avg_actor_loss:.2f}",
-            "loss_V": f"{avg_critic_loss:.2f}",
-        })
+        pbar.set_postfix(
+            {
+                "R": f"{avg_reward:.1f}",
+                "Cov": f"{final_coverage:.1f}",
+                "loss_P": f"{avg_actor_loss:.2f}",
+                "loss_V": f"{avg_critic_loss:.2f}",
+            }
+        )
 
         if config.track_wandb and wandb is not None:
             log_wandb(log_data, step=collected_frames)
@@ -335,7 +353,8 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
                 print(
                     f"  New best validation metric ({config.metric_to_optimize}): {best_val_metric:.4f}"
                 )
-                best_model_path = os.path.join(config.checkpoint_dir, "best_model_torchrl.pth")
+                best_model_path = os.path.join(
+                    config.checkpoint_dir, "best_model_torchrl.pth")
                 save_dict = {
                     # Save TorchRL modules' state_dicts
                     "policy_module_state_dict": policy_module.state_dict(),
@@ -370,7 +389,8 @@ def train_torchrl(policy_module, value_module, config: Config, train_set: SmallB
     collector.shutdown()  # Clean up collector resources
     print("Training finished.")
     # Final save?
-    final_model_path = os.path.join(config.checkpoint_dir, "final_model_torchrl.pth")
+    final_model_path = os.path.join(
+        config.checkpoint_dir, "final_model_torchrl.pth")
     # save_dict = {...}  # Same structure as checkpoints
     torch.save(save_dict, final_model_path)
     print(f"Final model saved to {final_model_path}")

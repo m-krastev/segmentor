@@ -7,7 +7,7 @@ import traceback
 import torch
 from torch.utils.data import Subset
 import numpy as np
-
+from tensordict import TensorDict
 
 # Try importing wandb, handle if not available
 try:
@@ -74,13 +74,25 @@ def main():
 
     train_set = Subset(dataset, train_indices)
     val_set = Subset(dataset, val_indices)
-    print(f"Val indices: {val_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in val_indices]}")
-
-    print(f"Training: {len(train_set)} subjects, Validation: {len(val_set)} subjects.")
-
+    print(f"Train indices\t({train_size:0>2}/{len(dataset)}): {train_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in train_indices]}")
+    print(f"Val indices \t({len(dataset)-train_size:0>2}/{len(dataset)}): {val_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in val_indices]}")
 
     # --- Models ---
     policy_module, value_module = create_ppo_modules(config, config.device)
+
+    # Init the lazy modules
+    with torch.no_grad():
+        dummy_input = TensorDict(
+            {
+                "actor": torch.zeros(1, 3, *config.patch_size_vox, device=config.device),
+                "critic": torch.zeros(1, 3, *config.patch_size_vox, device=config.device),
+            },
+        )
+        policy_module(dummy_input)
+        value_module(dummy_input)
+    
+    # policy_module.compile()
+    # value_module.compile()
     torch.serialization.add_safe_globals([Config])
     # --- Start Training ---
     if config.eval_only:
