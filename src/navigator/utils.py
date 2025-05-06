@@ -280,6 +280,32 @@ def draw_path_sphere(
                     cumulative_path_mask[current_z, rr, cc] = 1.0
 
 
+def draw_path_sphere_2(
+    cumulative_path_mask: torch.Tensor,
+    voxels: tuple[tuple],
+    dilation_module: nn.Module,
+    zero_buffer: torch.Tensor = None,
+):
+    """
+    Draw and dilate a sphere in a mask at the specified location.
+
+    Args:
+        cumulative_path_mask: Tensor to modify
+        voxels: List of voxel coordinates to draw (should be indexable)
+        dilation_module: Dilation module to use for dilation
+        zero_buffer: Optional buffer for dilation
+    """
+    zero_buffer = (
+        zero_buffer.zero_() if zero_buffer is not None else torch.zeros_like(cumulative_path_mask)
+    )
+
+    zero_buffer[voxels] = 1.0
+    zero_buffer = zero_buffer.unsqueeze(0).unsqueeze(0)
+    zero_buffer = dilation_module(zero_buffer)
+    zero_buffer = zero_buffer.squeeze(0).squeeze(0)
+    cumulative_path_mask = torch.maximum(cumulative_path_mask, zero_buffer)
+    return cumulative_path_mask
+
 def find_start_end(
     duodenum_volume: np.ndarray, colon_volume: np.ndarray, small_bowel_volume: np.ndarray
 ) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:

@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 # TorchRL components
 from torchrl.collectors import SyncDataCollector
 from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage, SamplerWithoutReplacement
-from torchrl.objectives import ClipPPOLoss
+from torchrl.objectives import ClipPPOLoss, KLPENPPOLoss
 from torchrl.objectives.value import GAE
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 
@@ -81,7 +81,7 @@ def validation_loop_torchrl(
     )  # No shuffle for validation
     # Create a validation environment instance
     # Pass the validation iterator to this env instance
-    val_env = make_sb_env(config, val_iterator, device, 1)
+    val_env = make_sb_env(config, val_iterator, device, 1, check_env=False)
 
     num_val_subjects = len(val_dataset)
 
@@ -156,7 +156,7 @@ def train_torchrl(
     # Collects data by interacting policy_module with environment instances
     collector = SyncDataCollector(
         create_env_fn=lambda: make_sb_env(
-            config, train_iterator, device, num_episodes_per_sample=config.num_episodes_per_sample
+            config, train_iterator, device, num_episodes_per_sample=config.num_episodes_per_sample, check_env=False
         ),  # Function to create environments
         policy=policy_module,  # Policy module to use for action selection
         # Total frames (steps) to collect in training
@@ -180,15 +180,15 @@ def train_torchrl(
     # )
 
     # --- Loss Function ---
-    loss_module = ClipPPOLoss(
+    loss_module = KLPENPPOLoss(
         actor_network=policy_module,
         critic_network=value_module,
         clip_epsilon=config.clip_epsilon,
         entropy_coef=config.ent_coef,
         # entropy_bonus=True,
         critic_coef=config.vf_coef,
-        # value_loss_type="huber", # Or "mse"
         loss_critic_type="smooth_l1",  # TorchRL standard
+        # value_loss_type="huber", # Or "mse"
         normalize_advantage=True,  # Recommended for PPO
     )
 
@@ -197,12 +197,13 @@ def train_torchrl(
         gamma=config.gamma,
         lmbda=config.gae_lambda,
         value_network=value_module,  # Pass the value module instance
-        average_gae=True,
+        average_gae=False,
     )
 
     # --- Optimizer ---
     optimizer = optim.Adam(
-        policy_module.parameters(),
+        # policy_module.parameters(),
+        loss_module.parameters(),
         lr=config.learning_rate,
     )
     optimizer_critic = optim.Adam(
@@ -240,15 +241,15 @@ def train_torchrl(
             batch_data = batch_data.reshape(-1)
             # Computes advantages and value targets (returns) in-place
             adv_module(batch_data)
-
             # Add collected data to the replay buffer
             # replay_buffer.extend(batch_data)
-            for _ in range(0, config.frames_per_batch, batch_size):
+
+            for j in range(0, config.frames_per_batch, batch_size):
                 # Iterate over minibatches in the collected batch
                 # minibatch = replay_buffer.sample()  # Sample a minibatch
                 # minibatch = minibatch.squeeze(0)  # Remove batch dim
                 # loss_dict = loss_module(minibatch)  # Calculate PPO losses
-                minibatch = batch_data[i: i + batch_size]
+                minibatch = batch_data[j: j + batch_size]
                 loss_dict = loss_module(minibatch)
 
                 # Sum losses
@@ -259,18 +260,16 @@ def train_torchrl(
                 )
 
                 # Optimization step
-                optimizer.zero_grad()
-                optimizer_critic.zero_grad()
 
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     loss_module.parameters(), config.max_grad_norm
                 )
                 optimizer.step()
-                optimizer_critic.step()
+                # optimizer_critic.step()
+                optimizer.zero_grad()
+                # optimizer_critic.zero_grad()
 
-                # scheduler.step()
-                # scheduler_c.step()
 
                 # Log losses for this minibatch update
                 actor_losses.append(loss_dict["loss_objective"])
@@ -278,6 +277,8 @@ def train_torchrl(
                 entropy_losses.append(loss_dict["loss_entropy"])
                 kl_div.append(loss_dict["kl_approx"])
 
+            # scheduler.step()
+            # scheduler_c.step()
         num_updates += 1  # Count PPO update cycles
 
         # --- Logging ---
