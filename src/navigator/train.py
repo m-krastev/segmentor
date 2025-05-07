@@ -228,9 +228,13 @@ def train_torchrl(
     collected_frames, num_updates = 0, 0
     # Use a specific metric like coverage or reward
     best_val_metric = float("-inf")
+    # train_env = make_sb_env(config, train_iterator, config.device, config.num_episodes_per_sample)
 
     # Use collector's iterator
     for i, batch_data in enumerate(collector):
+    # while collected_frames < config.total_timesteps:
+    #     with torch.no_grad():
+    #         batch_data = train_env.rollout(config.max_episode_steps, policy_module)
         current_frames = batch_data.numel()  # Number of steps collected in this batch
         pbar.update(current_frames)
         collected_frames += current_frames

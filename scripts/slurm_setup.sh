@@ -10,8 +10,10 @@ setup() {
     module purge
     module load 2024
     module load CUDA/12.6.0
+    module load OpenMPI/5.0.3-NVHPC-24.9-CUDA-12.6.0
+    module load Python/3.12.3-GCCcore-13.3.0
 
-	source "$1/.venv/bin/activate"
+	source "$cwd/.venv/bin/activate"
 
 	echo "Environment setup complete."
 	echo "Python version: $(python --version)"

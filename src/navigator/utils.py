@@ -303,7 +303,7 @@ def draw_path_sphere_2(
     zero_buffer = zero_buffer.unsqueeze(0).unsqueeze(0)
     zero_buffer = dilation_module(zero_buffer)
     zero_buffer = zero_buffer.squeeze(0).squeeze(0)
-    cumulative_path_mask = torch.maximum(cumulative_path_mask, zero_buffer)
+    cumulative_path_mask[:] = torch.maximum(cumulative_path_mask, zero_buffer)
     return cumulative_path_mask
 
 def find_start_end(

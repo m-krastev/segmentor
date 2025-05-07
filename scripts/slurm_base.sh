@@ -6,7 +6,6 @@
 #SBATCH --job-name=segmentor
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=120G
 #SBATCH --time=23:59:00
 #SBATCH --output=/scratch-shared/%u/logs/%x-%A.out
 date
@@ -17,7 +16,7 @@ export HF_TOKEN=
 export GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
 
 # make sure the correct modules are used and that the virtual environment is active
-PROJECT_ROOT=/home/mkrastev1/segmentor
+PROJECT_ROOT=$HOME/segmentor
 source $PROJECT_ROOT/scripts/slurm_setup.sh
 setup $PROJECT_ROOT
 cd $PROJECT_ROOT
@@ -41,7 +40,7 @@ DATASET_ID=42
 # python test.py
 
 
-module load OpenMPI/5.0.3-GCC-13.3.0
 python -m navigator --data-dir data/data
 
+cd notebooks
 # python grl_pathtracking.py --nifti-path ./ct.nii.gz --seg-path ./small_bowel.nii.gz --duodenum-seg-path ./duodenum.nii.gz --colon-seg-path ./colon.nii.gz

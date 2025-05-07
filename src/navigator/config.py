@@ -50,10 +50,11 @@ class Config:
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one
-    num_episodes_per_sample: int = 524288
+    # num_episodes_per_sample: int = 524288
+    num_episodes_per_sample: int = 32
     total_timesteps: int = 10_000_000
     # Size of the buffer to store transitions
-    frames_per_batch: int = 512
+    frames_per_batch: int = 1024
     learning_rate: float = 3e-5
     batch_size: int = 128  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs

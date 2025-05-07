@@ -49,15 +49,14 @@ class SmallBowelEnv(EnvBase):
     current_pos_vox: Tuple[int, int, int]
     start_coord: Tuple[int, int, int]
     end_coord: Tuple[int, int, int]
-    gt_path_available: bool
     image: torch.Tensor
     seg: torch.Tensor
     wall_map: torch.Tensor
     gt_path_voxels: np.ndarray
     gt_path_vol: torch.Tensor
     cumulative_path_mask: torch.Tensor
-    gdt: torch.Tensor
-    reward_map: torch.Tensor
+    gdt: np.ndarray
+    reward_map: np.ndarray
     spacing: Optional[Tuple[float, float, float]]
     image_affine: Optional[np.ndarray]
     current_step_count: int
@@ -154,10 +153,11 @@ class SmallBowelEnv(EnvBase):
         self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=torch.float32)
         self.dilation = (
             torch.nn.Sequential(*[
-                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 3)
+                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 2 + 1)
             ])
             .to(self.device)
         )
+        self.dilation.compile()
 
     # --- Data Loading Method (Internal) ---
     def _load_next_subject(self) -> bool:
@@ -361,7 +361,7 @@ class SmallBowelEnv(EnvBase):
         rt -= self.config.r_val2 * 2 * self.wall_map[S].mean()
 
         # --- 4. Revisiting penalty ---
-        rt -= self.config.r_val1 * self.cumulative_path_mask[S].sum().bool()
+        rt -= self.config.r_val1 * self.cumulative_path_mask[S].sum()
 
         if not self.seg_np[next_pos_vox]:
             rt -= self.config.r_val1
@@ -524,6 +524,8 @@ class SmallBowelEnv(EnvBase):
                 if termination_reason == "reached_goal"
                 else (final_coverage - 1) * self.config.r_final
             )
+            # nope doesn't work well at all
+            # reward += self.config.r_final if termination_reason == "reached_goal" else 0
 
         # Get Next State Patches
         next_obs_dict = self._get_state_patches()
@@ -567,9 +569,9 @@ class SmallBowelEnv(EnvBase):
 
     def _set_seed(self, seed: Optional[int] = None):
         """Sets the seed for the environment's random number generator(s)."""
+        random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
-        torch.manual_seed_all(seed)
 
 
 # --- Updated Helper function to create the environment ---
