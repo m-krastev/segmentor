@@ -88,7 +88,8 @@ class SmallBowelDataset(Dataset):
                     seg_file = patient_dir / FILE_PATTERNS[organ]
                     if not seg_file.exists():
                         print(f"Warning: {organ.capitalize()} file missing for subject {subject_id}. Skipping.")
-                        continue
+                        # continue
+                        seg_file = None
                     subject[organ] = seg_file
 
                 # Check for ground truth path file (optional)
@@ -172,16 +173,21 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
 
     # Load segmentations (ensure they exist before loading)
     sb_seg_nii = np.asanyarray(nib.load(subject_data["small_bowel"]).dataobj)
-    duodenum_seg_nii = np.asanyarray(nib.load(subject_data["duodenum"]).dataobj)
-    colon_seg_nii = np.asanyarray(nib.load(subject_data["colon"]).dataobj)
-
     seg_np = np.transpose(sb_seg_nii, (2, 1, 0))
-    duodenum_np = np.transpose(duodenum_seg_nii, (2, 1, 0))
-    colon_np = np.transpose(colon_seg_nii, (2, 1, 0))
-
     result["seg"] = seg_np
-    result["duodenum"] = duodenum_np
-    result["colon"] = colon_np
+
+    if subject_data.get("duodenum"):
+        duodenum_seg_nii = np.asanyarray(nib.load(subject_data["duodenum"]).dataobj)
+        duodenum_np = np.transpose(duodenum_seg_nii, (2, 1, 0))
+        result["duodenum"] = duodenum_np
+    else:
+        result["duodenum"] = None
+    if subject_data.get("colon"):
+        colon_seg_nii = np.asanyarray(nib.load(subject_data["colon"]).dataobj)
+        colon_np = np.transpose(colon_seg_nii, (2, 1, 0))
+        result["colon"] = colon_np
+    else:
+        result["colon"] = None
 
     # Load ground truth path if available
     if "path" in subject_data and subject_data["path"] is not None:
@@ -197,8 +203,10 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         start_coord = tuple(start_coord_np)
         end_coord = tuple(end_coord_np)
     else:
+        assert result["duodenum"] is not None, "Duodenum segmentation is required to find start/end coordinates."
+        assert result["colon"] is not None, "Colon segmentation is required to find start/end coordinates."
         start_coord, end_coord = find_start_end(
-            duodenum_volume=duodenum_np, colon_volume=colon_np, small_bowel_volume=seg_np
+            duodenum_volume=result["duodenum"], colon_volume=result["colon"], small_bowel_volume=seg_np
         )
         np.savetxt(start_end_cache_path, np.stack((start_coord, end_coord)), fmt="%d")
     result["start_coord"] = start_coord

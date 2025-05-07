@@ -311,15 +311,17 @@ class SmallBowelEnv(EnvBase):
         # PyVista visualization
         plotter = pv.Plotter()
         plotter.add_volume(self.seg_np * 20, cmap="viridis", opacity="linear")
-        plotter.add_volume(
-            self._current_subject_data["colon"] * 80, cmap="viridis", opacity="linear"
-        )
+        if self._current_subject_data.get("colon"):
+            plotter.add_volume(
+                self._current_subject_data["colon"] * 80, cmap="viridis", opacity="linear"
+            )
+        if self._current_subject_data.get("duodenum"):
+            plotter.add_volume(
+                self._current_subject_data["duodenum"] * 140,
+                cmap="viridis",
+                opacity="linear",
+            )
         plotter.add_volume(self.reward_map, opacity="linear")
-        plotter.add_volume(
-            self._current_subject_data["duodenum"] * 140,
-            cmap="viridis",
-            opacity="linear",
-        )
         lines: pv.PolyData = pv.lines_from_points(self.tracking_path_history)
         plotter.add_mesh(lines, line_width=10, cmap="viridis")
         plotter.add_points(np.array(self.tracking_path_history), color="blue", point_size=10)
