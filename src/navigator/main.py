@@ -90,6 +90,7 @@ def main():
         )
         policy_module(dummy_input)
         value_module(dummy_input)
+        print(f"Policy: {policy_module}")
     
     # policy_module.compile()
     # value_module.compile()

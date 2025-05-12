@@ -283,7 +283,7 @@ def train_torchrl(
 
             # scheduler.step()
             # scheduler_c.step()
-        num_updates += 1  # Count PPO update cycles
+            num_updates += 1  # Count PPO update cycles
 
         # --- Logging ---
         avg_actor_loss = torch.stack(actor_losses).mean().item()

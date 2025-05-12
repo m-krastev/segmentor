@@ -16,6 +16,8 @@ from skimage.filters import meijering
 from torch import nn
 # import FastGeodis as fg
 
+type Coords = Tuple[int, int, int]
+type Spacing = Tuple[float, float, float]
 
 try:
     import cupy
@@ -455,6 +457,16 @@ class ClipTransform(torch.nn.Module):
 
     def forward(self, x):
         return (torch.clamp(x, self.min, self.max) - self.min) / (self.max - self.min)
+
+# class ClipTransform(torch.nn.Module):
+#     def __init__(self, _min=-1, _max=1):
+#         super().__init__()
+#         self.min = _min
+#         self.max = _max
+
+#     def forward(self, x):
+#         x = x.where(x < self.max, self.min).where(x > self.min, self.min)
+#         return (x - self.min) / (self.max - self.min)
 
 
 class BinaryDilation3D(nn.Module):

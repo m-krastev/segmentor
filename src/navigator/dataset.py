@@ -75,6 +75,7 @@ class SmallBowelDataset(Dataset):
             subject_id = patient_dir.name  # Use directory name as subject ID
 
             image_file = patient_dir / FILE_PATTERNS["ct"]
+            image_file = image_file if image_file.exists() else image_file.with_suffix(".nii.gz")
 
             # Check if required files exist
             if image_file.exists():
@@ -86,6 +87,7 @@ class SmallBowelDataset(Dataset):
                 for organ in ["small_bowel", "duodenum", "colon"]:
                     # Check for small bowel segmentation file
                     seg_file = patient_dir / FILE_PATTERNS[organ]
+                    seg_file = seg_file if seg_file.exists() else seg_file.with_suffix(".nii.gz")
                     if not seg_file.exists():
                         print(f"Warning: {organ.capitalize()} file missing for subject {subject_id}. Skipping.")
                         # continue
@@ -190,9 +192,9 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         result["colon"] = None
 
     # Load ground truth path if available
-    if "path" in subject_data and subject_data["path"] is not None:
+    if subject_data.get("path") is not None:
         try:
-            result["gt_path"] = np.load(subject_data["path"])
+            result["gt_path"] = np.loadtxt(subject_data["path"], dtype=int)
         except Exception as e:
             print(f"Warning: Could not load GT path {subject_data['path']}: {e}")
 
@@ -258,14 +260,14 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
 
     local_peaks_cache_path = cache_dir / CACHE_FILES["local_peaks"]
     if local_peaks_cache_path.exists():
-        local_peaks_np = np.load(local_peaks_cache_path)
+        local_peaks_np = np.loadtxt(local_peaks_cache_path, dtype=int)
     else:
         from .utils import distance_transform_edt, binary_dilation
         distances = distance_transform_edt(
             binary_dilation(result["seg"], iterations=3)
         )
-        local_peaks_np = peak_local_max(distances, min_distance=6, threshold_abs=4, num_peaks=512)
-        np.save(local_peaks_cache_path, local_peaks_np)
+        local_peaks_np = peak_local_max(distances, min_distance=6, threshold_abs=4, num_peaks=1024)
+        np.savetxt(local_peaks_cache_path, local_peaks_np, fmt="%d")
     result["local_peaks"] = local_peaks_np
 
     return result

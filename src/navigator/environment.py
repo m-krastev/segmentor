@@ -3,7 +3,7 @@ Environment implementation for Navigator's small bowel path tracking,
 integrated with TorchRL. Simplified version without try-except blocks.
 """
 
-from math import dist
+from math import dist, isfinite
 from pathlib import Path
 import random
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -23,6 +23,8 @@ from torchrl.data import (
 from torchrl.envs import EnvBase
 from torchrl.envs.utils import check_env_specs
 
+from segmentor.utils.medutils import save_nifti
+
 from .config import Config
 from .utils import (
     BinaryDilation3D,
@@ -31,12 +33,13 @@ from .utils import (
     draw_path_sphere,
     draw_path_sphere_2,
     get_patch,
+    Coords,
+    Spacing
 )
 
 
 # Define action spec constants
 ACTION_DIM = 3  # 3D movement delta
-
 
 class SmallBowelEnv(EnvBase):
     """
@@ -45,10 +48,10 @@ class SmallBowelEnv(EnvBase):
     Relies on upstream data validity and will raise exceptions on errors.
     """
 
-    goal: Tuple[int, int, int]
-    current_pos_vox: Tuple[int, int, int]
-    start_coord: Tuple[int, int, int]
-    end_coord: Tuple[int, int, int]
+    goal: Coords
+    current_pos_vox: Coords
+    start_coord: Coords
+    end_coord: Coords
     image: torch.Tensor
     seg: torch.Tensor
     wall_map: torch.Tensor
@@ -57,10 +60,11 @@ class SmallBowelEnv(EnvBase):
     cumulative_path_mask: torch.Tensor
     gdt: np.ndarray
     reward_map: np.ndarray
-    spacing: Optional[Tuple[float, float, float]]
+    spacing: Optional[Spacing]
     image_affine: Optional[np.ndarray]
     current_step_count: int
-    tracking_path_history: List[Tuple[int, int, int]]
+    tracking_path_history: List[Coords]
+    goal: Coords = (0, 0, 0)
 
     def __init__(
         self,
@@ -84,7 +88,7 @@ class SmallBowelEnv(EnvBase):
         self.dataset_iterator = dataset_iterator  # Store the iterator
         self._current_subject_data = None  # Store data for the current subject
         self.num_episodes_per_sample = num_episodes_per_sample
-        self.episodes_on_current_subject = 0  # Counter for episodes on current subject
+        self.episodes_on_current_subject = num_episodes_per_sample  # Counter for episodes on current subject, set so that it refreshes at next step
 
         # --- Define Specs ---
         # Set the specs *after* calling super().__init__
@@ -145,7 +149,7 @@ class SmallBowelEnv(EnvBase):
         # --- TorchRL Internal State Flags (per-batch element) ---
         self._is_done = torch.zeros(*self.batch_size, 1, dtype=torch.bool, device=self.device)
 
-        self.transform = ClipTransform(-150, 250)
+        self.transform = ClipTransform(30-160, 30+160) # -150, 250
         self.transform.compile()
 
         # Placeholder tensor
@@ -200,10 +204,10 @@ class SmallBowelEnv(EnvBase):
         wall_map: np.ndarray,  # Receive wall_map tensor
         gdt_start: np.ndarray,  # Receive GDT tensors
         gdt_end: np.ndarray,
-        start_coord: Tuple[int, int, int],  # Receive coords
-        end_coord: Tuple[int, int, int],
+        start_coord: Coords,  # Receive coords
+        end_coord: Coords,
         gt_path: Optional[np.ndarray] = None,
-        spacing: Optional[Tuple[float, float, float]] = None,
+        spacing: Optional[Spacing] = None,
         image_affine: Optional[np.ndarray] = None,
         local_peaks: Optional[np.ndarray] = None,
         # Receive numpy versions if provided by dataset
@@ -213,6 +217,8 @@ class SmallBowelEnv(EnvBase):
         """
         # Store tensors directly
         self.image = self.transform(torch.from_numpy(image).to(self.device))
+        # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
+        # save_nifti(np.transpose(self.image.numpy(force=True), (2,1,0)), f"image_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
         self.seg_np = seg  # Keep numpy version for reference
 
         self.seg = torch.from_numpy(seg).to(
@@ -225,36 +231,29 @@ class SmallBowelEnv(EnvBase):
         self.cumulative_path_mask = torch.zeros_like(self.image, device=self.device, dtype=torch.uint8)
         self.local_peaks = local_peaks
 
-        # self.zeros_cache = torch.zeros_like(self.seg)
-        self.gt_path_vol = self.cumulative_path_mask.clone()
-
         # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
         self.image_affine = image_affine if image_affine is not None else np.eye(4)
         self.start_coord = start_coord
         self.end_coord = end_coord
+        # self.zeros_cache = torch.zeros_like(self.seg)
 
         # Update ground truth path if provided
         self.gt_path_voxels = gt_path
-        # self._process_gt_path()
-
-    def _process_gt_path(self):
-        """Process ground truth path data."""
-        self.gt_path_vol = torch.zeros_like(self.image)
-        if self.gt_path_voxels is None:
-            return
-
-        valid_indices = (
-            (self.gt_path_voxels[:, 0] >= 0)
-            & (self.gt_path_voxels[:, 0] < self.image.shape[0])
-            & (self.gt_path_voxels[:, 1] >= 0)
-            & (self.gt_path_voxels[:, 1] < self.image.shape[1])
-            & (self.gt_path_voxels[:, 2] >= 0)
-            & (self.gt_path_voxels[:, 2] < self.image.shape[2])
-        )
-        valid_gt_path = self.gt_path_voxels[valid_indices]
-        assert valid_gt_path.shape[0] > 0, "No valid GT path voxels found within image bounds."
-        self.gt_path_vol[valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]] = 1.0
+        # Process GT path data
+        self.gt_path_vol = torch.zeros_like(self.seg)
+        if self.gt_path_voxels is not None:
+            valid_indices = (
+                (self.gt_path_voxels[:, 0] >= 0)
+                & (self.gt_path_voxels[:, 0] < self.image.shape[0])
+                & (self.gt_path_voxels[:, 1] >= 0)
+                & (self.gt_path_voxels[:, 1] < self.image.shape[1])
+                & (self.gt_path_voxels[:, 2] >= 0)
+                & (self.gt_path_voxels[:, 2] < self.image.shape[2])
+            )
+            valid_gt_path = self.gt_path_voxels[valid_indices]
+            assert valid_gt_path.shape[0] > 0, "No valid GT path voxels found within image bounds."
+            self.gt_path_vol[valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]] = 1.0
 
     def _get_state_patches(self) -> Dict[str, torch.Tensor]:
         """Get state patches centered at current position. Assumes tensors are valid."""
@@ -272,22 +271,27 @@ class SmallBowelEnv(EnvBase):
         cum_path_patch = get_patch(
             self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
         )
-
+        # save_nifti(np.transpose(img_patch.numpy(force=True), (2,1,0)), "img_patch.nii.gz", affine=self.image_affine, spacing=self.spacing)
+        # save_nifti(np.transpose(wall_patch.numpy(force=True), (2,1,0)), "wall_patch.nii.gz", affine=self.image_affine, spacing=self.spacing)
+        # save_nifti(np.transpose(cum_path_patch.numpy(force=True), (2,1,0)), "cum_path_patch.nii.gz", affine=self.image_affine, spacing=self.spacing)
+        # exit()
         # Stack patches
         actor_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
         critic_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
         return {"actor": actor_state, "critic": critic_state}
 
-    def _is_valid_pos(self, pos_vox: Tuple[int, int, int]) -> bool:
+    def _is_valid_pos(self, pos_vox: Coords) -> bool:
         """Check if a position is within the volume bounds."""
         s = self.image.shape
         return (0 <= pos_vox[0] < s[0]) and (0 <= pos_vox[1] < s[1]) and (0 <= pos_vox[2] < s[2])
 
     def _get_final_coverage(self) -> float:
         """Calculate coverage. Assumes tensors are valid."""
-        mask = self.dilation(self.cumulative_path_mask.unsqueeze(0).unsqueeze(0)).squeeze()
+        # mask = self.dilation(self.cumulative_path_mask.unsqueeze(0).unsqueeze(0)).squeeze()
+        mask = self.cumulative_path_mask
         intersection = torch.sum(mask * self.seg)
-        return intersection / (self.seg_volume + mask.sum())
+        union = self.seg_volume + mask.sum()
+        return (2 * intersection / union) if union != 0 else 0
 
     def get_tracking_history(self) -> np.ndarray:
         """Get the history of tracked positions."""
@@ -311,11 +315,11 @@ class SmallBowelEnv(EnvBase):
         # PyVista visualization
         plotter = pv.Plotter()
         plotter.add_volume(self.seg_np * 20, cmap="viridis", opacity="linear")
-        if self._current_subject_data.get("colon"):
+        if self._current_subject_data.get("colon") is not None:
             plotter.add_volume(
                 self._current_subject_data["colon"] * 80, cmap="viridis", opacity="linear"
             )
-        if self._current_subject_data.get("duodenum"):
+        if self._current_subject_data.get("duodenum") is not None:
             plotter.add_volume(
                 self._current_subject_data["duodenum"] * 140,
                 cmap="viridis",
@@ -329,45 +333,64 @@ class SmallBowelEnv(EnvBase):
         plotter.export_html(cache_dir / "path.html")
 
     def _calculate_reward(
-        self, action_vox: Tuple[int, int, int], next_pos_vox: Tuple[int, int, int]
+        self, action_vox: Coords, next_pos_vox: Coords
     ) -> Tuple[float, Tuple]:
         """Calculate the reward for the current step."""
 
         rt = torch.tensor(0.0, device=self.device)
         # --- 1. Zero movement or goes out of the segmentation penalty ---
         if not any(action_vox) or not self._is_valid_pos(next_pos_vox):
-            return rt.fill_(-self.config.r_zero_mov), ()
+            rt -= self.config.r_zero_mov
+            return rt, ()
 
         # Set of voxels S on the line segment
         S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
 
-        # --- 2. GDT-based reward ---
-        next_gdt_val = self.gdt[next_pos_vox]
-        # If there is some progress
-        if next_gdt_val > self.max_gdt_achieved:
-            delta = next_gdt_val - self.max_gdt_achieved
-            # Penalty if too large, reward if within margins
-            rt += (
-                -self.config.r_val2
-                if delta > self.config.gdt_max_increase_theta
-                else self.config.r_val2 * delta / self.config.gdt_max_increase_theta
-            )
-            self.max_gdt_achieved = next_gdt_val
-
-        # 2.5 Peaks-based reward
-        rt += self.reward_map[S].sum() * self.config.r_peaks
-        # Discard the reward for visited nodes
-        self.reward_map[S] = 0
-
-        # --- 3. Wall-based penalty ---
-        rt -= self.config.r_val2 * 2 * self.wall_map[S].mean()
-
-        # --- 4. Revisiting penalty ---
-        rt -= self.config.r_val1 * self.cumulative_path_mask[S].sum()
-
         if not self.seg_np[next_pos_vox]:
             rt -= self.config.r_val1
+            return rt, S
 
+        # --- 2. GDT-based reward ---
+        next_gdt_val = self.gdt[next_pos_vox]
+        if self.config.use_immediate_gdt_reward:
+            delta = next_gdt_val - self.gdt[self.current_pos_vox]
+            if isfinite(delta):
+                rt += delta * self.config.r_val2 if delta > 0 else self.config.r_pen2
+        else:
+            # If there is some progress
+            if next_gdt_val > self.max_gdt_achieved:
+                delta = next_gdt_val - self.max_gdt_achieved
+                # Penalty if too large, reward if within margins
+                
+                # rt += self.config.r_val2 * (delta / self.config.gdt_max_increase_theta + 1)
+                rt += (
+                    -self.config.r_val2
+                    if delta > self.config.gdt_max_increase_theta
+                    else self.config.r_val2 * (delta / self.config.gdt_max_increase_theta + 1)
+                )
+                # rt += self.config.r_val2 * (min(delta / self.config.gdt_max_increase_theta, 1) + 1)
+
+                # print(f"{S=}")
+                # print(f"{rt=}")
+                self.max_gdt_achieved = next_gdt_val
+
+        # 2.5 Peaks-based reward
+        # rt += self.reward_map[S].sum() * self.config.r_peaks
+        # print(f"{self.reward_map[S].sum()=}")
+        # Discard the reward for visited nodes
+        # self.reward_map[S] = 0
+
+        # Simple problem, toy problem might be a good way to solve this
+
+        # --- 3. Wall-based penalty ---
+        # print(f"{self.wall_map[S].mean()=}")
+        rt -= self.config.r_val2 * self.wall_map[S].mean()
+
+        # --- 4. Revisiting penalty ---
+        rt -= self.config.r_val1 * self.cumulative_path_mask[S].sum().bool()
+        # print(f"{self.cumulative_path_mask[S].sum()=}")
+
+        # print(f"{self.seg_np[next_pos_vox]=}")
         return rt, S
 
     def _reset(
@@ -384,18 +407,20 @@ class SmallBowelEnv(EnvBase):
             self.episodes_on_current_subject += 1
 
         # Decide whether to load a new subject
-        should_load_new_subject = (
-            self._current_subject_data is None  # First time loading
-            or self.episodes_on_current_subject >= self.num_episodes_per_sample
-        )
-
-        if should_load_new_subject or must_load_new_subject:
+        if (
+            self.episodes_on_current_subject >= self.num_episodes_per_sample
+            or must_load_new_subject
+        ):
             # Reset counter *before* loading, as loading signifies starting fresh
             self.episodes_on_current_subject = 0
             self._load_next_subject()
 
         # --- Reset internal episode state ---
         self.current_step_count = 0
+
+        # Reset goal marker
+        self.wall_map[self.goal] = 0
+        self.image[self.goal] = 0
 
         # Determine start position and select appropriate GDT
         if self.episodes_on_current_subject % 2 == 0:
@@ -407,17 +432,20 @@ class SmallBowelEnv(EnvBase):
             self.goal = self.start_coord
             self.gdt = self.gdt_end
 
+        # Reset goal marker (just some indication)
+        self.wall_map[self.goal] = 1
+        self.image[self.goal] = 1
+
         # Validate start position (simplified check)
         if not self._is_valid_pos(self.current_pos_vox) or not self.seg_np[self.current_pos_vox]:
+            candidate = tuple(
+                self.local_peaks[random.randint(0, len(self.local_peaks) - 1)]
+            )
+
             print(
-                f"Warning: Chosen start pos {self.current_pos_vox} invalid/outside seg. Searching nearby..."
+                f"Warning: Chosen start pos {self.current_pos_vox} invalid/outside seg. Using {candidate}."
             )
-            valid_voxels = np.nonzero(self.seg_np > 0)
-            if len(valid_voxels) == 0:
-                raise ValueError("Cannot reset: No valid voxels found in segmentation mask.")
-            self.current_pos_vox = tuple(
-                valid_voxels[random.randint(0, len(valid_voxels) - 1)].tolist()
-            )
+            self.current_pos_vox = candidate
             self.goal = self.end_coord
             self.gdt = compute_gdt(self.seg_np, self.current_pos_vox, self.spacing)
 
@@ -471,7 +499,7 @@ class SmallBowelEnv(EnvBase):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Performs a step. Assumes env is initialized. Raises exceptions on errors."""
-        # Assert essential state is valid before proceeding
+        self.current_step_count += 1
 
         # Extract Action
         action_normalized = tensordict.get("action").squeeze(0)
@@ -481,7 +509,6 @@ class SmallBowelEnv(EnvBase):
         action_vox_delta = tuple(torch.round(action_mapped).int().cpu().tolist())
 
         # Execute Step Logic
-        self.current_step_count += 1
         next_pos_vox = (
             self.current_pos_vox[0] + action_vox_delta[0],
             self.current_pos_vox[1] + action_vox_delta[1],
@@ -492,28 +519,22 @@ class SmallBowelEnv(EnvBase):
         reward, S = self._calculate_reward(action_vox_delta, next_pos_vox)
 
         # Check validity and update cumulative path
-        is_next_pos_valid_seg = (
-            self._is_valid_pos(next_pos_vox)  # and self.seg[next_pos_vox] > 0
-        )
-        if is_next_pos_valid_seg:
-            # for vox in zip(*S):
-            #     draw_path_sphere(self.cumulative_path_mask, vox, self.config.cumulative_path_radius_vox)
+        is_next_pos_valid_seg = self._is_valid_pos(next_pos_vox)
+        # for vox in zip(*S):
+        #     draw_path_sphere(self.cumulative_path_mask, vox, self.config.cumulative_path_radius_vox)
+        if S:
             draw_path_sphere_2(self.cumulative_path_mask, S, self.dilation, self.gt_path_vol)
 
-            self.tracking_path_history.append(next_pos_vox)
-            self.current_pos_vox = next_pos_vox
+        self.tracking_path_history.append(next_pos_vox)
+        self.current_pos_vox = next_pos_vox
 
         # Check Termination Conditions
         done, terminated, truncated = False, False, False
         termination_reason = ""
         if self.current_step_count >= self.config.max_episode_steps:
             done, truncated, termination_reason = True, True, "max_steps"
-        elif not is_next_pos_valid_seg:
-            done, terminated, termination_reason = (
-                True,
-                True,
-                "out_of_bounds",
-            )
+        elif not (is_next_pos_valid_seg and self.seg_np[next_pos_vox]):
+            done, terminated, termination_reason = True, True, "out_of_bounds"
         elif dist(next_pos_vox, self.goal) < self.config.cumulative_path_radius_vox:
             done, terminated, termination_reason = True, True, "reached_goal"
 
@@ -521,6 +542,8 @@ class SmallBowelEnv(EnvBase):
         final_coverage = 0
         if done:
             final_coverage = self._get_final_coverage()
+            # Tbh that should only be added as a fine-tuning stage or something,
+            # it must be messing with the value function
             reward += (
                 (final_coverage * self.config.r_final)
                 if termination_reason == "reached_goal"
@@ -531,7 +554,6 @@ class SmallBowelEnv(EnvBase):
 
         # Get Next State Patches
         next_obs_dict = self._get_state_patches()
-
         # Update Internal Done Flag
         self._is_done[:] = done
 

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +13,14 @@ def load_nifti(img_path: str | Path) -> npt.NDArray:
     return np.asarray(nib.load(img_path).dataobj)
 
 
-def save_nifti(data: npt.NDArray, filename: str | Path, other: str | Path | nib.Nifti1Image = None):
+def save_nifti(
+    data: npt.NDArray,
+    filename: str | Path,
+    other: str | Path | nib.Nifti1Image = None,
+    header=None,
+    affine=None,
+    spacing=None,
+):
     """
     Saves a NumPy array as a NIfTI image.
 
@@ -21,14 +29,28 @@ def save_nifti(data: npt.NDArray, filename: str | Path, other: str | Path | nib.
         filename (str | Path): The filename to save the image to.
         other (str | Path | Nifti1Image, optional): Another NIfTI image to copy the header from. Defaults to None.
                                         If None, the header from the image to be saved is used.
+        header (nib.Nifti1Header, optional): The header to use for the new image. Defaults to None.
+        affine (npt.NDArray, optional): The affine transformation matrix to use for the new image. Defaults to None.
+        spacing (npt.NDArray, optional): The spacing to use for the new image. Defaults to None.
     """
-    if other is None:
+    if other is None and os.path.exists(filename):
         other = nib.load(filename)
-    else:
-        if not hasattr(other, "affine"):
-            other = nib.load(other)
+        affine = other.affine
+        header = other.header
+        new_image = nib.Nifti1Image(data, affine, header)
 
-    new_image = nib.Nifti1Image(data, other.affine, other.header)
+    elif affine is not None and spacing is not None:
+            new_image = nib.Nifti1Image(data, affine, nib.Nifti1Header())
+            new_image.header.set_zooms(spacing)
+    elif hasattr(other, "affine") and hasattr(other, "header"):
+            affine = other.affine
+            header = other.header
+            new_image = nib.Nifti1Image(data, affine, header)
+
+    else:
+        raise ValueError()
+
+
     nib.save(new_image, filename)
 
 
