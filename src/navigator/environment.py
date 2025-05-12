@@ -418,19 +418,29 @@ class SmallBowelEnv(EnvBase):
         # --- Reset internal episode state ---
         self.current_step_count = 0
 
-        # Reset goal marker
+        # Reset goal marker (some slight indication that the goal is there)
         self.wall_map[self.goal] = 0
         self.image[self.goal] = 0
 
         # Determine start position and select appropriate GDT
-        if self.episodes_on_current_subject % 2 == 0:
+        rand = random.randint(0, 9) # 40-40-20
+        if rand < 4:
+            # Start at the beginning
             self.current_pos_vox = self.start_coord
             self.goal = self.end_coord
             self.gdt = self.gdt_start
-        else:
+        elif rand < 8:
+            # Start at the end
             self.current_pos_vox = self.end_coord
             self.goal = self.start_coord
             self.gdt = self.gdt_end
+        else:
+            # Start at a random local peak
+            self.current_pos_vox = tuple(
+                self.local_peaks[random.randint(0, len(self.local_peaks) - 1)]
+            )
+            self.goal = self.end_coord
+            self.gdt = compute_gdt(self.seg_np, self.current_pos_vox, self.spacing)
 
         # Reset goal marker (just some indication)
         self.wall_map[self.goal] = 1
@@ -460,25 +470,18 @@ class SmallBowelEnv(EnvBase):
             self.gt_path_vol
         )
 
-        # self.cumulative_path_mask[self.current_pos_vox] = 1
-        # self.cumulative_path_mask = self.dilation(
-        #     self.cumulative_path_mask.unsqueeze(0).unsqueeze(0)
-        # ).squeeze()
-
+        # Initialize various tracking variables
         self.tracking_path_history = [self.current_pos_vox]
-
-        # Initialize current GDT value using the selected GDT
         self.cum_reward.fill_(0)
         self.max_gdt_achieved = self.gdt[self.current_pos_vox]
         self.reward_map = np.zeros_like(self.seg_np)
         self.reward_map[tuple(self.local_peaks.T)] = 1
 
         # --- Get Initial State Patches ---
-        obs_dict = self._get_state_patches()  # Let it raise RuntimeError if patches fail
+        obs_dict = self._get_state_patches()
 
         # --- Update Internal Done Flag and Package Output ---
         self._is_done.fill_(False)
-
         reset_td = TensorDict(
             {
                 "actor": obs_dict["actor"].unsqueeze(0),  # Add batch dim
@@ -489,12 +492,13 @@ class SmallBowelEnv(EnvBase):
                 "final_step_count": torch.zeros_like(self._is_done, dtype=torch.int64),
                 "final_coverage": self.placeholder_zeros,
                 "total_reward": self.placeholder_zeros,
-                "max_gdt_achieved": torch.as_tensor(self.max_gdt_achieved, dtype=torch.float32, device=self.device).view_as(self._is_done)
+                "max_gdt_achieved": torch.as_tensor(
+                    self.max_gdt_achieved, dtype=torch.float32, device=self.device
+                ).view_as(self._is_done),
             },
             batch_size=self.batch_size,
             device=self.device,
         )
-
         return reset_td
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
@@ -598,7 +602,6 @@ class SmallBowelEnv(EnvBase):
         torch.manual_seed(seed)
 
 
-# --- Updated Helper function to create the environment ---
 def make_sb_env(
     config: Config,
     dataset_iterator: Iterator,
