@@ -277,7 +277,7 @@ def generate_synthetic_ct_with_bowel(
     ct_volume[~body_mask] = BG_INTENSITY
 
     print("Generation complete.")
-    return ct_volume, small_bowel_gt_mask, start_coord_zyx, end_coord_zyx
+    return ct_volume, bowel_path_points, small_bowel_gt_mask, start_coord_zyx, end_coord_zyx
 
 
 def save_nifti(data_array, filepath, affine=None):
@@ -309,14 +309,14 @@ def save_coordinates_to_txt(start_coord_zyx, end_coord_zyx, filepath):
     with open(filepath, "w") as f:
         if start_coord_zyx is not None:
             # Convert ZYX to XYZ for output
-            f.write(f"{start_coord_zyx[2]}, {start_coord_zyx[1]}, {start_coord_zyx[0]}\n")
+            f.write(f"{start_coord_zyx[2]} {start_coord_zyx[1]} {start_coord_zyx[0]}\n")
         else:
-            f.write("N/A, N/A, N/A\n")  # Placeholder if no start coordinate
+            f.write("N/A N/A N/A\n")  # Placeholder if no start coordinate
 
         if end_coord_zyx is not None:
-            f.write(f"{end_coord_zyx[2]}, {end_coord_zyx[1]}, {end_coord_zyx[0]}\n")
+            f.write(f"{end_coord_zyx[2]} {end_coord_zyx[1]} {end_coord_zyx[0]}\n")
         else:
-            f.write("N/A, N/A, N/A\n")  # Placeholder if no end coordinate
+            f.write("N/A N/A N/A\n")  # Placeholder if no end coordinate
     print(f"Saved start/end coordinates to: {filepath}")
 
 
@@ -355,7 +355,14 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help="Path to save start/end coordinates TXT (e.g., coords.txt).",
-    )  # NEW
+    )
+
+    parser.add_argument(
+        "--output_path_path",
+        type=str,
+        required=True,
+        help="Path to save the path points.",
+    )
 
     parser.add_argument(
         "--volume_shape",
@@ -397,7 +404,7 @@ if __name__ == "__main__":
         np.random.seed(args.seed)
         print(f"Using random seed: {args.seed}")
 
-    synthetic_ct, ground_truth_bowel, start_coord, end_coord = generate_synthetic_ct_with_bowel(
+    synthetic_ct, bowel_path_points, ground_truth_bowel, start_coord, end_coord = generate_synthetic_ct_with_bowel(
         volume_shape=args.volume_shape,
         n_control_points=args.n_control_points,
         tube_radius=args.tube_radius,
@@ -426,7 +433,9 @@ if __name__ == "__main__":
         affine_identity = np.eye(4)
         save_nifti(synthetic_ct, args.output_ct_path, affine=affine_identity)
         save_nifti(ground_truth_bowel, args.output_gt_path, affine=affine_identity)
-        save_coordinates_to_txt(start_coord, end_coord, args.output_coords_path)  # NEW
+        # Save path points to a text file
+        np.savetxt(args.output_path_path, bowel_path_points, fmt="%d", delimiter=" ")
+        save_coordinates_to_txt(start_coord, end_coord, args.output_coords_path)
 
         if args.visualize:
             # (Visualization code from previous version)
