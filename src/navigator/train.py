@@ -10,7 +10,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 # TorchRL components
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import SyncDataCollector, MultiSyncDataCollector, MultiaSyncDataCollector
 from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage, SamplerWithoutReplacement
 from torchrl.objectives import ClipPPOLoss, KLPENPPOLoss
 from torchrl.objectives.value import GAE
@@ -32,34 +32,6 @@ def log_wandb(data: dict, **kwargs):
         print("WandB not initialized. Skipping logging.")
 
 
-# --- Dataset Iterator Helper ---
-class SubjectIterator:
-    """Wraps DataLoader to provide an infinite iterator for env resets."""
-
-    def __init__(self, dataset, batch_size=1, shuffle=True, num_workers=0):
-        self.dataloader = DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=num_workers,
-            collate_fn=lambda x: x[0],  # Get single subject dict
-            pin_memory=False,  # Pin memory handled by TorchRL if needed
-            persistent_workers=num_workers > 0,
-        )
-        self.iterator = iter(self.dataloader)
-        self.dataset = dataset
-
-    def __next__(self):
-        try:
-            return next(self.iterator)
-        except StopIteration:
-            self.iterator = iter(self.dataloader)  # Restart iterator
-            return next(self.iterator)
-
-    def __iter__(self):
-        return self
-
-
 # --- Validation Loop (Adaptation Needed) ---
 def validation_loop_torchrl(
     actor_module,  # Pass the trained policy module
@@ -75,13 +47,9 @@ def validation_loop_torchrl(
         "val_coverage": [],
     }
 
-    # Create a dedicated iterator for validation data
-    val_iterator = SubjectIterator(
-        val_dataset, shuffle=False, num_workers=0
-    )  # No shuffle for validation
     # Create a validation environment instance
     # Pass the validation iterator to this env instance
-    val_env = make_sb_env(config, val_iterator, device, 1, check_env=False)
+    val_env = make_sb_env(config, val_dataset, device, 1, check_env=False)
 
     num_val_subjects = len(val_dataset)
 
@@ -142,22 +110,21 @@ def train_torchrl(
     device = device or torch.device(config.device)
     batch_size = getattr(config, "batch_size", 32)
 
-    train_iterator = SubjectIterator(
-        train_set,
-        shuffle=config.shuffle_dataset,
-        num_workers=getattr(config, "num_workers", 0),
-    )
-
     print(
         f"Total trainable parameters: {sum(p.numel() for p in policy_module.parameters()) + sum(p.numel() for p in value_module.parameters())}"
     )
 
     # --- Collector ---
     # Collects data by interacting policy_module with environment instances
+    env_maker = lambda: make_sb_env(
+            config,
+            train_set,
+            device,
+            num_episodes_per_sample=config.num_episodes_per_sample,
+            check_env=False,
+        )
     collector = SyncDataCollector(
-        create_env_fn=lambda: make_sb_env(
-            config, train_iterator, device, num_episodes_per_sample=config.num_episodes_per_sample, check_env=False
-        ),  # Function to create environments
+        create_env_fn=env_maker,  # Function to create environments
         policy=policy_module,  # Policy module to use for action selection
         # Total frames (steps) to collect in training
         total_frames=total_timesteps,
@@ -170,6 +137,7 @@ def train_torchrl(
         # Device where data is stored (can be CPU if memory is tight)
         storing_device=device,
         max_frames_per_traj=config.max_episode_steps,  # Max steps per episode trajectory
+        # num_threads=8
     )
 
     # --- Replay Buffer ---
@@ -201,26 +169,26 @@ def train_torchrl(
     )
 
     # --- Optimizer ---
-    optimizer = optim.Adam(
+    optimizer = optim.AdamW(
         # policy_module.parameters(),
         loss_module.parameters(),
         lr=config.learning_rate,
     )
-    optimizer_critic = optim.Adam(
-        value_module.parameters(),
-        lr=config.learning_rate,
-    )
+    # optimizer_critic = optim.Adam(
+    #     value_module.parameters(),
+    #     lr=config.learning_rate,
+    # )
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=(total_timesteps * config.update_epochs // batch_size),
-        eta_min=1e-6,
+        eta_min=1e-5,
     )
-    scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer_critic,
-        T_max=(total_timesteps * config.update_epochs // batch_size),
-        eta_min=1e-6,
-    )
+    # scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
+    #     optimizer_critic,
+    #     T_max=(total_timesteps * config.update_epochs // batch_size),
+    #     eta_min=1e-5,
+    # )
 
     # --- Training Loop ---
     print(f"Starting training for {total_timesteps} total steps...")
@@ -228,13 +196,8 @@ def train_torchrl(
     collected_frames, num_updates = 0, 0
     # Use a specific metric like coverage or reward
     best_val_metric = float("-inf")
-    # train_env = make_sb_env(config, train_iterator, config.device, config.num_episodes_per_sample)
-
     # Use collector's iterator
     for i, batch_data in enumerate(collector):
-    # while collected_frames < config.total_timesteps:
-    #     with torch.no_grad():
-    #         batch_data = train_env.rollout(config.max_episode_steps, policy_module)
         current_frames = batch_data.numel()  # Number of steps collected in this batch
         pbar.update(current_frames)
         collected_frames += current_frames
@@ -253,7 +216,7 @@ def train_torchrl(
                 # minibatch = replay_buffer.sample()  # Sample a minibatch
                 # minibatch = minibatch.squeeze(0)  # Remove batch dim
                 # loss_dict = loss_module(minibatch)  # Calculate PPO losses
-                minibatch = batch_data[j: j + batch_size]
+                minibatch = batch_data[j : j + batch_size]
                 loss_dict = loss_module(minibatch)
 
                 # Sum losses
@@ -274,14 +237,13 @@ def train_torchrl(
                 optimizer.zero_grad()
                 # optimizer_critic.zero_grad()
 
-
                 # Log losses for this minibatch update
                 actor_losses.append(loss_dict["loss_objective"])
                 critic_losses.append(loss_dict["loss_critic"])
                 entropy_losses.append(loss_dict["loss_entropy"])
                 kl_div.append(loss_dict["kl_approx"])
 
-            # scheduler.step()
+            scheduler.step()
             # scheduler_c.step()
             num_updates += 1  # Count PPO update cycles
 
@@ -358,8 +320,7 @@ def train_torchrl(
                 print(
                     f"  New best validation metric ({config.metric_to_optimize}): {best_val_metric:.4f}"
                 )
-                best_model_path = os.path.join(
-                    config.checkpoint_dir, "best_model_torchrl.pth")
+                best_model_path = os.path.join(config.checkpoint_dir, "best_model_torchrl.pth")
                 save_dict = {
                     # Save TorchRL modules' state_dicts
                     "policy_module_state_dict": policy_module.state_dict(),
@@ -394,8 +355,7 @@ def train_torchrl(
     collector.shutdown()  # Clean up collector resources
     print("Training finished.")
     # Final save?
-    final_model_path = os.path.join(
-        config.checkpoint_dir, "final_model_torchrl.pth")
+    final_model_path = os.path.join(config.checkpoint_dir, "final_model_torchrl.pth")
     # save_dict = {...}  # Same structure as checkpoints
     torch.save(save_dict, final_model_path)
     print(f"Final model saved to {final_model_path}")
