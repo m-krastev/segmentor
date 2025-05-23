@@ -4,20 +4,23 @@ Utility functions for the Navigator system.
 
 import logging
 import math
-from typing import Tuple, Union
+from math import copysign
+from typing import List, Tuple, Union
 
 import numpy as np
 import skfmm
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 from scipy.ndimage import binary_dilation
 from skimage.draw import disk
 from skimage.filters import meijering
 from torch import nn
+
 # import FastGeodis as fg
 
-type Coords = Tuple[int, int, int]
-type Spacing = Tuple[float, float, float]
+type Coords = Tuple[int, ...]
+type Spacing = Tuple[float, ...]
 
 try:
     import cupy
@@ -308,11 +311,17 @@ def draw_path_sphere_2(
     cumulative_path_mask[:] = torch.maximum(cumulative_path_mask, zero_buffer)
     return cumulative_path_mask
 
+
 def find_start_end(
-    duodenum_volume: np.ndarray, colon_volume: np.ndarray, small_bowel_volume: np.ndarray
-) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
+    duodenum_volume: np.ndarray,
+    colon_volume: np.ndarray,
+    small_bowel_volume: np.ndarray,
+    affine: np.ndarray = None,
+) -> Tuple[Coords, Coords]:
     """
     Find start and end points for small bowel navigation based on anatomical structures.
+
+    NOTE: Built with the assumption that the duodenum is on the left side of the body (affine: -1 x -1 x 1) and that the input will be XYZ.
 
     Args:
         duodenum_volume: Duodenum segmentation
@@ -320,17 +329,17 @@ def find_start_end(
         small_bowel_volume: Small bowel segmentation
 
     Returns:
-        Tuple containing start and end coordinates (each as z,y,x coordinates)
+        Tuple containing start and end coordinates.
     """
+    import kimimaro
+    import networkx as nx
 
-    def find_duodenojejunal_flexure(start_volume: np.ndarray) -> np.ndarray:
+    def find_duodenojejunal_flexure(
+        duodenum_volume: np.ndarray, affine: np.ndarray = None
+    ) -> np.ndarray:
         """Find the duodenojejunal flexure as a start point."""
-        import kimimaro
-        import networkx as nx
-
-        start_volume_xyz = np.transpose(start_volume, (2, 1, 0))
         duodenum_skeleton = kimimaro.skeletonize(
-            binary_dilation(start_volume_xyz, iterations=5),
+            binary_dilation(duodenum_volume, iterations=5),
             teasar_params={
                 "scale": 3,
                 "const": 5,
@@ -348,28 +357,30 @@ def find_start_end(
             raise RuntimeError("Kimimaro failed on duodenum.")
         duodenum_skeleton = duodenum_skeleton[1]
         duodenum_graph = nx.Graph()
-        vertices_zyx = {idx: loc[::-1] for idx, loc in enumerate(duodenum_skeleton.vertices)}
-        duodenum_graph.add_nodes_from((idx, {"location": loc}) for idx, loc in vertices_zyx.items())
+        vertices_xyz = {idx: loc for idx, loc in enumerate(duodenum_skeleton.vertices)}
+        duodenum_graph.add_nodes_from((idx, {"location": loc}) for idx, loc in vertices_xyz.items())
         duodenum_graph.add_edges_from(duodenum_skeleton.edges)
         if duodenum_graph.number_of_nodes() == 0:
             raise RuntimeError("Duodenum skeleton graph empty.")
         ends = [node for node, degree in duodenum_graph.degree() if degree == 1]
-        if not ends:
-            start_node = max(
-                duodenum_graph.nodes, key=lambda n: duodenum_graph.nodes[n]["location"][0]
-            )
-        else:
-            start_node = max(ends, key=lambda n: duodenum_graph.nodes[n]["location"][0])
+        # NOTE: The DJF is the leftmost point (aka min in X axis). This is dependent on the affine transform used in the segmentation. So, sometimes it might correspond to the max in the X axis.
+        # TODO: Fix this to be more robust to affine transforms
+        nonzero = np.nonzero(duodenum_volume)
+        marker = (
+            nonzero[0].max(),
+            nonzero[1].mean(),
+            nonzero[2].mean(),
+        )
+        start_node = min(
+            ends,
+            key=lambda n: math.dist(duodenum_graph.nodes[n]["location"], marker),
+        )
         return duodenum_graph.nodes[start_node]["location"]
 
-    def find_ileocecal_junction(end_volume: np.ndarray) -> np.ndarray:
+    def find_ileocecal_junction(colon_volume: np.ndarray, affine: np.ndarray = None) -> np.ndarray:
         """Find the ileocecal junction as an end point."""
-        import kimimaro
-        import networkx as nx
-
-        end_volume_xyz = np.transpose(end_volume, (2, 1, 0))
         colon_skeleton = kimimaro.skeletonize(
-            binary_dilation(end_volume_xyz, iterations=5),
+            binary_dilation(colon_volume, iterations=5),
             teasar_params={
                 "scale": 3,
                 "const": 5,
@@ -377,6 +388,7 @@ def find_start_end(
                 "pdrf_exponent": 4,
                 "soma_acceptance_threshold": 3500,
             },
+            # NOTE: Assuming isotropic spacing
             anisotropy=(1, 1, 1),
             dust_threshold=5,
             fix_branching=True,
@@ -387,69 +399,50 @@ def find_start_end(
             raise RuntimeError("Kimimaro failed on colon.")
         colon_skeleton = colon_skeleton[1]
         colon_graph = nx.Graph()
-        vertices_zyx = {idx: loc[::-1] for idx, loc in enumerate(colon_skeleton.vertices)}
-        colon_graph.add_nodes_from((idx, {"location": loc}) for idx, loc in vertices_zyx.items())
+        vertices_xyz = {idx: loc for idx, loc in enumerate(colon_skeleton.vertices)}
+        colon_graph.add_nodes_from((idx, {"location": loc}) for idx, loc in vertices_xyz.items())
         colon_graph.add_edges_from(colon_skeleton.edges)
         if colon_graph.number_of_nodes() == 0:
             raise RuntimeError("Colon skeleton graph empty.")
-        largest_cc = max(nx.connected_components(colon_graph), key=len, default=None)
-        if largest_cc is None:
-            raise RuntimeError("Colon skeleton graph no CCs.")
-        colon_subgraph = colon_graph.subgraph(largest_cc).copy()
-        ends = [node for node, degree in colon_subgraph.degree() if degree == 1]
-        if not ends:
-            print("Warning: Colon skeleton no ends. Using lowest/farthest.")
-            rectal_end = max(
-                colon_subgraph.nodes, key=lambda n: colon_subgraph.nodes[n]["location"][0]
-            )
-            ileocecal_end = max(
-                colon_subgraph.nodes,
-                key=lambda n: np.linalg.norm(
-                    np.array(colon_subgraph.nodes[n]["location"])
-                    - np.array(colon_subgraph.nodes[rectal_end]["location"])
-                ),
-            )
-        else:
-            rectal_end = max(ends, key=lambda n: colon_subgraph.nodes[n]["location"][0])
-            ends.remove(rectal_end)
-            if not ends:
-                print("Warning: Only rectal end found. Using farthest node.")
-                ileocecal_end = max(
-                    colon_subgraph.nodes,
-                    key=lambda n: nx.shortest_path_length(colon_subgraph, rectal_end, n)
-                    if nx.has_path(colon_subgraph, rectal_end, n)
-                    else -1,
-                )
-            elif len(ends) > 1:
-                ileocecal_end = max(
-                    ends, key=lambda n: nx.shortest_path_length(colon_subgraph, rectal_end, n)
-                )
-            else:
-                ileocecal_end = ends[0]
-        return colon_subgraph.nodes[ileocecal_end]["location"]
+        ends = [node for node, degree in colon_graph.degree() if degree == 1]
+
+        # NOTE: The ICJ is the rightmost point (aka max in X axis) and positioned relatively to the middle. This is dependent on the affine transform used in the segmentation. So, sometimes it might correspond to the min in the X axis (e.g. when the affine for the X axis is negative).
+        # TODO: Fix this to be more robust to affine transforms
+        colon_bounding_box = colon_volume.nonzero()
+        marker = (
+            colon_bounding_box[0].min(),
+            colon_bounding_box[1].mean(),
+            np.percentile(colon_bounding_box[2], 25),
+        )
+        ileocecal_end = min(ends, key=lambda n: math.dist(colon_graph.nodes[n]["location"], marker))
+        return colon_graph.nodes[ileocecal_end]["location"]
 
     # Find approximate landmark points
     from scipy.spatial.distance import cdist
 
-    raw_start_coord_zyx = find_duodenojejunal_flexure(duodenum_volume)
-    raw_end_coord_zyx = find_ileocecal_junction(colon_volume)
-    sb_coords_zyx = np.argwhere(small_bowel_volume > 0)
-    if sb_coords_zyx.shape[0] == 0:
+    raw_start_coord = find_duodenojejunal_flexure(duodenum_volume, affine=affine)
+    raw_end_coord = find_ileocecal_junction(colon_volume, affine=affine)
+    sb_coords_xyz = np.argwhere(small_bowel_volume > 0)
+    if sb_coords_xyz.shape[0] == 0:
         raise ValueError("Small bowel segmentation empty.")
 
     # Map to nearest small bowel voxels
-    start_distances = cdist(raw_start_coord_zyx.reshape(1, 3), sb_coords_zyx)
+    start_distances = cdist(raw_start_coord.reshape(1, 3), sb_coords_xyz)
     nearest_start_idx = np.argmin(start_distances)
-    final_start_coord = tuple(sb_coords_zyx[nearest_start_idx].astype(int))
+    final_start_coord = tuple(sb_coords_xyz[nearest_start_idx].astype(int))
 
-    end_distances = cdist(raw_end_coord_zyx.reshape(1, 3), sb_coords_zyx)
+    end_distances = cdist(raw_end_coord.reshape(1, 3), sb_coords_xyz)
     nearest_end_idx = np.argmin(end_distances)
-    final_end_coord = tuple(sb_coords_zyx[nearest_end_idx].astype(int))
+    final_end_coord = tuple(sb_coords_xyz[nearest_end_idx].astype(int))
 
     return final_start_coord, final_end_coord
 
 
 class ClipTransform(torch.nn.Module):
+    """
+    Clip the input tensor to a specified range.
+    The output is then normalized to the range [0, 1].
+    """
     def __init__(self, _min=-1, _max=1):
         super().__init__()
         self.min = _min
@@ -457,16 +450,6 @@ class ClipTransform(torch.nn.Module):
 
     def forward(self, x):
         return (torch.clamp(x, self.min, self.max) - self.min) / (self.max - self.min)
-
-# class ClipTransform(torch.nn.Module):
-#     def __init__(self, _min=-1, _max=1):
-#         super().__init__()
-#         self.min = _min
-#         self.max = _max
-
-#     def forward(self, x):
-#         x = x.where(x < self.max, self.min).where(x > self.min, self.min)
-#         return (x - self.min) / (self.max - self.min)
 
 
 class BinaryDilation3D(nn.Module):
@@ -565,3 +548,392 @@ class BinaryDilation3D(nn.Module):
         dilated_volume = (dilated_volume_sum > 0).float()
 
         return dilated_volume
+
+
+def determine_do_sep_z_and_axis(
+    force_separate_z: bool,
+    current_spacing,
+    new_spacing,
+    separate_z_anisotropy_threshold: float = 3,
+) -> Tuple[bool, Union[int, None]]:
+    if force_separate_z is not None:
+        do_separate_z = force_separate_z
+        if force_separate_z:
+            axis = np.argmax(current_spacing)
+        else:
+            axis = None
+    else:
+        if (max(current_spacing) / min(current_spacing)) > separate_z_anisotropy_threshold:
+            do_separate_z = True
+            axis = np.argmax(current_spacing)
+        elif (max(new_spacing) / min(new_spacing)) > separate_z_anisotropy_threshold:
+            do_separate_z = True
+            axis = np.argmax(new_spacing)
+        else:
+            do_separate_z = False
+            axis = None
+
+    if axis is not None:
+        if len(axis) == 3:
+            do_separate_z = False
+            axis = None
+        elif len(axis) == 2:
+            # this happens for spacings like (0.24, 1.25, 1.25) for example. In that case we do not want to resample
+            # separately in the out of plane axis
+            do_separate_z = False
+            axis = None
+        else:
+            axis = axis[0]
+    return do_separate_z, axis
+
+
+def resample_torch_simple(
+    data: Union[torch.Tensor, np.ndarray],
+    new_shape: Union[Tuple[int, ...], List[int], np.ndarray],
+    is_seg: bool = False,
+    device: torch.device = torch.device("cpu"),
+    memefficient_seg_resampling: bool = False,
+    mode="linear",
+):
+    if mode == "linear":
+        if data.ndim == 4:
+            torch_mode = "trilinear"
+        elif data.ndim == 3:
+            torch_mode = "bilinear"
+        else:
+            raise RuntimeError
+    else:
+        torch_mode = mode
+
+    if isinstance(new_shape, np.ndarray):
+        new_shape = new_shape.tolist()
+
+    if all([i == j for i, j in zip(new_shape, data.shape[1:])]):
+        return data
+
+    new_shape = tuple(new_shape)
+    with torch.no_grad():
+        input_was_numpy = isinstance(data, np.ndarray)
+        if input_was_numpy:
+            data = torch.from_numpy(data).to(device)
+        else:
+            orig_device = data.device
+            data = data.to(device)
+
+        if is_seg:
+            unique_values = torch.unique(data)
+            result_dtype = torch.int8 if max(unique_values) < 127 else torch.int16
+            result = torch.zeros((data.shape[0], *new_shape), dtype=result_dtype, device=device)
+            if not memefficient_seg_resampling:
+                # believe it or not, the implementation below is 3x as fast (at least on Liver CT and on CPU)
+                # Why? Because argmax is slow. The implementation below immediately sets most locations and only lets the
+                # uncertain ones be determined by argmax
+
+                # unique_values = torch.unique(data)
+                # result = torch.zeros((len(unique_values), data.shape[0], *new_shape), dtype=torch.float16)
+                # for i, u in enumerate(unique_values):
+                #     result[i] = F.interpolate((data[None] == u).float() * 1000, new_shape, mode='trilinear', antialias=False)[0]
+                # result = unique_values[result.argmax(0)]
+
+                result_tmp = torch.zeros(
+                    (len(unique_values), data.shape[0], *new_shape),
+                    dtype=torch.float16,
+                    device=device,
+                )
+                scale_factor = 1000
+                done_mask = torch.zeros_like(result, dtype=torch.bool, device=device)
+                for i, u in enumerate(unique_values):
+                    result_tmp[i] = F.interpolate(
+                        (data[None] == u).float() * scale_factor,
+                        new_shape,
+                        mode=torch_mode,
+                        antialias=False,
+                    )[0]
+                    mask = result_tmp[i] > (0.7 * scale_factor)
+                    result[mask] = u.item()
+                    done_mask |= mask
+                if not torch.all(done_mask):
+                    # print('resolving argmax', torch.sum(~done_mask), "voxels to go")
+                    result[~done_mask] = unique_values[result_tmp[:, ~done_mask].argmax(0)].to(
+                        result_dtype
+                    )
+            else:
+                for i, u in enumerate(unique_values):
+                    if u == 0:
+                        pass
+                    result[
+                        F.interpolate(
+                            (data[None] == u).float(),
+                            new_shape,
+                            mode=torch_mode,
+                            antialias=False,
+                        )[0]
+                        > 0.5
+                    ] = u
+        else:
+            result = F.interpolate(data[None].float(), new_shape, mode=torch_mode, antialias=False)[
+                0
+            ]
+        if input_was_numpy:
+            result = result.cpu().numpy()
+        else:
+            result = result.to(orig_device)
+    return result
+
+
+def resample_torch_fornnunet(
+    data: Union[torch.Tensor, np.ndarray],
+    new_shape: Union[Tuple[int, ...], List[int], np.ndarray],
+    current_spacing: Union[Tuple[float, ...], List[float], np.ndarray],
+    new_spacing: Union[Tuple[float, ...], List[float], np.ndarray],
+    is_seg: bool = False,
+    device: torch.device = torch.device("cpu"),
+    memefficient_seg_resampling: bool = False,
+    force_separate_z: Union[bool, None] = None,
+    separate_z_anisotropy_threshold: float = 3,
+    mode="linear",
+    aniso_axis_mode="nearest-exact",
+):
+    """
+    Resample a 3D image to a new shape using PyTorch.
+    Args:
+        data (torch.Tensor or np.ndarray): Input data to be resampled.
+        new_shape (tuple): New shape for the resampled data.
+        current_spacing (tuple): Current spacing of the input data.
+        new_spacing (tuple): New spacing for the resampled data.
+        is_seg (bool): If True, treat the input as a segmentation map.
+        device (torch.device): Device to perform the computation on.
+        memefficient_seg_resampling (bool): If True, use memory-efficient segmentation resampling.
+        force_separate_z (bool or None): If True, force separate z-axis resampling.
+        separate_z_anisotropy_threshold (float): Threshold for anisotropy separation.
+        mode (str): Interpolation mode ('linear', 'nearest-exact', etc.).
+        aniso_axis_mode (str): Interpolation mode for anisotropic axis.
+    """
+    assert data.ndim == 4, "data must be c, x, y, z"
+    new_shape = [int(i) for i in new_shape]
+    orig_shape = data.shape
+
+    do_separate_z, axis = determine_do_sep_z_and_axis(
+        force_separate_z, current_spacing, new_spacing, separate_z_anisotropy_threshold
+    )
+
+    if not do_separate_z:
+        return resample_torch_simple(data, new_shape, is_seg, device, memefficient_seg_resampling)
+
+    was_numpy = isinstance(data, np.ndarray)
+    if was_numpy:
+        data = torch.from_numpy(data)
+
+    axis_letter = "xyz"[axis]
+    others_int = [i for i in range(3) if i != axis]
+    others = ["xyz"[i] for i in others_int]
+
+    # reshape by overloading c channel
+    data = rearrange(data, f"c x y z -> (c {axis_letter}) {others[0]} {others[1]}")
+
+    # reshape in-plane
+    tmp_new_shape = [new_shape[i] for i in others_int]
+    data = resample_torch_simple(
+        data,
+        tmp_new_shape,
+        is_seg=is_seg,
+        device=device,
+        memefficient_seg_resampling=memefficient_seg_resampling,
+        mode=mode,
+    )
+    data = rearrange(
+        data,
+        f"(c {axis_letter}) {others[0]} {others[1]} -> c x y z",
+        **{
+            axis_letter: orig_shape[axis + 1],
+            others[0]: tmp_new_shape[0],
+            others[1]: tmp_new_shape[1],
+        },
+    )
+    # reshape out of plane w/ nearest
+    data = resample_torch_simple(
+        data,
+        new_shape,
+        is_seg=is_seg,
+        device=device,
+        memefficient_seg_resampling=memefficient_seg_resampling,
+        mode=aniso_axis_mode,
+    )
+    return data.numpy(force=True) if was_numpy else data
+
+
+def resample_uniform_res(scan, affine, **kwargs) -> tuple[np.ndarray, np.ndarray]:
+    """Resample the input scan to a uniform resolution.
+
+    Parameters
+    ----------
+    scan : np.ndarray
+        The input scan to be resampled.
+    affine : np.ndarray
+        The affine transformation matrix.
+    kwargs : dict
+        Additional arguments to be passed to the resampling function.
+        This can include parameters like `force_separate_z`, `memefficient_seg_resampling`, etc.
+        See the `resample_torch_fornnunet` function for more details.
+    Returns
+    -------
+    np.ndarray
+        The resampled scan.
+    np.ndarray
+        The updated affine transformation matrix.
+    """
+    # Get the spacing of the image
+    spacing = np.abs(np.diag(affine)[:3])
+
+    new_spacing = (min(spacing),) * 3
+
+    # Let new shape be uniform spacing
+    new_shape = np.asarray(scan.shape) * (spacing / min(spacing))
+
+    new_img = resample_torch_fornnunet(
+        scan[None],  # add batch dimension
+        new_shape=new_shape,
+        current_spacing=spacing,
+        new_spacing=new_spacing,
+        **kwargs,
+    )
+
+    affine = affine.copy()
+
+    # Fix affine matrix
+    affine[0, 0] = copysign(new_spacing[0], affine[0, 0])
+    affine[1, 1] = copysign(new_spacing[1], affine[1, 1])
+    affine[2, 2] = copysign(new_spacing[2], affine[2, 2])
+    affine[0, 3] = affine[0, 3] + (new_spacing[0] - spacing[0]) * scan.shape[0] / 2
+    affine[1, 3] = affine[1, 3] + (new_spacing[1] - spacing[1]) * scan.shape[1] / 2
+    affine[2, 3] = affine[2, 3] + (new_spacing[2] - spacing[2]) * scan.shape[2] / 2
+
+    return new_img[0], affine
+
+
+def resample_to_spacing(
+    scan: np.ndarray,
+    affine: np.ndarray,
+    target_spacing: tuple[float, float, float],
+    **kwargs,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Resample the input scan to a specified target spacing.
+
+    Parameters
+    ----------
+    scan : np.ndarray
+        The input scan to be resampled.
+    affine : np.ndarray
+        The affine transformation matrix.
+    target_spacing : tuple[float, float, float]
+        The target spacing for the resampling.
+    kwargs : dict
+        Additional arguments to be passed to the resampling function.
+        This can include parameters like `force_separate_z`, `memefficient_seg_resampling`, etc.
+        See the `resample_torch_fornnunet` function for more details.
+    Returns
+    -------
+    np.ndarray
+        The resampled scan.
+    np.ndarray
+        The updated affine transformation matrix.
+    """
+    # Get the spacing of the image
+    spacing = np.abs(np.diag(affine)[:3])
+
+    # Let new shape be uniform spacing
+    new_shape = np.asarray(scan.shape) * (spacing / target_spacing)
+
+    new_img = resample_torch_fornnunet(
+        scan[None],  # add batch dimension
+        new_shape=new_shape,
+        current_spacing=spacing,
+        new_spacing=target_spacing,
+        **kwargs,
+    )
+
+    affine = affine.copy()
+    # Fix affine matrix
+    affine[0, 0] = copysign(target_spacing[0], affine[0, 0])
+    affine[1, 1] = copysign(target_spacing[1], affine[1, 1])
+    affine[2, 2] = copysign(target_spacing[2], affine[2, 2])
+    affine[0, 3] = affine[0, 3] + (target_spacing[0] - spacing[0]) * scan.shape[0] / 2
+    affine[1, 3] = affine[1, 3] + (target_spacing[1] - spacing[1]) * scan.shape[1] / 2
+    affine[2, 3] = affine[2, 3] + (target_spacing[2] - spacing[2]) * scan.shape[2] / 2
+
+    return new_img[0], affine
+
+
+def resample_to_spacing_and_crop(
+    scan: np.ndarray,
+    affine: np.ndarray,
+    colon: np.ndarray,
+    duodenum: np.ndarray,
+    small_bowel: np.ndarray,
+    target_spacing: tuple[float, float, float] = (1.5, 1.5, 1.5),
+    margin: int = 30,
+    **kwargs,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Resample the input scan to a specified target spacing and crop to the region of interest.
+
+    Parameters
+    ----------
+    scan : np.ndarray
+        The input scan to be resampled.
+    affine : np.ndarray
+        The affine transformation matrix.
+    target_spacing : tuple[float, float, float]
+        The target spacing for the resampling.
+    colon : np.ndarray
+        The colon segmentation mask.
+    duodenum : np.ndarray
+        The duodenum segmentation mask.
+    small_bowel : np.ndarray
+        The small bowel segmentation mask.
+    Returns
+    -------
+    np.ndarray
+        The resampled and cropped scan.
+    np.ndarray
+        The updated affine transformation matrix.
+    """
+
+    # Full resampling + cropping to the region of interest (bowel, colon, duodenum)
+    new_img, aff = resample_to_spacing(scan, affine=affine, target_spacing=target_spacing, **kwargs)
+
+    # Do the same for the segmentations
+    colon, _ = resample_to_spacing(
+        colon, affine=affine, target_spacing=target_spacing, is_seg=True, **kwargs
+    )
+    duodenum, _ = resample_to_spacing(
+        duodenum, affine=affine, target_spacing=target_spacing, is_seg=True, **kwargs
+    )
+    small_bowel, _ = resample_to_spacing(
+        small_bowel, affine=affine, target_spacing=target_spacing, is_seg=True, **kwargs
+    )
+
+    # Get the bounding box of the bowel
+    overlayed = colon + duodenum + small_bowel
+    nonzero = np.nonzero(overlayed)
+    min_x, max_x = np.min(nonzero[0]), np.max(nonzero[0])
+    min_y, max_y = np.min(nonzero[1]), np.max(nonzero[1])
+    min_z, max_z = np.min(nonzero[2]), np.max(nonzero[2])
+
+    # Add a margin
+    min_x = max(0, min_x - margin)
+    max_x = min(new_img.shape[0], max_x + margin)
+    min_y = max(0, min_y - margin)
+    max_y = min(new_img.shape[1], max_y + margin)
+    min_z = max(0, min_z - margin)
+    max_z = min(new_img.shape[2], max_z + margin)
+
+    # Crop the image to the bounding box
+    new_img = new_img[min_x:max_x, min_y:max_y, min_z:max_z]
+    colon = colon[min_x:max_x, min_y:max_y, min_z:max_z]
+    duodenum = duodenum[min_x:max_x, min_y:max_y, min_z:max_z]
+    small_bowel = small_bowel[min_x:max_x, min_y:max_y, min_z:max_z]
+    # Update the affine matrix
+    aff[0, 3] = aff[0, 3] - (min_x * target_spacing[0])
+    aff[1, 3] = aff[1, 3] - (min_y * target_spacing[1])
+    aff[2, 3] = aff[2, 3] - (min_z * target_spacing[2])
+    return new_img, aff, colon, duodenum, small_bowel
