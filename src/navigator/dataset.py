@@ -11,7 +11,8 @@ from typing import Dict, List, Any
 from segmentor.utils.medutils import load_and_normalize_nifti
 
 # Import necessary calculation functions
-from .utils import find_start_end, compute_wall_map, compute_gdt
+from .utils import find_start_end, compute_wall_map, compute_gdt, distance_transform_edt, binary_dilation
+
 from .config import Config
 from skimage.feature import peak_local_max
 
@@ -116,12 +117,6 @@ class SmallBowelDataset(Dataset):
             Dictionary with the loaded subject data (images/maps as tensors)
         """
         if isinstance(idx, int) or np.issubdtype(type(idx), np.integer):
-            # Handle index out of bounds
-            if idx < 0 or idx >= len(self.subjects):
-                raise IndexError(
-                    f"Index {idx} out of range for dataset with {len(self.subjects)} subjects"
-                )
-
             # Get the subject entry
             subject = self.subjects[idx]
             data = load_subject_data(subject, self.config)
@@ -176,18 +171,18 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     # Load segmentations (ensure they exist before loading)
     sb_seg_nii = np.asanyarray(nib.load(subject_data["small_bowel"]).dataobj)
     seg_np = np.transpose(sb_seg_nii, (2, 1, 0))
-    result["seg"] = seg_np
+    result["seg"] = (seg_np > 0).astype(np.uint8)
 
     if subject_data.get("duodenum"):
         duodenum_seg_nii = np.asanyarray(nib.load(subject_data["duodenum"]).dataobj)
         duodenum_np = np.transpose(duodenum_seg_nii, (2, 1, 0))
-        result["duodenum"] = duodenum_np
+        result["duodenum"] = (duodenum_np > 0).astype(np.uint8)
     else:
         result["duodenum"] = None
     if subject_data.get("colon"):
         colon_seg_nii = np.asanyarray(nib.load(subject_data["colon"]).dataobj)
         colon_np = np.transpose(colon_seg_nii, (2, 1, 0))
-        result["colon"] = colon_np
+        result["colon"] = (colon_np > 0).astype(np.uint8)
     else:
         result["colon"] = None
 
@@ -201,16 +196,18 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     # --- Load/Calculate Start/End Coordinates ---
     start_end_cache_path = cache_dir / CACHE_FILES["start_end"]
     if start_end_cache_path.exists():
+        # NOTE: Coords are saved in XYZ, so we transpose)
         start_coord_np, end_coord_np = np.loadtxt(start_end_cache_path, dtype=int)
-        start_coord = tuple(start_coord_np)
-        end_coord = tuple(end_coord_np)
+        start_coord = tuple(start_coord_np)[::-1]
+        end_coord = tuple(end_coord_np)[::-1]
     else:
         assert result["duodenum"] is not None, "Duodenum segmentation is required to find start/end coordinates."
         assert result["colon"] is not None, "Colon segmentation is required to find start/end coordinates."
+        # Get them in XYZ order
         start_coord, end_coord = find_start_end(
-            duodenum_volume=result["duodenum"], colon_volume=result["colon"], small_bowel_volume=seg_np
+            duodenum_volume=np.transpose(result["duodenum"], (2,1,0)), colon_volume=np.transpose(result["colon"], (2,1,0)), small_bowel_volume=np.tranpose(result["seg"], (2,1,0))
         )
-        np.savetxt(start_end_cache_path, np.stack((start_coord, end_coord)), fmt="%d")
+        np.savetxt(start_end_cache_path, (start_coord, end_coord), fmt="%d")
     result["start_coord"] = start_coord
     result["end_coord"] = end_coord
 
@@ -261,13 +258,11 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     local_peaks_cache_path = cache_dir / CACHE_FILES["local_peaks"]
     if local_peaks_cache_path.exists():
         local_peaks_np = np.loadtxt(local_peaks_cache_path, dtype=int)
+        local_peaks_np = np.fliplr(local_peaks_np)
     else:
-        from .utils import distance_transform_edt, binary_dilation
-        distances = distance_transform_edt(
-            binary_dilation(result["seg"], iterations=3)
-        )
-        local_peaks_np = peak_local_max(distances, min_distance=6, threshold_abs=4, num_peaks=1024)
-        np.savetxt(local_peaks_cache_path, local_peaks_np, fmt="%d")
+        distances = distance_transform_edt(result["seg"])
+        local_peaks_np = peak_local_max(distances, min_distance=4, threshold_abs=3, num_peaks=1024)
+        np.savetxt(local_peaks_cache_path, np.fliplr(local_peaks_np), fmt="%d")
     result["local_peaks"] = local_peaks_np
 
     return result

@@ -1,0 +1,61 @@
+{'target': 1.5134368798847333, 'params': {'edge_threshold': 0.2251066014107722, 'sigmas': 3.8812979737686324, 'thetad': 4.000686248904069, 'thetav': 4.511662863159199}}
+Iteration 0: 
+        {'target': 1.5134368798847333, 'params': {'edge_threshold': 0.2251066014107722, 'sigmas': 3.8812979737686324, 'thetad': 4.000686248904069, 'thetav': 4.511662863159199}}
+Iteration 1: 
+        {'target': 1.4531127987405006, 'params': {'edge_threshold': 0.1440267672451339, 'sigmas': 1.3693543790751912, 'thetad': 5.117561268266026, 'thetav': 4.727803635215238}}
+Iteration 2: 
+        {'target': 1.4880457602111425, 'params': {'edge_threshold': 0.219030242269201, 'sigmas': 3.155266936013428, 'thetad': 6.515167086419769, 'thetav': 6.426097501983797}}
+Iteration 3: 
+        {'target': 1.4269987036253933, 'params': {'edge_threshold': 0.16133567491945525, 'sigmas': 4.512469745563782, 'thetad': 4.1643255591875565, 'thetav': 6.3523375508920115}}
+Iteration 4: 
+        {'target': 1.4577592904438887, 'params': {'edge_threshold': 0.2251914407101381, 'sigmas': 3.2347593137830066, 'thetad': 4.842321631571402, 'thetav': 3.990507445424394}}
+Iteration 5: 
+        {'target': 1.377707156019407, 'params': {'edge_threshold': 0.10231595679523632, 'sigmas': 1.6474437368507848, 'thetad': 8.25621420501999, 'thetav': 6.823684294958005}}
+Iteration 6: 
+        {'target': 1.4443996939553265, 'params': {'edge_threshold': 0.2694030841405533, 'sigmas': 4.281836677848862, 'thetad': 4.146695973739681, 'thetav': 4.239567530622855}}
+Iteration 7: 
+        {'target': 1.3718796467615275, 'params': {'edge_threshold': 0.2870157058835763, 'sigmas': 1.892898146405499, 'thetad': 9.754567882139094, 'thetav': 7.023425074850002}}
+Iteration 8: 
+        {'target': 1.4036017031549939, 'params': {'edge_threshold': 0.12895454513358795, 'sigmas': 1.403734478578368, 'thetad': 5.113197981534545, 'thetav': 4.784855233966708}}
+Iteration 9: 
+        {'target': 1.3788480271071166, 'params': {'edge_threshold': 0.20932575747022858, 'sigmas': 1.089592444534238, 'thetad': 4.914486077180496, 'thetav': 7.857607619407514}}
+Iteration 10: 
+        {'target': 1.419985153891036, 'params': {'edge_threshold': 0.39859006239055905, 'sigmas': 2.300690023530845, 'thetad': 8.901195897936509, 'thetav': 3.223169786105089}}
+Iteration 11: 
+        {'target': 1.4385761505752412, 'params': {'edge_threshold': 0.3943693881935696, 'sigmas': 2.081669313924289, 'thetad': 8.85271010841861, 'thetav': 5.2327966606441425}}
+Iteration 12: 
+        {'target': 1.4029785646480235, 'params': {'edge_threshold': 0.1974627284197036, 'sigmas': 3.543125664743176, 'thetad': 6.403030656165507, 'thetav': 6.757773999573022}}
+Iteration 13: 
+        {'target': 1.4559575445660538, 'params': {'edge_threshold': 0.1917733662011333, 'sigmas': 3.706613216052107, 'thetad': 7.308290369649883, 'thetav': 4.579288339271416}}
+Iteration 14: 
+        {'target': 1.3973942510115345, 'params': {'edge_threshold': 0.21915535924618582, 'sigmas': 1.7767115856767717, 'thetad': 4.317135861792655, 'thetav': 4.7247601559147}}
+Iteration 15: 
+        {'target': 1.412427496987731, 'params': {'edge_threshold': 0.1028390956475857, 'sigmas': 3.2008169338309513, 'thetad': 4.971929657840342, 'thetav': 5.388995995862228}}
+Iteration 16: 
+        {'target': 1.366254438235663, 'params': {'edge_threshold': 0.19970579957890716, 'sigmas': 2.939170026054512, 'thetad': 6.500957852129975, 'thetav': 7.104151395790843}}
+Iteration 17: 
+        {'target': 1.3667573624198366, 'params': {'edge_threshold': 0.1702171222603207, 'sigmas': 2.7880074227149096, 'thetad': 7.3006582782725, 'thetav': 7.745913437130053}}
+Iteration 18: 
+        {'target': 1.436150430213671, 'params': {'edge_threshold': 0.13536131895492165, 'sigmas': 3.2021243831067134, 'thetad': 6.948790842755521, 'thetav': 3.7298028041440547}}
+Iteration 19: 
+        {'target': 1.4397886575930507, 'params': {'edge_threshold': 0.17881606260490274, 'sigmas': 1.0873354212461344, 'thetad': 5.004818817467434, 'thetav': 6.208139852107393}}
+Iteration 20: 
+        {'target': 1.427107300170542, 'params': {'edge_threshold': 0.15882438992898273, 'sigmas': 2.6014764527653518, 'thetad': 7.0919705581400665, 'thetav': 3.3504306974940405}}
+Iteration 21: 
+        {'target': 1.4583017768727176, 'params': {'edge_threshold': 0.15423655590331461, 'sigmas': 2.087085177978319, 'thetad': 8.821243705911701, 'thetav': 6.2401927179669014}}
+Iteration 22: 
+        {'target': 1.4583017768727176, 'params': {'edge_threshold': 0.1401138933236334, 'sigmas': 3.031394434395081, 'thetad': 9.33461993264099, 'thetav': 5.835820464942017}}
+Iteration 23: 
+        {'target': 1.4152686804820467, 'params': {'edge_threshold': 0.14549104162587495, 'sigmas': 1.8170564836396874, 'thetad': 8.03485384597515, 'thetav': 7.3740593042393625}}
+Iteration 24: 
+        {'target': 1.4443996939553265, 'params': {'edge_threshold': 0.3454125847035012, 'sigmas': 1.6541068483078085, 'thetad': 4.090199304993721, 'thetav': 3.804943542970224}}
+Iteration 25: 
+        {'target': 1.366983621219227, 'params': {'edge_threshold': 0.39580290683132446, 'sigmas': 3.8333105595931247, 'thetad': 7.495078425066314, 'thetav': 6.730622113874221}}
+Iteration 26: 
+        {'target': 1.4583959764349574, 'params': {'edge_threshold': 0.36969970999946056, 'sigmas': 2.8088777952299937, 'thetad': 6.395289188187424, 'thetav': 4.557641046220448}}
+Iteration 27: 
+        {'target': 1.4066714389258657, 'params': {'edge_threshold': 0.31051032435241654, 'sigmas': 2.5369433233019802, 'thetad': 5.6101921042104, 'thetav': 5.4459168935411295}}
+Iteration 28: 
+        {'target': 1.4485119081379279, 'params': {'edge_threshold': 0.39827148527274836, 'sigmas': 2.0233665752689274, 'thetad': 7.711772990477663, 'thetav': 4.849188554091869}}
+Iteration 29: 
+        {'target': 1.4552134599667035, 'params': {'edge_threshold': 0.3553059733854639, 'sigmas': 4.1318246642338945, 'thetad': 9.413142058811166, 'thetav': 3.466949186543657}}

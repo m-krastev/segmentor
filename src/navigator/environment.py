@@ -218,11 +218,14 @@ class SmallBowelEnv(EnvBase):
         """
         # Store tensors directly
         self.image = self.transform(torch.from_numpy(image).to(self.device))
-        # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
-        # save_nifti(np.transpose(self.image.numpy(force=True), (2,1,0)), f"image_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
+        # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
+        # save_nifti(np.transpose(self.image.numpy(force=True), (2,1,0)), f"image_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
+
         self.seg = torch.from_numpy(seg).to(device=self.device, dtype=torch.uint8)
-        # FIXME: Temporary solution while figuring out how to fix bugs/incorrect segmentation.
         self.seg = self.dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze()
+        # self.seg[tuple(start_coord)] = 3
+        # self.seg[tuple(end_coord)] = 3
+        # save_nifti(np.transpose(self.seg.numpy(force=True), (2,1,0)), f"seg_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
         self.seg_np = self.seg.numpy(force=True)  # Keep numpy version for reference
         self.seg_volume = torch.sum(self.seg).item()
         self.wall_map = torch.from_numpy(wall_map).to(self.device)
@@ -235,8 +238,8 @@ class SmallBowelEnv(EnvBase):
         # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
         self.image_affine = image_affine if image_affine is not None else np.eye(4)
-        self.start_coord = start_coord
-        self.end_coord = end_coord
+        self.start_coord = tuple(start_coord)
+        self.end_coord = tuple(end_coord)
         # self.zeros_cache = torch.zeros_like(self.seg)
 
         # Update ground truth path if provided
@@ -272,9 +275,10 @@ class SmallBowelEnv(EnvBase):
         cum_path_patch = get_patch(
             self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
         )
-        # save_nifti(np.transpose(img_patch.numpy(force=True), (2,1,0)), "img_patch.nii.gz", affine=self.image_affine, spacing=self.spacing)
-        # save_nifti(np.transpose(wall_patch.numpy(force=True), (2,1,0)), "wall_patch.nii.gz", affine=self.image_affine, spacing=self.spacing)
-        # save_nifti(np.transpose(cum_path_patch.numpy(force=True), (2,1,0)), "cum_path_patch.nii.gz", affine=self.image_affine, spacing=self.spacing)
+        # save_nifti(np.transpose(img_patch.numpy(force=True), (2,1,0)), "img_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
+        # save_nifti(np.transpose(wall_patch.numpy(force=True), (2,1,0)), "wall_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
+        # save_nifti(np.transpose(cum_path_patch.numpy(force=True), (2,1,0)), "cum_path_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
+        # exit()
         # Stack patches
         actor_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
         critic_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
@@ -298,30 +302,31 @@ class SmallBowelEnv(EnvBase):
         return np.array(self.tracking_path_history)
 
     def save_path(self):
+        # Environment works with ZYX, so we have to do transposes here
         cache_dir = Path("results") / self._current_subject_data["id"]
         cache_dir.mkdir(parents=True, exist_ok=True)
         nif = nib.nifti1.Nifti1Image(
-            self.cumulative_path_mask.numpy(force=True),
+            np.transpose(self.cumulative_path_mask.numpy(force=True), (2,1,0)),
             affine=self.image_affine,
             header=nib.Nifti1Header(),
         )
-        nif.header.set_zooms(self.spacing)
+        nif.header.set_zooms(self.spacing[::-1])
         nib.save(nif, cache_dir / "cumulative_path_mask.nii.gz")
 
         # Save the tracking history
         tracking_history_path = cache_dir / "tracking_history.npy"
-        np.save(tracking_history_path, self.tracking_path_history)
+        np.save(tracking_history_path, np.fliplr(self.tracking_path_history))
 
         # PyVista visualization
         plotter = pv.Plotter()
-        plotter.add_volume(self.seg_np * 20, cmap="viridis", opacity="linear")
+        plotter.add_volume(self.seg_np * 10, cmap="viridis", opacity="linear")
         if self._current_subject_data.get("colon") is not None:
             plotter.add_volume(
                 self._current_subject_data["colon"] * 80, cmap="viridis", opacity="linear"
             )
         if self._current_subject_data.get("duodenum") is not None:
             plotter.add_volume(
-                self._current_subject_data["duodenum"] * 140,
+                self._current_subject_data["duodenum"] * 120,
                 cmap="viridis",
                 opacity="linear",
             )
@@ -348,7 +353,6 @@ class SmallBowelEnv(EnvBase):
 
         if not self.seg_np[next_pos_vox]:
             rt -= self.config.r_val1
-            return rt, S
 
         # --- 2. GDT-based reward ---
         next_gdt_val = self.gdt[next_pos_vox]
@@ -361,24 +365,20 @@ class SmallBowelEnv(EnvBase):
             if next_gdt_val > self.max_gdt_achieved:
                 delta = next_gdt_val - self.max_gdt_achieved
                 # Penalty if too large, reward if within margins
-                
-                # rt += self.config.r_val2 * (delta / self.config.gdt_max_increase_theta + 1)
                 rt += (
                     -self.config.r_val2
                     if delta > self.config.gdt_max_increase_theta
-                    else self.config.r_val2 * (delta / self.config.gdt_max_increase_theta + 1)
+                    else self.config.r_val2 * (1+delta / self.config.gdt_max_increase_theta)
                 )
-                # rt += self.config.r_val2 * (min(delta / self.config.gdt_max_increase_theta, 1) + 1)
 
-                # print(f"{S=}")
-                # print(f"{rt=}")
                 self.max_gdt_achieved = next_gdt_val
 
         # 2.5 Peaks-based reward
-        # rt += self.reward_map[S].sum() * self.config.r_peaks
+        rt += self.reward_map[S].sum() * self.config.r_peaks
         # print(f"{self.reward_map[S].sum()=}")
         # Discard the reward for visited nodes
-        # self.reward_map[S] = 0
+        self.reward_map[S] = 0
+        # print(f"Reward claimed!", flush=True)
 
         # Simple problem, toy problem might be a good way to solve this
 
@@ -390,7 +390,6 @@ class SmallBowelEnv(EnvBase):
         rt -= self.config.r_val1 * self.cumulative_path_mask[S].sum().bool()
         # print(f"{self.cumulative_path_mask[S].sum()=}")
 
-        # print(f"{self.seg_np[next_pos_vox]=}")
         return rt, S
 
     def _reset(
@@ -430,18 +429,18 @@ class SmallBowelEnv(EnvBase):
             self.current_pos_vox = self.start_coord
             self.goal = self.end_coord
             self.gdt = self.gdt_start
-        # elif rand < 6:
-        #     # Start at a random local peak
-        #     self.current_pos_vox = tuple(
-        #         self.local_peaks[random.randint(0, len(self.local_peaks) - 1)]
-        #     )
-        #     # Randomly go in either direction
-        #     if self.episodes_on_current_subject % 2:
-        #         self.goal = self.end_coord
-        #         self.gdt = self.gdt_start
-        #     else:
-        #         self.goal = self.start_coord
-        #         self.gdt = self.gdt_end
+        elif rand < 6:
+            # Start at a random local peak
+            self.current_pos_vox = tuple(
+                self.local_peaks[random.randint(0, len(self.local_peaks) - 1)]
+            )
+            # Randomly go in either direction
+            if self.episodes_on_current_subject % 2:
+                self.goal = self.end_coord
+                self.gdt = self.gdt_start
+            else:
+                self.goal = self.start_coord
+                self.gdt = self.gdt_end
         else:
             # Start at the end
             self.current_pos_vox = self.end_coord
@@ -495,8 +494,8 @@ class SmallBowelEnv(EnvBase):
                 "terminated": self._is_done.clone(),
                 "truncated": self._is_done.clone(),
                 "final_step_count": torch.zeros_like(self._is_done, dtype=torch.int64),
-                "final_coverage": self.placeholder_zeros,
-                "total_reward": self.placeholder_zeros,
+                "final_coverage": self.placeholder_zeros.clone(),
+                "total_reward": self.placeholder_zeros.clone(),
                 "max_gdt_achieved": torch.as_tensor(
                     self.max_gdt_achieved, dtype=torch.float32, device=self.device
                 ).view_as(self._is_done),
@@ -515,7 +514,7 @@ class SmallBowelEnv(EnvBase):
 
         # Map Action
         action_mapped = (2 * action_normalized - 1) * self.config.max_step_vox
-        action_vox_delta = tuple(torch.round(action_mapped).int().cpu().tolist())
+        action_vox_delta = action_mapped.cpu().round().int().tolist()
 
         # Execute Step Logic
         next_pos_vox = (
@@ -527,20 +526,20 @@ class SmallBowelEnv(EnvBase):
         # Check validity and update cumulative path
         is_next_pos_valid_seg = self._is_valid_pos(next_pos_vox)
 
-        if not is_next_pos_valid_seg or not self.seg_np[next_pos_vox]:
-            # Bounce in the opposite direction
-            next_pos_vox = (
-                self.current_pos_vox[0] - action_vox_delta[0],
-                self.current_pos_vox[1] - action_vox_delta[1],
-                self.current_pos_vox[2] - action_vox_delta[2],
-            )
+        # if not is_next_pos_valid_seg or not self.seg_np[next_pos_vox]:
+        #     # Bounce in the opposite direction in the X axis
+        #     next_pos_vox = (
+        #         self.current_pos_vox[0] + action_vox_delta[0],
+        #         self.current_pos_vox[1] + action_vox_delta[1],
+        #         self.current_pos_vox[2] - action_vox_delta[2],
+        #     )
 
-            # If the next position is invalid, bounce back to the current position
-            is_next_pos_valid_seg = self._is_valid_pos(next_pos_vox)
-            if not is_next_pos_valid_seg or not self.seg_np[next_pos_vox]:
-                next_pos_vox = self.current_pos_vox
-                action_vox_delta = (0, 0, 0)
-                is_next_pos_valid_seg = True
+        #     # If the next position is invalid, bounce back to the current position
+        #     is_next_pos_valid_seg = self._is_valid_pos(next_pos_vox)
+        #     if not is_next_pos_valid_seg or not self.seg_np[next_pos_vox]:
+        #         next_pos_vox = self.current_pos_vox
+        #         action_vox_delta = (0, 0, 0)
+        #         is_next_pos_valid_seg = True
 
 
         # Calculate reward (needs to be before moving to the next pos)
@@ -559,7 +558,7 @@ class SmallBowelEnv(EnvBase):
         termination_reason = ""
         if self.current_step_count >= self.config.max_episode_steps:
             done, truncated, termination_reason = True, True, "max_steps"
-        elif not (is_next_pos_valid_seg and self.seg_np[next_pos_vox]):
+        elif not (is_next_pos_valid_seg and self.seg_np[next_pos_vox]): # and 
             done, terminated, termination_reason = True, True, "out_of_bounds"
         elif dist(next_pos_vox, self.goal) < self.config.cumulative_path_radius_vox:
             done, terminated, termination_reason = True, True, "reached_goal"
@@ -644,7 +643,7 @@ def make_sb_env(
     num_workers = getattr(config, "num_workers", 0)
     dataset_iterator = cycle(DataLoader(
         dataset, batch_size=1, shuffle=config.shuffle_dataset, num_workers=num_workers,
-        collate_fn=get_first, pin_memory=False, persistent_workers=num_workers>0,
+        collate_fn=get_first, pin_memory=True, persistent_workers=num_workers>0,
     ))
 
     env = SmallBowelEnv(

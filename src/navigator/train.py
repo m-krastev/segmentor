@@ -55,7 +55,7 @@ def validation_loop_torchrl(
 
     with (
         torch.no_grad(),
-        set_exploration_type(ExplorationType.DETERMINISTIC),
+        set_exploration_type(ExplorationType.MODE),
     ):  # Use deterministic actions
         for i in tqdm(range(num_val_subjects), desc="Validation"):
             try:
@@ -113,6 +113,8 @@ def train_torchrl(
     print(
         f"Total trainable parameters: {sum(p.numel() for p in policy_module.parameters()) + sum(p.numel() for p in value_module.parameters())}"
     )
+
+    torch.set_float32_matmul_precision("medium")
 
     # --- Collector ---
     # Collects data by interacting policy_module with environment instances

@@ -1,4 +1,5 @@
 import numpy as np
+from math import dist
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,7 +20,8 @@ from tqdm import tqdm
 try:
     import kimimaro
     import networkx as nx
-    from scipy.ndimage import binary_dilation
+    # from scipy.ndimage import binary_dilation, grey_dilation
+    from navigator.utils import binary_dilation
     from scipy.spatial.distance import cdist
 except ImportError as e:
     print(f"Error importing dependencies for start/end finding: {e}")
@@ -30,7 +32,7 @@ except ImportError as e:
 import wandb  # Import wandb
 
 
-# --- Configuration Dataclass (Added Wandb Options) ---
+# --- Configuration Dataclass (Added Wandb & Evaluation Options) ---
 @dataclass
 class Config:
     # --- Input/Output ---
@@ -44,7 +46,9 @@ class Config:
     # --- Wandb Logging ---
     track_wandb: bool = True  # Flag to enable/disable wandb
     wandb_project_name: str = "SmallBowelPathTracking"
-    wandb_entity: Optional[str] = None  # Your wandb username or team name (optional)
+    wandb_entity: Optional[str] = (
+        None  # Your wandb username or team name (optional)
+    )
     wandb_run_name: Optional[str] = (
         None  # Optional run name, defaults to auto-generated
     )
@@ -52,24 +56,21 @@ class Config:
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.5
     patch_size_mm: int = 60
-    max_step_displacement_mm: float = (
-        10.0  # Reduced default based on previous discussion
-    )
+    max_step_displacement_mm: float = 9.0
     max_episode_steps: int = 1024
-    cumulative_path_radius_mm: float = 6.0
+    cumulative_path_radius_mm: float = 4
     wall_map_sigma: float = 1.0
 
     # --- Reward Hyperparameters ---
     r_wall: float = 4.0
     r_val2: float = 6.0
     r_final: float = 100.0
-    # Add a flag/value for reward modification if you implement it
-    use_immediate_gdt_reward: bool = False  # Flag for the denser reward
-    wall_penalty_scale: float = 0.2  # Scale factor for wall penalty
+    use_immediate_gdt_reward: bool = False
+    wall_penalty_scale: float = 1.5
 
     # --- PPO Hyperparameters ---
     learning_rate: float = 1e-5
-    total_timesteps: int = 1_000_000
+    total_timesteps: int = 10_000_000
     n_steps: int = 2048
     batch_size: int = 128
     n_epochs: int = 5
@@ -83,6 +84,18 @@ class Config:
     # --- Training/Device ---
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # --- Evaluation Parameters (NEW) ---
+    eval_mode: bool = False  # If True, run evaluation instead of training
+    load_path: Optional[str] = (
+        None  # Path to the .pth file for evaluation (required if eval_mode=True)
+    )
+    eval_output_path: str = (
+        "evaluated_path.npy"  # Path to save the resulting trajectory NPY file
+    )
+    eval_deterministic: bool = (
+        True  # Use deterministic actions (mean) during evaluation
+    )
+
     # --- Derived Parameters ---
     gdt_cell_length: float = field(init=False)
     max_step_vox: int = field(init=False)
@@ -91,37 +104,36 @@ class Config:
     gdt_max_increase_theta: float = field(init=False)
 
     def __post_init__(self):
-        # ... (post_init calculation remains the same) ...
         self.gdt_cell_length = self.voxel_size_mm
-        self.max_step_vox = mm_to_vox(self.max_step_displacement_mm, self.voxel_size_mm)
+        self.max_step_vox = mm_to_vox(
+            self.max_step_displacement_mm, self.voxel_size_mm
+        )
         patch_vox_dim = mm_to_vox(self.patch_size_mm, self.voxel_size_mm)
         self.patch_size_vox = (patch_vox_dim,) * 3
         self.cumulative_path_radius_vox = mm_to_vox(
             self.cumulative_path_radius_mm, self.voxel_size_mm
         )
-        step_dist_gdt = self.max_step_displacement_mm / self.gdt_cell_length
-        self.gdt_max_increase_theta = max(0.0, np.sqrt(3 * step_dist_gdt**2))
+        self.gdt_max_increase_theta = max(0.0, np.sqrt(3 * self.max_step_vox **2))
 
 
-# --- Argument Parsing (Updated for Wandb) ---
+# --- Argument Parsing (Updated for Wandb & Evaluation) ---
 def parse_args() -> Config:
     parser = argparse.ArgumentParser(
         description="Deep Reinforcement Learning for Small Bowel Path Tracking"
     )
     default_config = Config()
+
     # Add arguments dynamically from Config fields
-    for field_name, field_type in Config.__annotations__.items():
-        if field_name in [
-            "gdt_cell_length",
-            "max_step_vox",
-            "patch_size_vox",
-            "cumulative_path_radius_vox",
-            "gdt_max_increase_theta",
-        ]:
+    for field_name, field_info in Config.__dataclass_fields__.items():
+        if field_info.init is False:  # Skip derived fields
             continue
+
+        field_type = field_info.type
         default_val = getattr(default_config, field_name)
         arg_type = field_type
         required = False
+        arg_name = f"--{field_name.replace('_', '-')}"
+
         # Make duodenum/colon paths required if not using dummy defaults
         if (
             field_name in ["duodenum_seg_path", "colon_seg_path"]
@@ -137,37 +149,46 @@ def parse_args() -> Config:
             and field_type.__origin__ is Union
             and type(None) in field_type.__args__
         ):
-            # Special case for wandb_entity and wandb_run_name which can be None
-            if field_name in ["wandb_entity", "wandb_run_name"]:
+            # Special case for wandb_entity, wandb_run_name, load_path which can be None
+            if field_name in ["wandb_entity", "wandb_run_name", "load_path"]:
                 arg_type = str  # Expect string or nothing
             else:
-                arg_type = field_type.__args__[0]
+                arg_type = field_type.__args__[0]  # Get the non-None type
 
         if arg_type == bool:
-            # Use BooleanOptionalAction for flags like --track-wandb / --no-track-wandb
+            # Use BooleanOptionalAction for flags like --eval-mode / --no-eval-mode
             parser.add_argument(
-                f"--{field_name.replace('_', '-')}",
+                arg_name,
                 action=argparse.BooleanOptionalAction,
                 default=default_val,
                 help=f"{field_name} (default: {default_val})",
             )
         else:
+            # Handle load_path being conditionally required later
+            is_conditionally_required = field_name == "load_path"
             parser.add_argument(
-                f"--{field_name.replace('_', '-')}",
+                arg_name,
                 type=arg_type,
                 default=default_val,
-                required=required,
+                required=required
+                and not is_conditionally_required,  # Standard requirement check
                 help=f"{field_name} (default: {default_val})",
             )
 
     args = parser.parse_args()
-    config_dict = {k: v for k, v in vars(args).items() if k in Config.__annotations__}
+
+    # --- Conditional Requirement Check ---
+    if args.eval_mode and args.load_path is None:
+        parser.error("--load-path is required when --eval-mode is set.")
+
+    config_dict = {
+        k: v for k, v in vars(args).items() if k in Config.__annotations__
+    }
     config = Config(**config_dict)
     return config
 
 
 # --- Helper Functions (Unchanged) ---
-# ... (mm_to_vox, vox_to_mm, get_patch, compute_gdt, compute_wall_map, draw_path_sphere) ...
 def mm_to_vox(dist_mm: float, voxel_dim_mm: float) -> int:
     return int(math.floor(dist_mm / voxel_dim_mm))
 
@@ -185,9 +206,15 @@ def get_patch(
     center_z, center_y, center_x = center_vox
     pz, py, px = patch_size_vox
     h_pz, h_py, h_px = pz // 2, py // 2, px // 2
-    pad_z = max(0, h_pz - center_z) + max(0, center_z + (pz - h_pz) - volume.shape[0])
-    pad_y = max(0, h_py - center_y) + max(0, center_y + (py - h_py) - volume.shape[1])
-    pad_x = max(0, h_px - center_x) + max(0, center_x + (px - h_px) - volume.shape[2])
+    pad_z = max(0, h_pz - center_z) + max(
+        0, center_z + (pz - h_pz) - volume.shape[0]
+    )
+    pad_y = max(0, h_py - center_y) + max(
+        0, center_y + (py - h_py) - volume.shape[1]
+    )
+    pad_x = max(0, h_px - center_x) + max(
+        0, center_x + (px - h_px) - volume.shape[2]
+    )
     padded_volume = volume
     if pad_z > 0 or pad_y > 0 or pad_x > 0:
         padding = (
@@ -211,7 +238,11 @@ def get_patch(
         center_z += max(0, h_pz - center_z)
         center_y += max(0, h_py - center_y)
         center_x += max(0, h_px - center_x)
-    start_z, start_y, start_x = center_z - h_pz, center_y - h_py, center_x - h_px
+    start_z, start_y, start_x = (
+        center_z - h_pz,
+        center_y - h_py,
+        center_x - h_px,
+    )
     end_z, end_y, end_x = start_z + pz, start_y + py, start_x + px
     patch = padded_volume[start_z:end_z, start_y:end_y, start_x:end_x]
     if patch.shape != tuple(patch_size_vox):
@@ -229,7 +260,9 @@ def get_patch(
 
 
 def compute_gdt(
-    segmentation_mask: np.ndarray, start_voxel: Tuple[int, int, int], voxel_size: float
+    segmentation_mask: np.ndarray,
+    start_voxel: Tuple[int, int, int],
+    voxel_size: float,
 ) -> np.ndarray:
     speed = np.ones_like(segmentation_mask, dtype=float)
     speed[segmentation_mask == 0] = 1e-5
@@ -254,7 +287,7 @@ def compute_wall_map(image: np.ndarray, sigma: float = 1.0) -> np.ndarray:
     sigma_int = max(1, int(sigma))
     wall_map = meijering(
         image,
-        sigmas=[1,3],
+        sigmas=[1, 3],  # Adjusted sigmas based on previous context if needed
         black_ridges=True,
         mode="constant",
         cval=0,
@@ -281,20 +314,32 @@ def draw_path_sphere(
                 slice_radius = int(math.sqrt(slice_radius_sq))
                 try:
                     rr, cc = disk(
-                        (y, x), radius=slice_radius + 0.5, shape=(shape[1], shape[2])
+                        (y, x),
+                        radius=slice_radius + 0.5,
+                        shape=(shape[1], shape[2]),
                     )
                     rr = np.clip(rr, 0, shape[1] - 1)
                     cc = np.clip(cc, 0, shape[2] - 1)
                     if rr.size > 0 and cc.size > 0:
                         cumulative_path_mask[current_z, rr, cc] = 1.0
                 except Exception as e:
-                    # print(f"Warning: Error drawing disk z={current_z}, center=({y},{x}), r={slice_radius}: {e}") # Less verbose
                     if 0 <= y < shape[1] and 0 <= x < shape[2]:
                         cumulative_path_mask[current_z, y, x] = 1.0
 
+# def draw_path_sphere(
+#         cumulative_path_mask,
+#         start,
+#         end,
+#         n_iter = 1,
+# ):    
+#     line = line_nd(start, end, endpoint=True)
+#     cumulative_path_mask[line] = 1
+#     cumulative_path_mask = binary_dilation(cumulative_path_mask, n_iter)
+#     return cumulative_path_mask
+
+
 
 # --- Start/End Finding Logic (Unchanged) ---
-# ... (find_start_end function exactly as before) ...
 def find_start_end(
     duodenum_volume: np.ndarray,
     colon_volume: np.ndarray,
@@ -341,8 +386,9 @@ def find_start_end(
                 key=lambda n: duodenum_graph.nodes[n]["location"][0],
             )
         else:
-            start_node = max(ends, key=lambda n: duodenum_graph.nodes[n]["location"][0])
-        # print(f"  Found raw DJ flexure node {start_node} at {duodenum_graph.nodes[start_node]['location']}")
+            start_node = max(
+                ends, key=lambda n: duodenum_graph.nodes[n]["location"][0]
+            )
         return duodenum_graph.nodes[start_node]["location"]
 
     def find_ileocecal_junction(end_volume: np.ndarray) -> np.ndarray:
@@ -376,7 +422,9 @@ def find_start_end(
         colon_graph.add_edges_from(colon_skeleton.edges)
         if colon_graph.number_of_nodes() == 0:
             raise RuntimeError("Colon skeleton graph empty.")
-        largest_cc = max(nx.connected_components(colon_graph), key=len, default=None)
+        largest_cc = max(
+            nx.connected_components(colon_graph), key=len, default=None
+        )
         if largest_cc is None:
             raise RuntimeError("Colon skeleton graph no CCs.")
         colon_subgraph = colon_graph.subgraph(largest_cc).copy()
@@ -395,13 +443,17 @@ def find_start_end(
                 ),
             )
         else:
-            rectal_end = max(ends, key=lambda n: colon_subgraph.nodes[n]["location"][0])
+            rectal_end = max(
+                ends, key=lambda n: colon_subgraph.nodes[n]["location"][0]
+            )
             ends.remove(rectal_end)
             if not ends:
                 print("Warning: Only rectal end found. Using farthest node.")
                 ileocecal_end = max(
                     colon_subgraph.nodes,
-                    key=lambda n: nx.shortest_path_length(colon_subgraph, rectal_end, n)
+                    key=lambda n: nx.shortest_path_length(
+                        colon_subgraph, rectal_end, n
+                    )
                     if nx.has_path(colon_subgraph, rectal_end, n)
                     else -1,
                 )
@@ -414,7 +466,6 @@ def find_start_end(
                 )
             else:
                 ileocecal_end = ends[0]
-        # print(f"  Found raw IC junction node {ileocecal_end} at {colon_subgraph.nodes[ileocecal_end]['location']}")
         return colon_subgraph.nodes[ileocecal_end]["location"]
 
     raw_start_coord_zyx = find_duodenojejunal_flexure(duodenum_volume)
@@ -435,7 +486,7 @@ def find_start_end(
     return final_start_coord, final_end_coord
 
 
-# --- Environment Definition (Updated Reward Calculation) ---
+# --- Environment Definition (Unchanged) ---
 class SmallBowelEnv:
     def __init__(
         self, config: Config, start_end_coords: Dict[str, Tuple[int, int, int]]
@@ -459,14 +510,20 @@ class SmallBowelEnv:
             self.image_np = (image_np - img_min) / (img_max - img_min)
         else:
             self.image_np = np.zeros_like(image_np)
-        self.wall_map_np = compute_wall_map(self.image_np, sigma=config.wall_map_sigma)
+        self.wall_map_np = compute_wall_map(
+            self.image_np, sigma=config.wall_map_sigma
+        )
         self.gt_path_available = False
         self.gt_path_voxels = None
-        if config.gt_path_path is not None and os.path.exists(config.gt_path_path):
+        if config.gt_path_path is not None and os.path.exists(
+            config.gt_path_path
+        ):
             try:
                 self.gt_path_voxels = np.load(config.gt_path_path).astype(int)
                 self.gt_path_available = True
-                self.gt_path_vol_np = np.zeros_like(self.image_np, dtype=np.float32)
+                self.gt_path_vol_np = np.zeros_like(
+                    self.image_np, dtype=np.float32
+                )
                 valid_indices = (
                     (self.gt_path_voxels[:, 0] >= 0)
                     & (self.gt_path_voxels[:, 0] < self.image_np.shape[0])
@@ -478,11 +535,17 @@ class SmallBowelEnv:
                 valid_gt_path = self.gt_path_voxels[valid_indices]
                 if valid_gt_path.shape[0] > 0:
                     self.gt_path_vol_np[
-                        valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]
+                        valid_gt_path[:, 0],
+                        valid_gt_path[:, 1],
+                        valid_gt_path[:, 2],
                     ] = 1.0
-                self.gt_path_vol = torch.from_numpy(self.gt_path_vol_np).to(self.device)
+                self.gt_path_vol = torch.from_numpy(self.gt_path_vol_np).to(
+                    self.device
+                )
             except Exception as e:
-                print(f"Warning: Could not load GT path {config.gt_path_path}: {e}")
+                print(
+                    f"Warning: Could not load GT path {config.gt_path_path}: {e}"
+                )
                 self.gt_path_available = False
                 self.gt_path_vol = torch.zeros_like(
                     torch.from_numpy(self.image_np), device=self.device
@@ -498,14 +561,13 @@ class SmallBowelEnv:
 
         self.current_step: int = 0
         self.cumulative_path_mask: Optional[torch.Tensor] = None
-        # self.gdt: Optional[torch.Tensor] = None
         self.max_gdt_achieved: float = 0.0
         self.tracking_path_history: List[Tuple[int, int, int]] = []
-        self.current_gdt_val: float = (
-            0.0  # Store GDT value of current position for immediate reward
-        )
+        self.current_gdt_val: float = 0.0
         self.gdt = torch.from_numpy(
-            compute_gdt(self.seg_np, self.start_coord, self.config.gdt_cell_length)
+            compute_gdt(
+                self.seg_np, self.start_coord, self.config.gdt_cell_length
+            )
         ).to(self.device)
 
     def _get_state_patches(self) -> Dict[str, torch.Tensor]:
@@ -520,7 +582,9 @@ class SmallBowelEnv:
         )
         cum_path_patch = get_patch(cum_path_mask, center, ps)
         gt_path_patch = get_patch(self.gt_path_vol, center, ps)
-        actor_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
+        actor_state = torch.stack(
+            [img_patch, wall_patch, cum_path_patch], dim=0
+        )
         critic_state = torch.stack(
             [img_patch, wall_patch, cum_path_patch, gt_path_patch], dim=0
         )
@@ -529,7 +593,9 @@ class SmallBowelEnv:
     def _is_valid_pos(self, pos_vox: Tuple[int, int, int]) -> bool:
         s = self.image.shape
         return (
-            0 <= pos_vox[0] < s[0] and 0 <= pos_vox[1] < s[1] and 0 <= pos_vox[2] < s[2]
+            0 <= pos_vox[0] < s[0]
+            and 0 <= pos_vox[1] < s[1]
+            and 0 <= pos_vox[2] < s[2]
         )
 
     def _get_final_coverage(self) -> float:
@@ -547,11 +613,14 @@ class SmallBowelEnv:
             self.current_pos_vox = self.end_coord
         else:
             self.current_pos_vox = self.start_coord
+
         if (
             not self._is_valid_pos(self.current_pos_vox)
             or self.seg[self.current_pos_vox].item() == 0
         ):
-            print(f"Warning: Start pos {self.current_pos_vox} invalid. Searching...")
+            print(
+                f"Warning: Start pos {self.current_pos_vox} invalid. Searching..."
+            )
             found_valid_start = False
             for dz in [-1, 0, 1]:
                 for dy in [-1, 0, 1]:
@@ -563,7 +632,10 @@ class SmallBowelEnv:
                             self.current_pos_vox[1] + dy,
                             self.current_pos_vox[2] + dx,
                         )
-                        if self._is_valid_pos(new_pos) and self.seg[new_pos].item() > 0:
+                        if (
+                            self._is_valid_pos(new_pos)
+                            and self.seg[new_pos].item() > 0
+                        ):
                             self.current_pos_vox = new_pos
                             found_valid_start = True
                             break
@@ -575,11 +647,12 @@ class SmallBowelEnv:
                 valid_voxels = torch.nonzero(self.seg > 0)
                 if len(valid_voxels) > 0:
                     rand_idx = torch.randint(0, len(valid_voxels), (1,)).item()
-                    self.current_pos_vox = tuple(valid_voxels[rand_idx].tolist())
+                    self.current_pos_vox = tuple(
+                        valid_voxels[rand_idx].tolist()
+                    )
                     print(f"Fallback start: {self.current_pos_vox}")
                 else:
                     raise ValueError("Cannot start: Seg mask empty.")
-                
 
         self.cumulative_path_mask = torch.zeros_like(
             self.image, dtype=torch.float32, device=self.device
@@ -591,7 +664,6 @@ class SmallBowelEnv:
         )
         self.tracking_path_history = [self.current_pos_vox]
 
-        # Initialize current GDT value
         if self.gdt is not None and self._is_valid_pos(self.current_pos_vox):
             gdt_tensor = self.gdt[self.current_pos_vox]
             self.current_gdt_val = (
@@ -599,86 +671,66 @@ class SmallBowelEnv:
             )
         else:
             self.current_gdt_val = 0.0
-        self.max_gdt_achieved = (
-            self.current_gdt_val
-        )  # Initialize max achieved with start value
+        self.max_gdt_achieved = self.current_gdt_val
         return self._get_state_patches()
 
     def get_tracking_history(self) -> np.ndarray:
         return np.array(self.tracking_path_history)
 
     def _calculate_reward(
-        self, action_vox: Tuple[int, int, int], next_pos_vox: Tuple[int, int, int]
+        self,
+        action_vox: Tuple[int, int, int],
+        next_pos_vox: Tuple[int, int, int],
     ) -> float:
-        """Calculates the reward for the current step (modified version)."""
-        rt = 0.0
-        current_pos_np = np.array(self.current_pos_vox)
-        next_pos_np = np.array(next_pos_vox)
-        action_np = np.array(action_vox)
+        """Calculate the reward for the current step. Assumes tensors are valid."""
 
-        # --- 1. Zero movement penalty ---
-        if np.all(action_np == 0):
-            return -self.config.r_wall  # Just return reward, GDT update handled in step
+        rt = torch.tensor(0.0, device=self.device)
+        # Set of voxels S on the line segment
+        S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
 
-        # --- Line segment voxels ---
-        line_voxels_idx = line_nd(current_pos_np, next_pos_np, endpoint=True)
-        S = list(zip(line_voxels_idx[0], line_voxels_idx[1], line_voxels_idx[2]))
+        # --- 1. Zero movement or goes out of the image penalty ---
+        if not any(action_vox) or not self._is_valid_pos(next_pos_vox) or not self.gt_path_vol[next_pos_vox]:
+            rt -= self.config.r_wall
+            return rt, S
 
-        # --- 2. GDT-based reward (Immediate Increase) ---
-        next_gdt_val = np.inf
-        if self.gdt is not None and self._is_valid_pos(next_pos_vox):
-            next_gdt_tensor = self.gdt[next_pos_vox]
-            if torch.isfinite(next_gdt_tensor):
-                next_gdt_val = next_gdt_tensor.item()
+        # --- 2. GDT-based reward ---
+        next_gdt_val = self.gdt[next_pos_vox]
+        # If there is some progress
+        if self.config.use_immediate_gdt_reward:
+            rt += max(
+                0.0,
+                self.config.r_val2
+                * (next_gdt_val - self.current_gdt_val)
+                / self.config.gdt_max_increase_theta,
+            )
+        elif next_gdt_val > self.max_gdt_achieved:
+            delta = next_gdt_val - self.max_gdt_achieved
+            # Penalty if too large
+            if delta > self.config.gdt_max_increase_theta:
+                rt -= self.config.r_val2
+            else:
+                rt += (
+                    self.config.r_val2
+                    * delta
+                    / self.config.gdt_max_increase_theta
+                )
+            self.max_gdt_achieved = next_gdt_val
 
-                if self.config.use_immediate_gdt_reward:
-                    # Reward immediate positive change from previous step's GDT value
-                    immediate_delta_gdt = next_gdt_val - self.current_gdt_val
-                    if immediate_delta_gdt > 0:
-                        # Simple reward scaled by r_val2
-                        rt += self.config.r_val2 * (
-                            immediate_delta_gdt / max(1.0, self.config.max_step_vox)
-                        )  # Normalize by step?
-                else:
-                    # Original logic: Reward increase beyond max achieved
-                    delta_gdt = next_gdt_val - self.max_gdt_achieved
-                    if self.config.gdt_max_increase_theta > 1e-9:
-                        if delta_gdt > self.config.gdt_max_increase_theta:
-                            rt -= self.config.r_val2  # Penalty for too large step
-                        elif delta_gdt > 0:
-                            rt += (
-                                delta_gdt / self.config.gdt_max_increase_theta
-                            ) * self.config.r_val2
-                    elif delta_gdt > 0:  # If theta is ~0, reward any positive change
-                        rt += self.config.r_val2
+        # 2.5 Peaks-based reward
+        # rt += self.reward_map[S].sum() * self.config.r_peaks
+        # Discard the reward for visited nodes
+        # self.reward_map[S] = 0
 
-        # --- 3. Wall-based penalty (Reduced Impact) ---
-        wall_sum = 0.0
-        num_valid_s = 0
-        for s_vox in S:
-            if self._is_valid_pos(s_vox):
-                wall_sum += self.wall_map[s_vox].item()
-                num_valid_s += 1
-        if num_valid_s > 0:
-            avg_wall = wall_sum / num_valid_s
-            # Apply reduced penalty using wall_penalty_scale from config
-            rt -= avg_wall * self.config.wall_penalty_scale * self.config.r_val2
+        # --- 3. Wall-based penalty ---
+        rt -= self.config.r_val2 * self.wall_map[S].mean()
 
         # --- 4. Revisiting penalty ---
-        revisit_sum = 0
-        if self.cumulative_path_mask is not None:
-            for s_vox in S:
-                if self._is_valid_pos(s_vox):
-                    revisit_sum += self.cumulative_path_mask[s_vox].item()
-        if revisit_sum > 0:  # Penalize if any part overlaps
-            rt -= self.config.r_wall
+        rt -= self.config.r_wall * self.cumulative_path_mask[S].sum().bool()
 
         # --- 5. Out-of-segmentation penalty ---
-        # Check the *intended* next position
-        if not self._is_valid_pos(next_pos_vox) or self.seg[next_pos_vox].item() == 0:
-            rt -= self.config.r_wall
+        # rt = -self.config.r_wall
 
-        return rt
+        return rt, S
 
     def step(
         self, action_vox_delta: Tuple[int, int, int]
@@ -689,42 +741,34 @@ class SmallBowelEnv:
         current_z, current_y, current_x = self.current_pos_vox
         dz, dy, dx = action_vox_delta
         next_pos_vox = (current_z + dz, current_y + dy, current_x + dx)
-
-        # Calculate reward based on *intended* next step
-        reward = self._calculate_reward(action_vox_delta, next_pos_vox)
-
-        # Update GDT tracking *before* updating position
+        reward, S = self._calculate_reward(action_vox_delta, next_pos_vox)
         next_gdt_val = np.inf
         if self.gdt is not None and self._is_valid_pos(next_pos_vox):
             next_gdt_tensor = self.gdt[next_pos_vox]
             if torch.isfinite(next_gdt_tensor):
                 next_gdt_val = next_gdt_tensor.item()
-                # Update max achieved if using original reward logic
                 if not self.config.use_immediate_gdt_reward:
-                    self.max_gdt_achieved = max(self.max_gdt_achieved, next_gdt_val)
-                # Update current GDT value for next step's immediate reward calculation
+                    self.max_gdt_achieved = max(
+                        self.max_gdt_achieved, next_gdt_val
+                    )
                 self.current_gdt_val = next_gdt_val
-            else:  # Landed outside reachable GDT area
-                self.current_gdt_val = 0.0  # Or keep previous? Resetting seems safer.
-        else:  # Landed outside image bounds
+            else:
+                self.current_gdt_val = 0.0
+        else:
             self.current_gdt_val = 0.0
-
-        # Update position
-        self.current_pos_vox = next_pos_vox
-
-        # Check validity and update cumulative path
         is_next_pos_valid_seg = (
-            self._is_valid_pos(next_pos_vox) and self.seg[next_pos_vox].item() > 0
+            self._is_valid_pos(next_pos_vox)
+            # and self.seg[next_pos_vox].item() > 0
         )
         if is_next_pos_valid_seg:
-            draw_path_sphere(
+            for pos in zip(*S):
+                draw_path_sphere(
                 self.cumulative_path_mask,
-                self.current_pos_vox,
+                pos,
                 self.config.cumulative_path_radius_vox,
             )
-            self.tracking_path_history.append(self.current_pos_vox)
-
-        # Check termination conditions
+            self.tracking_path_history.append(next_pos_vox)
+        self.current_pos_vox = next_pos_vox
         done = False
         termination_reason = ""
         if self.current_step >= self.config.max_episode_steps:
@@ -734,12 +778,10 @@ class SmallBowelEnv:
             done = True
             termination_reason = "out_of_bounds_or_segmentation"
         elif (
-            np.linalg.norm(np.array(self.current_pos_vox) - np.array(self.end_coord))
-            < self.config.cumulative_path_radius_vox
+            dist(self.current_pos_vox, self.end_coord) < self.config.cumulative_path_radius_vox
         ):
             done = True
             termination_reason = "reached_end"
-
         info = {
             "current_pos": self.current_pos_vox,
             "termination": termination_reason,
@@ -755,13 +797,11 @@ class SmallBowelEnv:
             )
             reward += final_reward_adjustment
             info["episode_coverage"] = coverage
-
         next_state_patches = self._get_state_patches()
         return next_state_patches, reward, done, info
 
 
 # --- Network Definitions (Unchanged) ---
-# ... (ActorNetwork and CriticNetwork exactly as before) ...
 class ActorNetwork(nn.Module):
     def __init__(self, config: Config, input_channels=3):
         super().__init__()
@@ -781,13 +821,12 @@ class ActorNetwork(nn.Module):
         self.pool4 = nn.MaxPool3d(2)
         with torch.no_grad():
             dummy_input = torch.zeros(1, input_channels, *self.patch_size_vox)
-            pooled_output = self.pool4(self.pool3(self.pool2(self.pool1(dummy_input))))
+            pooled_output = self.pool4(
+                self.pool3(self.pool2(self.pool1(dummy_input)))
+            )
             final_channels = 64
-            self.flattened_size = (
-                final_channels
-                * pooled_output.shape[-3]
-                * pooled_output.shape[-2]
-                * pooled_output.shape[-1]
+            self.flattened_size = final_channels * np.prod(
+                pooled_output.shape[-3:]
             )
         if self.flattened_size <= 0:
             raise ValueError(f"Actor flat size <= 0 ({self.flattened_size}).")
@@ -841,13 +880,12 @@ class CriticNetwork(nn.Module):
         self.pool4 = nn.MaxPool3d(2)
         with torch.no_grad():
             dummy_input = torch.zeros(1, input_channels, *self.patch_size_vox)
-            pooled_output = self.pool4(self.pool3(self.pool2(self.pool1(dummy_input))))
+            pooled_output = self.pool4(
+                self.pool3(self.pool2(self.pool1(dummy_input)))
+            )
             final_channels = 64
-            self.flattened_size = (
-                final_channels
-                * pooled_output.shape[-3]
-                * pooled_output.shape[-2]
-                * pooled_output.shape[-1]
+            self.flattened_size = final_channels * np.prod(
+                pooled_output.shape[-3:]
             )
         if self.flattened_size <= 0:
             raise ValueError(f"Critic flat size <= 0 ({self.flattened_size}).")
@@ -873,34 +911,43 @@ class CriticNetwork(nn.Module):
         return value
 
 
-# --- PPO Training Logic (Updated with Wandb Logging) ---
+# --- PPO Training Logic (Unchanged) ---
 def train(
-    config: Config, env: SmallBowelEnv, actor: ActorNetwork, critic: CriticNetwork
+    config: Config,
+    env: SmallBowelEnv,
+    actor: ActorNetwork,
+    critic: CriticNetwork,
 ):
-    """Main PPO training loop with wandb logging."""
-
     optimizer = optim.Adam(
         list(actor.parameters()) + list(critic.parameters()),
         lr=config.learning_rate,
         eps=1e-5,
     )
-
-    # --- Storage setup ---
     obs_actor_shape = (config.n_steps, 3, *config.patch_size_vox)
     obs_critic_shape = (config.n_steps, 4, *config.patch_size_vox)
     action_shape = (config.n_steps, 3)
     log_prob_shape = (config.n_steps, 3)
-    obs_actor_buf = torch.zeros(obs_actor_shape, dtype=torch.float32).to(config.device)
+    obs_actor_buf = torch.zeros(obs_actor_shape, dtype=torch.float32).to(
+        config.device
+    )
     obs_critic_buf = torch.zeros(obs_critic_shape, dtype=torch.float32).to(
         config.device
     )
-    actions_buf = torch.zeros(action_shape, dtype=torch.float32).to(config.device)
-    log_probs_buf = torch.zeros(log_prob_shape, dtype=torch.float32).to(config.device)
-    rewards_buf = torch.zeros(config.n_steps, dtype=torch.float32).to(config.device)
-    dones_buf = torch.zeros(config.n_steps, dtype=torch.float32).to(config.device)
-    values_buf = torch.zeros(config.n_steps, dtype=torch.float32).to(config.device)
-
-    # --- Training Loop ---
+    actions_buf = torch.zeros(action_shape, dtype=torch.float32).to(
+        config.device
+    )
+    log_probs_buf = torch.zeros(log_prob_shape, dtype=torch.float32).to(
+        config.device
+    )
+    rewards_buf = torch.zeros(config.n_steps, dtype=torch.float32).to(
+        config.device
+    )
+    dones_buf = torch.zeros(config.n_steps, dtype=torch.float32).to(
+        config.device
+    )
+    values_buf = torch.zeros(config.n_steps, dtype=torch.float32).to(
+        config.device
+    )
     print(f"Starting training for {config.total_timesteps} timesteps...")
     obs_dict = env.reset()
     next_obs_actor = obs_dict["actor"]
@@ -908,18 +955,13 @@ def train(
     next_done = torch.zeros(1, dtype=torch.float32).to(config.device)
     global_step = 0
     num_updates = config.total_timesteps // config.n_steps
-
-    # Store episode stats for logging
-    ep_info_buffer = []  # Store (reward, length, coverage) tuples
-
+    ep_info_buffer = []
     for update in range(1, num_updates + 1):
         actor.eval()
-        critic.eval()  # Set to eval mode for collection
-        # Use a list to collect episode info during this rollout
+        critic.eval()
         current_rollout_ep_infos = []
         current_episode_reward = 0
         current_episode_length = 0
-
         pbar = tqdm(
             range(config.n_steps),
             desc=f"Update {update}/{num_updates} - Collecting",
@@ -930,36 +972,29 @@ def train(
             obs_actor_buf[step] = next_obs_actor
             obs_critic_buf[step] = next_obs_critic
             dones_buf[step] = next_done.item()
-
             with torch.no_grad():
                 action_dist = actor.get_action_dist(next_obs_actor.unsqueeze(0))
                 normalized_action = action_dist.sample()
                 log_prob = action_dist.log_prob(normalized_action).sum(dim=-1)
                 value = critic(next_obs_critic.unsqueeze(0))
-
             actions_buf[step] = normalized_action.squeeze(0)
-            log_probs_buf[step] = action_dist.log_prob(normalized_action).squeeze(0)
+            log_probs_buf[step] = action_dist.log_prob(
+                normalized_action
+            ).squeeze(0)
             values_buf[step] = value.squeeze()
-
             action_mapped = (
                 2.0 * normalized_action.squeeze(0) - 1.0
             ) * config.max_step_vox
             action_vox_delta = tuple(torch.round(action_mapped).int().tolist())
-
             obs_dict, reward, done, info = env.step(action_vox_delta)
-            rewards_buf[step] = torch.tensor(reward, dtype=torch.float32).to(
-                config.device
-            )
+            rewards_buf[step] = reward
             next_obs_actor = obs_dict["actor"]
             next_obs_critic = obs_dict["critic"]
-            next_done = torch.tensor([done], dtype=torch.float32).to(config.device)
-
-            current_episode_reward += reward
+            next_done.fill_(done)
+            current_episode_reward += reward.item()
             current_episode_length += 1
             if done:
-                ep_coverage = info.get(
-                    "episode_coverage", 0.0
-                )  # Get coverage if available
+                ep_coverage = info.get("episode_coverage", 0.0)
                 current_rollout_ep_infos.append({
                     "reward": current_episode_reward,
                     "length": current_episode_length,
@@ -975,24 +1010,26 @@ def train(
                 obs_dict = env.reset()
                 next_obs_actor = obs_dict["actor"]
                 next_obs_critic = obs_dict["critic"]
-                next_done = torch.zeros(1, dtype=torch.float32).to(config.device)
-
-        # Add infos from this rollout to the main buffer (keep last ~100 episodes)
+                next_done = torch.zeros(1, dtype=torch.float32).to(
+                    config.device
+                )
         ep_info_buffer.extend(current_rollout_ep_infos)
         ep_info_buffer = ep_info_buffer[-100:]
-
-        # --- Calculate Advantages (GAE) ---
         advantages = torch.zeros_like(rewards_buf).to(config.device)
         last_gae_lam = 0
         with torch.no_grad():
             next_value = critic(next_obs_critic.unsqueeze(0)).reshape(1, -1)
         for t in reversed(range(config.n_steps)):
-            if t == config.n_steps - 1:
-                nextnonterminal = 1.0 - next_done.item()
-                nextvalues = next_value.squeeze()
-            else:
-                nextnonterminal = 1.0 - dones_buf[t + 1]
-                nextvalues = values_buf[t + 1]
+            nextnonterminal = 1.0 - (
+                next_done.item()
+                if t == config.n_steps - 1
+                else dones_buf[t + 1]
+            )
+            nextvalues = (
+                next_value.squeeze()
+                if t == config.n_steps - 1
+                else values_buf[t + 1]
+            )
             delta = (
                 rewards_buf[t]
                 + config.gamma * nextvalues * nextnonterminal
@@ -1000,13 +1037,14 @@ def train(
             )
             advantages[t] = last_gae_lam = (
                 delta
-                + config.gamma * config.gae_lambda * nextnonterminal * last_gae_lam
+                + config.gamma
+                * config.gae_lambda
+                * nextnonterminal
+                * last_gae_lam
             )
         returns = advantages + values_buf
-
-        # --- PPO Update Phase ---
         actor.train()
-        critic.train()  # Set to train mode
+        critic.train()
         b_obs_actor = obs_actor_buf.reshape((-1, 3, *config.patch_size_vox))
         b_obs_critic = obs_critic_buf.reshape((-1, 4, *config.patch_size_vox))
         b_actions = actions_buf.reshape((-1, 3))
@@ -1015,9 +1053,7 @@ def train(
         b_returns = returns.reshape(-1)
         b_values = values_buf.reshape(-1)
         inds = np.arange(config.n_steps)
-        # Store losses for logging
         all_pg_loss, all_v_loss, all_ent_loss, all_total_loss = [], [], [], []
-
         for epoch in range(config.n_epochs):
             np.random.shuffle(inds)
             for start in range(0, config.n_steps, config.batch_size):
@@ -1061,13 +1097,10 @@ def train(
                     config.max_grad_norm,
                 )
                 optimizer.step()
-                # Append losses for logging
                 all_pg_loss.append(pg_loss.item())
                 all_v_loss.append(value_loss.item())
                 all_ent_loss.append(entropy_loss.item())
                 all_total_loss.append(loss.item())
-
-        # --- Logging (Wandb and Console) ---
         log_data = {
             "charts/learning_rate": optimizer.param_groups[0]["lr"],
             "losses/policy_loss": np.mean(all_pg_loss),
@@ -1081,10 +1114,8 @@ def train(
                     if pbar.format_dict["elapsed"] > 0
                     else 1e-6
                 )
-            ),  # Steps per second
-            "gdt_max": env.gdt.max(),
+            ),
         }
-
         if len(ep_info_buffer) > 0:
             avg_reward = np.mean([ep["reward"] for ep in ep_info_buffer])
             avg_length = np.mean([ep["length"] for ep in ep_info_buffer])
@@ -1102,12 +1133,8 @@ def train(
         print(
             f"  Losses(P/V/E): {log_data['losses/policy_loss']:.3f}/{log_data['losses/value_loss']:.3f}/{log_data['losses/entropy']:.3f}"
         )
-
-        # Log to wandb if enabled
         if config.track_wandb:
             wandb.log(log_data, step=global_step)
-
-        # --- Save Model Periodically ---
         if update % 50 == 0 or update == num_updates:
             save_dict = {
                 "actor_state_dict": actor.state_dict(),
@@ -1119,44 +1146,166 @@ def train(
             }
             torch.save(save_dict, config.save_path)
             print(f"Model saved to {config.save_path} at update {update}")
-            # Optional: Log model checkpoint to wandb as artifact
-            # if config.track_wandb:
-            #     artifact = wandb.Artifact(f'model-{wandb.run.id}', type='model')
-            #     artifact.add_file(config.save_path)
-            #     wandb.log_artifact(artifact, aliases=[f"update_{update}", f"step_{global_step}"])
-
     print("Training finished.")
 
 
-# --- Main Execution Block (Updated with Wandb Init/Finish) ---
+# --- NEW: Evaluation Function ---
+def evaluate(config: Config, env: SmallBowelEnv, actor: ActorNetwork):
+    """Runs the agent in evaluation mode using a loaded model."""
+    print(f"\n--- Starting Evaluation ---")
+    if not config.load_path or not os.path.exists(config.load_path):
+        raise FileNotFoundError(
+            f"Evaluation model not found at: {config.load_path}"
+        )
+
+    print(f"Loading model from: {config.load_path}")
+    checkpoint = torch.load(config.load_path, map_location=config.device, weights_only=False)
+
+    # Load actor state dict
+    try:
+        actor.load_state_dict(checkpoint["actor_state_dict"])
+    except KeyError:
+        # Handle potential older save formats or different keys
+        print(
+            "Warning: 'actor_state_dict' key not found in checkpoint. Trying common alternatives."
+        )
+        if "model_state_dict" in checkpoint:
+            actor.load_state_dict(checkpoint["model_state_dict"])
+            print("Loaded state dict from 'model_state_dict'.")
+        elif (
+            isinstance(checkpoint, dict) and len(checkpoint) == 1
+        ):  # Check if it might be just the state_dict
+            key = list(checkpoint.keys())[0]
+            if isinstance(
+                checkpoint[key], dict
+            ):  # Check if it looks like a state_dict
+                try:
+                    actor.load_state_dict(checkpoint[key])
+                    print(f"Loaded state dict directly from key '{key}'.")
+                except RuntimeError as e:
+                    print(f"Failed to load state dict directly: {e}")
+                    raise ValueError(
+                        "Could not load actor state dict from checkpoint."
+                    )
+            else:
+                raise ValueError(
+                    "Checkpoint format not recognized for actor state dict."
+                )
+        else:
+            raise ValueError(
+                "Could not find a valid actor state dict in the checkpoint."
+            )
+
+    actor.to(config.device)
+    actor.eval()  # Set actor to evaluation mode
+    print("Actor model loaded successfully.")
+
+    # Critic is not needed for evaluation, but could be loaded if desired
+    # if 'critic_state_dict' in checkpoint:
+    #     critic = CriticNetwork(config=config, input_channels=4).to(config.device)
+    #     critic.load_state_dict(checkpoint['critic_state_dict'])
+    #     critic.eval()
+    #     print("Critic model loaded.")
+
+    obs_dict = env.reset()
+    state_actor = obs_dict["actor"]
+    done = False
+    total_reward = 0.0
+    step_count = 0
+
+    print(f"Starting evaluation run (max steps: {config.max_episode_steps})...")
+    pbar = tqdm(total=config.max_episode_steps, desc="Evaluating", leave=True)
+
+    with torch.no_grad():
+        while not done and step_count < config.max_episode_steps:
+            step_count += 1
+            # Get action from the actor network
+            action_dist = actor.get_action_dist(state_actor.unsqueeze(0))
+
+            if config.eval_deterministic:
+                # Use the mode of the distribution for deterministic action
+                normalized_action = action_dist.mode
+            else:
+                # Sample from the distribution for stochastic action
+                normalized_action = action_dist.sample()
+
+            # Map normalized action (0 to 1) to voxel delta [-max_step, +max_step]
+            action_mapped = (
+                2.0 * normalized_action.squeeze(0) - 1.0
+            ) * config.max_step_vox
+            action_vox_delta = tuple(torch.round(action_mapped).int().tolist())
+
+            # Step the environment
+            obs_dict, reward, done, info = env.step(action_vox_delta)
+            state_actor = obs_dict["actor"]
+            total_reward += reward
+
+            pbar.update(1)
+            pbar.set_postfix({
+                "Pos": env.current_pos_vox,
+                "Reward": f"{reward:.2f}",
+                "Done": done,
+            })
+
+    pbar.close()
+
+    # --- Process and Save Results ---
+    final_path_voxels = env.get_tracking_history()
+    final_pos = env.current_pos_vox
+    dist_to_target = np.linalg.norm(
+        np.array(final_pos) - np.array(env.end_coord)
+    )
+    # Recalculate coverage just in case info dict didn't capture it correctly
+    coverage = env._get_final_coverage()
+    termination_reason = info.get(
+        "termination", "max_steps_eval"
+    )  # Provide default if info key missing
+
+    print("\n--- Evaluation Results ---")
+    print(f"Termination Reason: {termination_reason}")
+    print(f"Total Steps Taken: {step_count}")
+    print(f"Final Position: {final_pos}")
+    print(f"Target Position: {env.end_coord}")
+    print(f"Final Distance to Target (voxels): {dist_to_target:.2f}")
+    print(f"Final Cumulative Reward: {total_reward:.2f}")
+    print(f"Final Segmentation Coverage: {coverage:.4f}")
+    print(f"Path Length (voxels tracked): {len(final_path_voxels)}")
+
+    # Save the tracked path
+    try:
+        np.save(config.eval_output_path, final_path_voxels)
+        print(
+            f"Evaluation path saved successfully to: {config.eval_output_path}"
+        )
+
+        import nibabel as nib
+        example = nib.load(config.nifti_path)
+        final_path_map = np.zeros_like(env.image_np)
+        final_path_map[tuple(final_path_voxels.T)] = 1
+        for point_a, point_b in zip(final_path_voxels, final_path_voxels[1:]):
+            line = line_nd(point_a, point_b, endpoint=True)
+            final_path_map[line] = 1
+        
+        final_path_map = binary_dilation(final_path_map, iterations=3)
+        example._dataobj = final_path_map
+        nib.save(example, config.eval_output_path[:-4] + ".nii.gz")
+    except Exception as e:
+        print(f"Error saving evaluation path to {config.eval_output_path}: {e}")
+
+    print("--- Evaluation Finished ---\n")
+
+
+# --- Main Execution Block (Updated with Eval Mode) ---
 if __name__ == "__main__":
     config = parse_args()
     print("Parsed configuration:")
-    # Convert dataclass to dict for printing/wandb config
     config_dict = {
-        f.name: getattr(config, f.name) for f in config.__dataclass_fields__.values()
+        f.name: getattr(config, f.name)
+        for f in config.__dataclass_fields__.values()
     }
     print(config_dict)
 
-    # --- Initialize Wandb ---
-    run = None
-    if config.track_wandb:
-        try:
-            run = wandb.init(
-                project=config.wandb_project_name,
-                entity=config.wandb_entity,  # Optional: Your wandb user/team
-                name=config.wandb_run_name,  # Optional: Defaults to auto-generated name
-                sync_tensorboard=False,  # We are using wandb logging directly
-                config=config_dict,  # Log hyperparameters
-                monitor_gym=False,  # We are not using gym environment directly
-                save_code=True,  # Save main script to wandb
-            )
-            print(f"Wandb run initialized: {run.url}")
-        except Exception as e:
-            print(f"Error initializing wandb: {e}. Wandb tracking disabled.")
-            config.track_wandb = False  # Disable tracking if init fails
-
-    # --- Load segmentations and find start/end points ---
+    # --- Load segmentations and find start/end points (Common for both modes) ---
     try:
         print(f"Loading main SB segmentation from: {config.seg_path}")
         sb_seg_nii = nib.load(config.seg_path)
@@ -1184,46 +1333,78 @@ if __name__ == "__main__":
         print(f"Error during start/end finding: {e}")
         exit(1)
 
-    # --- Initialize Environment, Actor, Critic ---
+    # --- Initialize Environment and Networks (Common) ---
     print("Initializing environment and networks...")
     env = SmallBowelEnv(config=config, start_end_coords=start_end)
     actor = ActorNetwork(config=config, input_channels=3).to(config.device)
+    # Critic needed for training, initialize here but only used in train()
     critic = CriticNetwork(config=config, input_channels=4).to(config.device)
     print("Initialization complete.")
 
-    # --- Watch model gradients with Wandb (optional) ---
-    if config.track_wandb and run:
-        wandb.watch(
-            actor, log="gradients", log_freq=300, idx=0, log_graph=False
-        )  # Log actor grads every 300 steps
-        wandb.watch(
-            critic, log="gradients", log_freq=300, idx=1, log_graph=False
-        )  # Log critic grads
+    # --- Mode Selection: Train or Evaluate ---
+    if config.eval_mode:
+        # --- Run Evaluation ---
+        # No Wandb needed for evaluation usually, unless you want to log eval metrics
+        if config.track_wandb:
+            print(
+                "Wandb tracking is enabled but typically not used during evaluation."
+            )
+            # Optionally, you could start a short wandb run here to log final eval metrics if desired.
+        evaluate(config, env, actor)  # Pass actor only, critic not needed
 
-    # --- Start Training ---
-    try:
-        train(config, env, actor, critic)
-    except Exception as e:
-        print(f"\nAn error occurred during training: {e}")
-        import traceback
+    else:
+        # --- Run Training ---
+        run = None
+        if config.track_wandb:
+            try:
+                run = wandb.init(
+                    project=config.wandb_project_name,
+                    entity=config.wandb_entity,
+                    name=config.wandb_run_name,
+                    sync_tensorboard=False,
+                    config=config_dict,
+                    monitor_gym=False,
+                    save_code=True,
+                )
+                print(f"Wandb run initialized: {run.url}")
+                # Watch model gradients with Wandb
+                wandb.watch(
+                    actor, log="gradients", log_freq=300, idx=0, log_graph=False
+                )
+                wandb.watch(
+                    critic,
+                    log="gradients",
+                    log_freq=300,
+                    idx=1,
+                    log_graph=False,
+                )
+            except Exception as e:
+                print(
+                    f"Error initializing wandb: {e}. Wandb tracking disabled."
+                )
+                config.track_wandb = False
 
-        traceback.print_exc()  # Print detailed traceback
-    finally:
-        # --- Finish Wandb Run ---
-        if config.track_wandb and run:
-            # Optional: Save final model before finishing
-            final_save_path = config.save_path.replace(".pth", "_final.pth")
-            save_dict = {
-                "actor_state_dict": actor.state_dict(),
-                "critic_state_dict": critic.state_dict(),
-                "config": config,
-            }
-            torch.save(save_dict, final_save_path)
-            print(f"Final model saved to {final_save_path}")
-            # Log final model as artifact
-            # artifact = wandb.Artifact(f'model-{run.id}', type='model')
-            # artifact.add_file(final_save_path)
-            # run.log_artifact(artifact, aliases=["final"])
+        try:
+            train(config, env, actor, critic)
+        except Exception as e:
+            print(f"\nAn error occurred during training: {e}")
+            import traceback
 
-            run.finish()
-            print("Wandb run finished.")
+            traceback.print_exc()
+        finally:
+            if config.track_wandb and run:
+                # Save final model before finishing
+                final_save_path = config.save_path.replace(".pth", "_final.pth")
+                save_dict = {
+                    "actor_state_dict": actor.state_dict(),
+                    "critic_state_dict": critic.state_dict(),
+                    "config": config,  # Save config used for this training run
+                }
+                torch.save(save_dict, final_save_path)
+                print(f"Final model saved to {final_save_path}")
+                # Optionally log final model as artifact
+                # artifact = wandb.Artifact(f'model-{run.id}', type='model')
+                # artifact.add_file(final_save_path)
+                # run.log_artifact(artifact, aliases=["final"])
+                run.finish()
+                print("Wandb run finished.")

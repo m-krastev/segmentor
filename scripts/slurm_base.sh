@@ -21,6 +21,8 @@ source $PROJECT_ROOT/scripts/slurm_setup.sh
 setup $PROJECT_ROOT
 cd $PROJECT_ROOT
 
+#ignore: s0009, s0016, s0022, s0039, s0045, s0046, s0048, s0050, s0057
+    
 # rest of the script
 UNET_CONFIG="3d_fullres"
 FOLD=1
@@ -40,7 +42,7 @@ DATASET_ID=42
 # python test.py
 
 
-python -m navigator --data-dir data/data
+python -m navigator --data-dir data/bomopi_resampled2 checkpoints/checkpoint_torchrl_7372800.pth # --load-from-checkpoint checkpoints/checkpoint_torchrl_2252800.pth
 
 cd notebooks
 # python grl_pathtracking.py --nifti-path ./ct.nii.gz --seg-path ./small_bowel.nii.gz --duodenum-seg-path ./duodenum.nii.gz --colon-seg-path ./colon.nii.gz

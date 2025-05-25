@@ -39,6 +39,11 @@ class BetaParamExtractor(torch.nn.Module):
         param0, param1 = self.parameter_mapping(tensor).chunk(2, -1)
         return (param0, param1, *others)
 
+def ind(concentration1, concentration0):
+    return Independent(
+        Beta(concentration1=concentration1, concentration0=concentration0),
+        reinterpreted_batch_ndims=1,
+    )
 
 # --- TorchRL Modules ---
 def create_ppo_modules(config: Config, device: torch.device):
@@ -78,6 +83,7 @@ def create_ppo_modules(config: Config, device: torch.device):
     #     distribution_kwargs=dict(low=-config.max_step_vox, high=config.max_step_vox),
     #     return_log_prob=True,
     # ).to(device)
+
     policy_module = ProbabilisticActor(
         module=TensorDictSequential(
             actor_cnn_module,  # Outputs TD with "concentration1, concentration0"
@@ -85,10 +91,7 @@ def create_ppo_modules(config: Config, device: torch.device):
         spec=action_spec,
         in_keys=["concentration1", "concentration0"],
         out_keys=["action"],
-        distribution_class=lambda concentration1, concentration0: Independent(
-            Beta(concentration1=concentration1, concentration0=concentration0),
-            reinterpreted_batch_ndims=1,
-        ),
+        distribution_class=ind,
         return_log_prob=True,
     ).to(device)
 

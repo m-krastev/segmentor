@@ -622,7 +622,7 @@ def resample_torch_simple(
 
         if is_seg:
             unique_values = torch.unique(data)
-            result_dtype = torch.int8 if max(unique_values) < 127 else torch.int16
+            result_dtype = torch.uint8 if max(unique_values) < 255 else torch.uint16
             result = torch.zeros((data.shape[0], *new_shape), dtype=result_dtype, device=device)
             if not memefficient_seg_resampling:
                 # believe it or not, the implementation below is 3x as fast (at least on Liver CT and on CPU)
