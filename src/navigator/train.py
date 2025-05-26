@@ -15,7 +15,7 @@ from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage, SamplerWitho
 from torchrl.objectives import ClipPPOLoss, KLPENPPOLoss
 from torchrl.objectives.value import GAE
 from torchrl.envs.utils import ExplorationType, set_exploration_type
-
+from tensordict.nn import set_composite_lp_aggregate
 # Your project components
 from .config import Config
 from .dataset import SmallBowelDataset  # Keep for creating the iterator
@@ -23,6 +23,8 @@ from .dataset import SmallBowelDataset  # Keep for creating the iterator
 # Use the TorchRL environment wrapper and factory function
 from .environment import make_sb_env, SmallBowelEnv
 
+torch.set_float32_matmul_precision("medium")
+set_composite_lp_aggregate(False).set()
 
 def log_wandb(data: dict, **kwargs):
     """Log data to wandb."""
@@ -58,26 +60,44 @@ def validation_loop_torchrl(
         set_exploration_type(ExplorationType.MODE),
     ):  # Use deterministic actions
         for i in tqdm(range(num_val_subjects), desc="Validation"):
-            try:
-                # Reset env (this will load the next subject from val_iterator)
-                tensordict = val_env._reset(must_load_new_subject=True)
-                rollout = val_env.rollout(
-                    config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
-                )
+            # best of k
+            # Store intermediate results
+            paths = []
+            path_masks = []
+            intermediate_results = []
+            reward, step_count, final_coverage = 0, 0, 0
+            for _ in range(10):
+                try:
+                    # Reset env (this will load the next subject from val_iterator)
+                    tensordict = val_env._reset(must_load_new_subject=True)
+                    rollout = val_env.rollout(
+                        config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
+                    )
 
-                reward = rollout["next", "reward"].mean().item()
-                step_count = rollout["action"].shape[1]
-                final_coverage = val_env._get_final_coverage().item()
+                    reward = rollout["next", "reward"].mean().item()
+                    step_count = rollout["action"].shape[1]
+                    final_coverage = val_env._get_final_coverage().item()
 
-                val_env.save_path()
+                    paths.append(val_env.get_tracking_history())
+                    path_masks.append(val_env.get_tracking_mask())
+                    intermediate_results.append((reward, step_count, final_coverage))
+                except Exception as e:
+                    print(f"Error during validation rollout for subject {i}: {e}")
 
-            except Exception as e:
-                reward, step_count, final_coverage = 0, 0, 0
-                raise e
-            finally:
-                val_results["val_reward_sum"].append(reward)
-                val_results["val_length"].append(step_count)
-                val_results["val_coverage"].append(final_coverage)
+            # Choose the best result from the 10 rollouts
+            best_run = intermediate_results.index(max(intermediate_results, key=lambda x: x[0]))
+            reward, step_count, final_coverage = intermediate_results[best_run]
+            path = paths[best_run]
+            path_mask = path_masks[best_run]
+
+            # Save the best path and mask
+            val_env.tracking_path_history = path
+            val_env.cumulative_path_mask = path_mask
+            val_env.save_path()
+
+            val_results["val_reward_sum"].append(reward)
+            val_results["val_length"].append(step_count)
+            val_results["val_coverage"].append(final_coverage)
 
     val_env.close()  # Close the validation environment
 
@@ -114,7 +134,71 @@ def train_torchrl(
         f"Total trainable parameters: {sum(p.numel() for p in policy_module.parameters()) + sum(p.numel() for p in value_module.parameters())}"
     )
 
-    torch.set_float32_matmul_precision("medium")
+    # --- Loss Function ---
+    loss_module = KLPENPPOLoss(
+        actor_network=policy_module,
+        critic_network=value_module,
+        clip_epsilon=config.clip_epsilon,
+        entropy_coef=config.ent_coef,
+        # entropy_bonus=True,
+        critic_coef=config.vf_coef,
+        loss_critic_type="smooth_l1",  # TorchRL standard
+        # value_loss_type="huber", # Or "mse"
+        normalize_advantage=True,  # Recommended for PPO
+    )
+
+    # --- Optimizer ---
+    optimizer = optim.AdamW(
+        # policy_module.parameters(),
+        loss_module.parameters(),
+        lr=config.learning_rate,
+    )
+    # optimizer_critic = optim.Adam(
+    #     value_module.parameters(),
+    #     lr=config.learning_rate,
+    # )
+    # Cosine annealing scheduler (optional)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=(total_timesteps * config.update_epochs // batch_size),
+        eta_min=1e-5,
+    )
+    # scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
+    #     optimizer_critic,
+    #     T_max=(total_timesteps * config.update_epochs // batch_size),
+    #     eta_min=1e-5,
+    # )
+
+    # --- Checkpoint Reloading ---
+    if config.reload_checkpoint_path:
+        print(f"Loading checkpoint from {config.reload_checkpoint_path}")
+        try:
+            checkpoint = torch.load(config.reload_checkpoint_path, map_location=device)
+            policy_module.load_state_dict(checkpoint["policy_module_state_dict"])
+            value_module.load_state_dict(checkpoint["value_module_state_dict"])
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            collected_frames = checkpoint.get("collected_frames", 0)
+            num_updates = checkpoint.get("num_updates", 0)
+            best_val_metric = checkpoint.get("best_val_metric", float("-inf"))
+            print("Checkpoint loaded successfully.")
+            print(f"Resuming training from collected_frames: {collected_frames}, num_updates: {num_updates}")
+        except FileNotFoundError:
+            print(f"Error: Checkpoint file not found at {config.reload_checkpoint_path}")
+            # Decide how to handle this: exit, start fresh, etc.
+            # For now, we'll print an error and continue without loading
+            exit(1)
+        except KeyError as e:
+            print(f"Error loading checkpoint: Missing key {e}")
+            # Handle missing keys if checkpoint structure changes
+            exit(1)
+        except Exception as e:
+            print(f"An unexpected error occurred while loading checkpoint: {e}")
+            exit(1)
+
+    # Advance the scheduler to the correct state
+    for _ in range(num_updates):
+        scheduler.step()
 
     # --- Collector ---
     # Collects data by interacting policy_module with environment instances
@@ -149,19 +233,6 @@ def train_torchrl(
     #     batch_size=batch_size,  # PPO minibatch size for sampling
     # )
 
-    # --- Loss Function ---
-    loss_module = KLPENPPOLoss(
-        actor_network=policy_module,
-        critic_network=value_module,
-        clip_epsilon=config.clip_epsilon,
-        entropy_coef=config.ent_coef,
-        # entropy_bonus=True,
-        critic_coef=config.vf_coef,
-        loss_critic_type="smooth_l1",  # TorchRL standard
-        # value_loss_type="huber", # Or "mse"
-        normalize_advantage=True,  # Recommended for PPO
-    )
-
     # --- Advantage Module (GAE) ---
     adv_module = GAE(
         gamma=config.gamma,
@@ -169,28 +240,6 @@ def train_torchrl(
         value_network=value_module,  # Pass the value module instance
         average_gae=False,
     )
-
-    # --- Optimizer ---
-    optimizer = optim.AdamW(
-        # policy_module.parameters(),
-        loss_module.parameters(),
-        lr=config.learning_rate,
-    )
-    # optimizer_critic = optim.Adam(
-    #     value_module.parameters(),
-    #     lr=config.learning_rate,
-    # )
-    # Cosine annealing scheduler (optional)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=(total_timesteps * config.update_epochs // batch_size),
-        eta_min=1e-5,
-    )
-    # scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
-    #     optimizer_critic,
-    #     T_max=(total_timesteps * config.update_epochs // batch_size),
-    #     eta_min=1e-5,
-    # )
 
     # --- Training Loop ---
     print(f"Starting training for {total_timesteps} total steps...")
@@ -328,6 +377,7 @@ def train_torchrl(
                     "policy_module_state_dict": policy_module.state_dict(),
                     "value_module_state_dict": value_module.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
                     "collected_frames": collected_frames,
                     "num_updates": num_updates,
                     "best_val_metric": best_val_metric,
@@ -345,6 +395,7 @@ def train_torchrl(
                 "policy_module_state_dict": policy_module.state_dict(),
                 "value_module_state_dict": value_module.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
                 "collected_frames": collected_frames,
                 "num_updates": num_updates,
                 "config": vars(config),

@@ -171,7 +171,7 @@ class SmallBowelEnv(EnvBase):
         Raises StopIteration if iterator is exhausted.
         Raises other exceptions if data loading/processing fails.
         """
-        subject_data = next(self.dataset_iterator)  # Let StopIteration propagate
+        subject_data: dict = next(self.dataset_iterator)  # Let StopIteration propagate
         self._current_subject_data = subject_data
 
         # Call update_data - let it raise exceptions if issues occur
@@ -300,17 +300,19 @@ class SmallBowelEnv(EnvBase):
     def get_tracking_history(self) -> np.ndarray:
         """Get the history of tracked positions."""
         return np.array(self.tracking_path_history)
+    
+    def get_tracking_mask(self) -> torch.Tensor:
+        """Get the cumulative path mask."""
+        return self.cumulative_path_mask.clone()
 
-    def save_path(self):
+    def save_path(self, save_dir: Optional[Path] = None):
         # Environment works with ZYX, so we have to do transposes here
-        cache_dir = Path("results") / self._current_subject_data["id"]
+        cache_dir = save_dir or (Path("results") / self._current_subject_data["id"])
         cache_dir.mkdir(parents=True, exist_ok=True)
         nif = nib.nifti1.Nifti1Image(
             np.transpose(self.cumulative_path_mask.numpy(force=True), (2,1,0)),
             affine=self.image_affine,
-            header=nib.Nifti1Header(),
         )
-        nif.header.set_zooms(self.spacing[::-1])
         nib.save(nif, cache_dir / "cumulative_path_mask.nii.gz")
 
         # Save the tracking history
