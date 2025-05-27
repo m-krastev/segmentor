@@ -52,17 +52,17 @@ class Config:
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
-    num_episodes_per_sample: int = 16384  # 32768
+    num_episodes_per_sample: int = 1638400  # 32768
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 20_000_000
     # Size of the buffer to store transitions
-    frames_per_batch: int = 2048
+    frames_per_batch: int = 4096
     learning_rate: float = 3e-5
     batch_size: int = 256  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
     gamma: float = 0.99
     gae_lambda: float = 0.95
-    clip_epsilon: float = 0.2
+    clip_epsilon: float = 0.1
     # Entropy coefficient for exploration (higher values encourage exploration)
     ent_coef: float = 0.001
     # Value function coefficient (higher values encourage accurate value estimates)

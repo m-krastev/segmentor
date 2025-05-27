@@ -168,6 +168,7 @@ def train_torchrl(
     #     T_max=(total_timesteps * config.update_epochs // batch_size),
     #     eta_min=1e-5,
     # )
+    collected_frames, num_updates = 0, 0
 
     # --- Checkpoint Reloading ---
     if config.reload_checkpoint_path:
@@ -213,7 +214,7 @@ def train_torchrl(
         create_env_fn=env_maker,  # Function to create environments
         policy=policy_module,  # Policy module to use for action selection
         # Total frames (steps) to collect in training
-        total_frames=total_timesteps,
+        total_frames=total_timesteps - collected_frames,
         # Number of frames collected in each rollout() call
         frames_per_batch=config.frames_per_batch,
         # No initial random exploration phase needed if policy handles exploration
@@ -243,12 +244,11 @@ def train_torchrl(
 
     # --- Training Loop ---
     print(f"Starting training for {total_timesteps} total steps...")
-    pbar = tqdm(total=total_timesteps)
-    collected_frames, num_updates = 0, 0
+    pbar = tqdm(total=total_timesteps, desc="Training", unit="steps", initial=collected_frames)
     # Use a specific metric like coverage or reward
     best_val_metric = float("-inf")
     # Use collector's iterator
-    for i, batch_data in enumerate(collector):
+    for i, batch_data in enumerate(collector, start=collected_frames):
         current_frames = batch_data.numel()  # Number of steps collected in this batch
         pbar.update(current_frames)
         collected_frames += current_frames
@@ -304,6 +304,7 @@ def train_torchrl(
         avg_entropy_loss = torch.stack(entropy_losses).mean().item()
         avg_kldiv = torch.stack(kl_div).mean().item()
         avg_reward = batch_data["next", "reward"].mean().item()
+        max_reward = batch_data["next", "reward"].max().item()
         # Log episode stats from collected batch_data
         final_coverage = batch_data["next", "final_coverage"]
         final_coverage = final_coverage[final_coverage.nonzero()].mean()
@@ -324,6 +325,7 @@ def train_torchrl(
             "charts/max_gdt_achieved": batch_data["next", "max_gdt_achieved"].mean(),
             "train/num_updates": num_updates,
             "train/reward": avg_reward,
+            "train/max_reward": max_reward,
             "train/episode_len": ep_len,
             "train/final_coverage": final_coverage,
             "train/total_reward": total_reward,

@@ -7,8 +7,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Beta
 
-from ..config import Config
+class ConvBlock(nn.Module):
+    """
+    A simple convolutional block with Conv3D, GroupNorm, and GELU activation.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, num_groups=8):
+        super().__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
+        self.norm = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.activation = nn.GELU()
 
+    def forward(self, x):
+        return self.activation(self.norm(self.conv(x)))
 
 class ActorNetwork(nn.Module):
     """
@@ -27,43 +37,55 @@ class ActorNetwork(nn.Module):
         """
         super().__init__()
 
-        self.net = nn.Sequential(
-            nn.Conv3d(input_channels, 8, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(8, 8),
-            nn.GELU(),
-            nn.MaxPool3d(2),
-            nn.Conv3d(8, 16, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(8, 16),
-            nn.GELU(),
-            nn.MaxPool3d(2),
-            nn.Conv3d(16, 32, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(8, 32),
-            nn.GELU(),
-            nn.MaxPool3d(2),
-            nn.Conv3d(32, 64, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(8, 64),
-            nn.GELU(),
-            nn.MaxPool3d(2),
-            nn.Conv3d(64, 64, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(8, 64),
-            nn.GELU(),
+        # self.net = nn.Sequential(
+        #     ConvBlock(input_channels, 64, kernel_size=3, padding=1),
+        #     # Strided convolution to downsample
+        #     nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False),
+        #     ConvBlock(64, 128, kernel_size=3, padding=1),
+        #     # Strided convolution to downsample
+        #     nn.Conv3d(128, 128, kernel_size=2, stride=2, padding=0, bias=False),
+        #     ConvBlock(128, 256, kernel_size=3, padding=1),
+        #     # Strided convolution to downsample
+        #     nn.Conv3d(256, 256, kernel_size=2, stride=2, padding=0, bias=False),
+        #     nn.Flatten(),
+        #     nn.LazyLinear(256),
+        #     nn.GroupNorm(8, 256),
+        #     nn.GELU(),
+        #     nn.Linear(256, 256),
+        #     nn.GroupNorm(8, 256),
+        #     nn.GELU(),
+        # )
+
+        self.conv1 = ConvBlock(input_channels, 64, kernel_size=3, padding=1, num_groups=8)
+        self.pool1 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.conv2 = ConvBlock(64, 128, kernel_size=3, padding=1, num_groups=16)
+        self.pool2 = nn.Conv3d(128, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.conv3 = ConvBlock(128, 256, kernel_size=3, padding=1, num_groups=32)
+        self.pool3 = nn.Conv3d(256, 256, kernel_size=2, stride=2, padding=0, bias=False)
+        self.head = nn.Sequential(
             nn.Flatten(),
-            nn.LazyLinear(64),
-            nn.GroupNorm(8, 64),
+            nn.LazyLinear(256),
+            nn.GroupNorm(8, 256),
             nn.GELU(),
-            nn.Linear(64, 64),
-            nn.GroupNorm(8, 64),
+            nn.Linear(256, 256),
+            nn.GroupNorm(8, 256),
             nn.GELU(),
         )
 
         # Output layer for alpha/beta parameters (6 values = 3 dimensions × 2 params)
-        self.alpha = nn.Linear(64, 3)
-        self.beta = nn.Linear(64, 3)
+        self.alpha = nn.Linear(256, 3)
+        self.beta = nn.Linear(256, 3)
         self.eps = eps
 
     def forward(self, x):
         """Forward pass through the network."""
-        x = self.net(x)
+        x = self.conv1(x) + x # Residual connection
+        x = self.pool1(x)
+        x = self.conv2(x) + x # Residual connection
+        x = self.pool2(x)
+        x = self.conv3(x) + x # Residual connection
+        x = self.pool3(x)
+        x = self.head(x)
 
         # Output alpha/beta parameters
         alpha = torch.clamp(F.softplus(self.alpha(x), threshold=5) + self.eps, max=100)
