@@ -58,6 +58,7 @@ def validation_loop_torchrl(
     with (
         torch.no_grad(),
         set_exploration_type(ExplorationType.MODE),
+        torch.cuda.amp.autocast() if device and device.type == "cuda" else torch.cpu.amp.autocast(enabled=False),
     ):  # Use deterministic actions
         for i in tqdm(range(num_val_subjects), desc="Validation"):
             # best of k
@@ -68,15 +69,15 @@ def validation_loop_torchrl(
             reward, step_count, final_coverage = 0, 0, 0
             for _ in range(10):
                 try:
-                    # Reset env (this will load the next subject from val_iterator)
-                    tensordict = val_env._reset(must_load_new_subject=True)
-                    rollout = val_env.rollout(
-                        config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
-                    )
+                    with torch.cuda.amp.autocast() if device and device.type == "cuda" else torch.cpu.amp.autocast(enabled=False):
+                        tensordict = val_env._reset(must_load_new_subject=True)
+                        rollout = val_env.rollout(
+                            config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
+                        )
 
-                    reward = rollout["next", "reward"].mean().item()
-                    step_count = rollout["action"].shape[1]
-                    final_coverage = val_env._get_final_coverage().item()
+                        reward = rollout["next", "reward"].mean().item()
+                        step_count = rollout["action"].shape[1]
+                        final_coverage = val_env._get_final_coverage().item()
 
                     paths.append(val_env.get_tracking_history())
                     path_masks.append(val_env.get_tracking_mask())
@@ -153,10 +154,8 @@ def train_torchrl(
         loss_module.parameters(),
         lr=config.learning_rate,
     )
-    # optimizer_critic = optim.Adam(
-    #     value_module.parameters(),
-    #     lr=config.learning_rate,
-    # )
+    # Mixed precision scaler
+    scaler = torch.cuda.amp.GradScaler() if device and device.type == "cuda" else None
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
@@ -257,36 +256,38 @@ def train_torchrl(
         actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
         for _ in range(config.update_epochs):
             batch_data = batch_data.reshape(-1)
-            # Computes advantages and value targets (returns) in-place
             adv_module(batch_data)
-            # Add collected data to the replay buffer
-            # replay_buffer.extend(batch_data)
-
             for j in range(0, config.frames_per_batch, batch_size):
-                # Iterate over minibatches in the collected batch
-                # minibatch = replay_buffer.sample()  # Sample a minibatch
-                # minibatch = minibatch.squeeze(0)  # Remove batch dim
-                # loss_dict = loss_module(minibatch)  # Calculate PPO losses
                 minibatch = batch_data[j : j + batch_size]
-                loss_dict = loss_module(minibatch)
-
-                # Sum losses
-                loss = (
-                    loss_dict["loss_objective"]
-                    + loss_dict["loss_critic"]
-                    + loss_dict["loss_entropy"]
-                )
-
-                # Optimization step
-
-                loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    loss_module.parameters(), config.max_grad_norm
-                )
-                optimizer.step()
-                # optimizer_critic.step()
-                optimizer.zero_grad()
-                # optimizer_critic.zero_grad()
+                if scaler is not None:
+                    with torch.cuda.amp.autocast():
+                        loss_dict = loss_module(minibatch)
+                        loss = (
+                            loss_dict["loss_objective"]
+                            + loss_dict["loss_critic"]
+                            + loss_dict["loss_entropy"]
+                        )
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        loss_module.parameters(), config.max_grad_norm
+                    )
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+                else:
+                    loss_dict = loss_module(minibatch)
+                    loss = (
+                        loss_dict["loss_objective"]
+                        + loss_dict["loss_critic"]
+                        + loss_dict["loss_entropy"]
+                    )
+                    loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        loss_module.parameters(), config.max_grad_norm
+                    )
+                    optimizer.step()
+                    optimizer.zero_grad()
 
                 # Log losses for this minibatch update
                 actor_losses.append(loss_dict["loss_objective"])

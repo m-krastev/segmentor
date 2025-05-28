@@ -79,12 +79,24 @@ class ActorNetwork(nn.Module):
 
     def forward(self, x):
         """Forward pass through the network."""
-        x = self.conv1(x) + x # Residual connection
+        # print(x.shape)
+        x = self.conv1(x) # Residual connection
+        # print(x.shape)
+
         x = self.pool1(x)
-        x = self.conv2(x) + x # Residual connection
+        # print(x.shape)
+
+        x = self.conv2(x) # Residual connection
+        # print(x.shape)
+
         x = self.pool2(x)
-        x = self.conv3(x) + x # Residual connection
+        # print(x.shape)
+
+        x = self.conv3(x) # Residual connection
+        # print(x.shape)
+
         x = self.pool3(x)
+        # print(x.shape)
         x = self.head(x)
 
         # Output alpha/beta parameters

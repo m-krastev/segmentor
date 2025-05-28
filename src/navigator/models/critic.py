@@ -59,11 +59,11 @@ class CriticNetwork(nn.Module):
         )
 
     def forward(self, x):
-        x = self.conv1(x) + x
+        x = self.conv1(x)
         x = self.pool1(x)
-        x = self.conv2(x) + x
+        x = self.conv2(x)
         x = self.pool2(x)
-        x = self.conv3(x) + x
+        x = self.conv3(x)
         x = self.pool3(x)
 
         out = self.head(x)
