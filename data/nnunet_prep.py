@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# /// script
+# dependencies = ["tqdm"]
+# ///
 
 import argparse
 import json
@@ -18,7 +21,7 @@ DATASET_LABELS = {
 
 def create_dataset(
     data_dir: Path,
-    output_dir: Path,
+    _output_dir: Path,
     labels: list[str],
     ratio: float,
     seed: int = 42,
@@ -26,7 +29,7 @@ def create_dataset(
 ):
     modality = 0  # CT
     for label in labels:
-        output_dir = output_dir / "nnUNet_raw" / f"Dataset{DATASET_LABELS[label]:03d}_{label}"
+        output_dir = _output_dir / "nnUNet_raw" / f"Dataset{DATASET_LABELS[label]:03d}_{label}"
         train_image_dir = output_dir / "imagesTr"
         train_label_dir = output_dir / "labelsTr"
         test_image_dir = output_dir / "imagesTs"
