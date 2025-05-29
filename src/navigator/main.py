@@ -92,8 +92,8 @@ def main():
         value_module(dummy_input)
         print(f"Policy: {policy_module}")
     
-    policy_module.compile()
-    value_module.compile()
+    # policy_module.compile()
+    # value_module.compile()
 
     # Watch the model parameters
     if config.track_wandb and wandb is not None:

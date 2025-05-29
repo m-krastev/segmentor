@@ -5,7 +5,7 @@
 
 #SBATCH --job-name=segmentor
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=18
 #SBATCH --time=23:59:00
 #SBATCH --output=/scratch-shared/%u/logs/%x-%A.out
 date
@@ -27,12 +27,12 @@ cd $PROJECT_ROOT
 UNET_CONFIG="3d_fullres"
 FOLD=1
 DEVICE=cuda
-DATASET_ID=42
+DATASET_ID=18
 
 # nnUNetv2_plan_and_preprocess -d $DATASET_ID --verify_dataset_integrity -c $UNET_CONFIG -np 16 -pl nnUNetPlannerResEncL
 
 # Training
-# nnUNetv2_train $DATASET_ID $UNET_CONFIG $FOLD -device $DEVICE --npz -p nnUNetResEncUNetLPlans -tr nnUNetTrainerDiceFocal
+nnUNetv2_train $DATASET_ID $UNET_CONFIG $FOLD -device $DEVICE --npz -p nnUNetResEncUNetLPlans -tr nnUNetTrainerDiceFocal
 
 # export RAYON_NUM_THREADS=16
 # cd notebooks
@@ -42,7 +42,7 @@ DATASET_ID=42
 # python test.py
 
 
-python -m navigator --data-dir data/bomopi_resampled2 checkpoints/checkpoint_torchrl_7372800.pth # --load-from-checkpoint checkpoints/checkpoint_torchrl_2252800.pth
+# python -m navigator --data-dir data/data # checkpoints/checkpoint_torchrl_7372800.pth # --load-from-checkpoint checkpoints/checkpoint_torchrl_2252800.pth
 
-cd notebooks
+# cd notebooks
 # python grl_pathtracking.py --nifti-path ./ct.nii.gz --seg-path ./small_bowel.nii.gz --duodenum-seg-path ./duodenum.nii.gz --colon-seg-path ./colon.nii.gz

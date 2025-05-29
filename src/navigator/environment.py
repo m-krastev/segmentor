@@ -112,8 +112,15 @@ class SmallBowelEnv(EnvBase):
                 device=device,
             ),
             final_step_count=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 1]), dtype=torch.int64, device=device
+                shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
             ),
+            final_length=UnboundedContinuous(
+                shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
+            ),
+            final_wall_gradient=UnboundedContinuous(
+                shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
+            ),
+
             total_reward=UnboundedContinuous(
                 shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
             ),
@@ -317,7 +324,7 @@ class SmallBowelEnv(EnvBase):
 
         # Save the tracking history
         tracking_history_path = cache_dir / "tracking_history.npy"
-        np.save(tracking_history_path, np.fliplr(self.tracking_path_history))
+        np.savetxt(tracking_history_path, np.fliplr(self.tracking_path_history), fmt="%d")
 
         # PyVista visualization
         plotter = pv.Plotter()
@@ -386,7 +393,9 @@ class SmallBowelEnv(EnvBase):
 
         # --- 3. Wall-based penalty ---
         # print(f"{self.wall_map[S].mean()=}")
-        rt -= self.config.r_val2 * self.wall_map[S].mean()
+        wall_map = self.wall_map[S].max()
+        rt -= 200 * self.config.r_val2 * wall_map
+        self.wall_gradient += wall_map.item()
 
         # --- 4. Revisiting penalty ---
         rt -= self.config.r_val1 * self.cumulative_path_mask[S].sum().bool()
@@ -419,6 +428,8 @@ class SmallBowelEnv(EnvBase):
 
         # --- Reset internal episode state ---
         self.current_step_count = 0
+        self.current_distance_traveled = 0
+        self.wall_gradient = 0
 
         # Reset goal marker (some slight indication that the goal is there)
         self.wall_map[self.goal] = 0
@@ -457,7 +468,7 @@ class SmallBowelEnv(EnvBase):
             )
 
             print(
-                f"Warning: Chosen start pos {self.current_pos_vox} invalid/outside seg. Using {candidate}."
+                f"Warning: Chosen start pos {self.current_pos_vox} invalid/outside seg. Using {candidate}.", flush=True
             )
             self.current_pos_vox = candidate
             self.goal = self.end_coord
@@ -465,7 +476,7 @@ class SmallBowelEnv(EnvBase):
             # self.gdt = compute_gdt(self.seg_np, self.current_pos_vox, self.spacing)
 
         # Reset goal marker (small indication to add prior information to the tracker to move towards)
-        self.wall_map[self.goal] = 2
+        self.wall_map[self.goal] = -2
         self.image[self.goal] = 2
 
         # Initialize path tracking
@@ -495,7 +506,9 @@ class SmallBowelEnv(EnvBase):
                 "done": self._is_done.clone(),
                 "terminated": self._is_done.clone(),
                 "truncated": self._is_done.clone(),
-                "final_step_count": torch.zeros_like(self._is_done, dtype=torch.int64),
+                "final_step_count": torch.zeros_like(self._is_done, dtype=torch.float32),
+                "final_length": torch.zeros_like(self._is_done, dtype=torch.float32),
+                "final_wall_gradient": torch.zeros_like(self._is_done, dtype=torch.float32),
                 "final_coverage": self.placeholder_zeros.clone(),
                 "total_reward": self.placeholder_zeros.clone(),
                 "max_gdt_achieved": torch.as_tensor(
@@ -552,15 +565,15 @@ class SmallBowelEnv(EnvBase):
             #     draw_path_sphere(self.cumulative_path_mask, vox, self.config.cumulative_path_radius_vox)
             draw_path_sphere_2(self.cumulative_path_mask, S, self.dilation, self.gt_path_vol)
 
+        self.current_distance_traveled += dist(next_pos_vox, self.current_pos_vox)
         self.tracking_path_history.append(next_pos_vox)
         self.current_pos_vox = next_pos_vox
-
         # Check Termination Conditions
         done, terminated, truncated = False, False, False
         termination_reason = ""
         if self.current_step_count >= self.config.max_episode_steps:
             done, truncated, termination_reason = True, True, "max_steps"
-        elif not (is_next_pos_valid_seg and self.seg_np[next_pos_vox]): # and 
+        elif not (is_next_pos_valid_seg): # and self.seg_np[next_pos_vox]
             done, terminated, termination_reason = True, True, "out_of_bounds"
         elif dist(next_pos_vox, self.goal) < self.config.cumulative_path_radius_vox:
             done, terminated, termination_reason = True, True, "reached_goal"
@@ -608,6 +621,17 @@ class SmallBowelEnv(EnvBase):
                 ).view_as(_reward)
                 if done
                 else torch.as_tensor(0, device=self.device).view_as(_reward),
+                "final_length": torch.as_tensor(
+                    self.current_distance_traveled, device=self.device
+                ).view_as(_reward)
+                if done
+                else torch.as_tensor(0, device=self.device).view_as(_reward),
+                "final_wall_gradient": torch.as_tensor(
+                    self.wall_gradient, device=self.device
+                ).view_as(_reward)
+                if done
+                else torch.as_tensor(0, device=self.device).view_as(_reward),
+                
                 "total_reward": self.cum_reward.view_as(_reward)
                 if done
                 else self.placeholder_zeros,

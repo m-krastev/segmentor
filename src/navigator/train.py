@@ -58,7 +58,6 @@ def validation_loop_torchrl(
     with (
         torch.no_grad(),
         set_exploration_type(ExplorationType.MODE),
-        torch.cuda.amp.autocast() if device and device.type == "cuda" else torch.cpu.amp.autocast(enabled=False),
     ):  # Use deterministic actions
         for i in tqdm(range(num_val_subjects), desc="Validation"):
             # best of k
@@ -67,17 +66,17 @@ def validation_loop_torchrl(
             path_masks = []
             intermediate_results = []
             reward, step_count, final_coverage = 0, 0, 0
+            must_load_new_subject = True
             for _ in range(10):
-                try:
-                    with torch.cuda.amp.autocast() if device and device.type == "cuda" else torch.cpu.amp.autocast(enabled=False):
-                        tensordict = val_env._reset(must_load_new_subject=True)
-                        rollout = val_env.rollout(
-                            config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
-                        )
+                try:                    
+                    tensordict = val_env._reset(must_load_new_subject=must_load_new_subject)
+                    rollout = val_env.rollout(
+                        config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
+                    )
 
-                        reward = rollout["next", "reward"].mean().item()
-                        step_count = rollout["action"].shape[1]
-                        final_coverage = val_env._get_final_coverage().item()
+                    reward = rollout["next", "reward"].mean().item()
+                    step_count = rollout["action"].shape[1]
+                    final_coverage = val_env._get_final_coverage().item()
 
                     paths.append(val_env.get_tracking_history())
                     path_masks.append(val_env.get_tracking_mask())
@@ -155,17 +154,17 @@ def train_torchrl(
         lr=config.learning_rate,
     )
     # Mixed precision scaler
-    scaler = torch.cuda.amp.GradScaler() if device and device.type == "cuda" else None
+    scaler = torch.GradScaler(device)
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=(total_timesteps * config.update_epochs // batch_size),
-        eta_min=1e-5,
+        eta_min=5e-6,
     )
     # scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
     #     optimizer_critic,
     #     T_max=(total_timesteps * config.update_epochs // batch_size),
-    #     eta_min=1e-5,
+    #     eta_min=5e-6,
     # )
     collected_frames, num_updates = 0, 0
 
@@ -196,9 +195,9 @@ def train_torchrl(
             print(f"An unexpected error occurred while loading checkpoint: {e}")
             exit(1)
 
-    # Advance the scheduler to the correct state
-    for _ in range(num_updates):
-        scheduler.step()
+    # # Advance the scheduler to the correct state
+    # for _ in range(num_updates):
+    #     scheduler.step()
 
     # --- Collector ---
     # Collects data by interacting policy_module with environment instances
@@ -256,38 +255,21 @@ def train_torchrl(
         actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
         for _ in range(config.update_epochs):
             batch_data = batch_data.reshape(-1)
-            adv_module(batch_data)
+
+            with torch.no_grad():
+                adv_module(batch_data)
             for j in range(0, config.frames_per_batch, batch_size):
                 minibatch = batch_data[j : j + batch_size]
-                if scaler is not None:
-                    with torch.cuda.amp.autocast():
-                        loss_dict = loss_module(minibatch)
-                        loss = (
-                            loss_dict["loss_objective"]
-                            + loss_dict["loss_critic"]
-                            + loss_dict["loss_entropy"]
-                        )
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(optimizer)
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        loss_module.parameters(), config.max_grad_norm
-                    )
-                    scaler.step(optimizer)
-                    scaler.update()
-                    optimizer.zero_grad()
-                else:
-                    loss_dict = loss_module(minibatch)
-                    loss = (
-                        loss_dict["loss_objective"]
-                        + loss_dict["loss_critic"]
-                        + loss_dict["loss_entropy"]
-                    )
-                    loss.backward()
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        loss_module.parameters(), config.max_grad_norm
-                    )
-                    optimizer.step()
-                    optimizer.zero_grad()
+                loss_dict = loss_module(minibatch)
+                actor_loss = loss_dict["loss_objective"] + loss_dict["loss_entropy"]
+                critic_loss = loss_dict["loss_critic"]
+                actor_loss.backward()
+                critic_loss.backward()
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    loss_module.parameters(), config.max_grad_norm
+                )
+                optimizer.step()
+                optimizer.zero_grad()
 
                 # Log losses for this minibatch update
                 actor_losses.append(loss_dict["loss_objective"])
@@ -309,8 +291,12 @@ def train_torchrl(
         # Log episode stats from collected batch_data
         final_coverage = batch_data["next", "final_coverage"]
         final_coverage = final_coverage[final_coverage.nonzero()].mean()
-        ep_len = batch_data["next", "final_step_count"]
-        ep_len = ep_len[ep_len.nonzero()].float().mean()
+        step_count = batch_data["next", "final_step_count"].float()
+        step_count = step_count[step_count.nonzero()].mean()
+        ep_len = batch_data["next", "final_length"].float()
+        ep_len = ep_len[ep_len.nonzero()].mean()
+        wall_gradient = batch_data["next", "final_wall_gradient"].float()
+        wall_gradient = wall_gradient[wall_gradient.nonzero()].mean()
         total_reward = batch_data["next", "total_reward"]
         total_reward = total_reward[total_reward.nonzero()].mean()
         log_data = {
@@ -319,23 +305,24 @@ def train_torchrl(
             "losses/entropy": avg_entropy_loss,
             "losses/kl_div": avg_kldiv,
             "losses/grad_norm": grad_norm.item(),
-            # "losses/std": batch_data["scale"].mean(),
-            "losses/concentration1": batch_data["concentration1"].mean(),
-            "losses/concentration0": batch_data["concentration0"].mean(),
+            "losses/alpha": batch_data["alpha"].mean(),
+            "losses/beta": batch_data["beta"].mean(),
             "charts/learning_rate": optimizer.param_groups[0]["lr"],
             "charts/max_gdt_achieved": batch_data["next", "max_gdt_achieved"].mean(),
-            "train/num_updates": num_updates,
+            "charts/num_updates": num_updates,
             "train/reward": avg_reward,
             "train/max_reward": max_reward,
+            "train/step_count": step_count,
+            "train/wall_gradient": wall_gradient,
             "train/episode_len": ep_len,
             "train/final_coverage": final_coverage,
             "train/total_reward": total_reward,
-            "train/action_0": batch_data["action"][:, 0].mean(),
-            "train/action_1": batch_data["action"][:, 1].mean(),
-            "train/action_2": batch_data["action"][:, 2].mean(),
-            "train/action_0_std": batch_data["action"][:, 0].std(),
-            "train/action_1_std": batch_data["action"][:, 1].std(),
-            "train/action_2_std": batch_data["action"][:, 2].std(),
+            "charts/action_0": batch_data["action"][:, 0].mean(),
+            "charts/action_1": batch_data["action"][:, 1].mean(),
+            "charts/action_2": batch_data["action"][:, 2].mean(),
+            "charts/action_0_std": batch_data["action"][:, 0].std(),
+            "charts/action_1_std": batch_data["action"][:, 1].std(),
+            "charts/action_2_std": batch_data["action"][:, 2].std(),
         }
 
         pbar.set_postfix(

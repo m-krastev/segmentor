@@ -56,7 +56,7 @@ class Config:
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 20_000_000
     # Size of the buffer to store transitions
-    frames_per_batch: int = 4096
+    frames_per_batch: int = 2048
     learning_rate: float = 3e-5
     batch_size: int = 256  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs

@@ -2,9 +2,11 @@
 Neural network models for the Navigator RL agent.
 """
 
+from typing import Union
 import torch
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from tensordict.nn.distributions import NormalParamExtractor
+from tensordict.nn import InteractionType
 from tensordict.nn.utils import biased_softplus
 from torchrl.modules import ProbabilisticActor, ValueOperator
 from torchrl.data import Bounded
@@ -39,11 +41,37 @@ class BetaParamExtractor(torch.nn.Module):
         param0, param1 = self.parameter_mapping(tensor).chunk(2, -1)
         return (param0, param1, *others)
 
-def ind(concentration1, concentration0):
+def ind(alpha, beta):
     return Independent(
-        Beta(concentration1=concentration1, concentration0=concentration0),
+        Beta(alpha, beta),
         reinterpreted_batch_ndims=1,
     )
+
+
+class IndependentBeta(Independent):
+    def __init__(
+        self,
+        alpha: torch.Tensor,
+        beta: torch.Tensor,
+        min: Union[float, torch.Tensor] = 0.0,
+        max: Union[float, torch.Tensor] = 1.0,
+        event_dims: int = 1,
+    ):
+        self.min = torch.as_tensor(min, device=alpha.device).broadcast_to(alpha.shape)
+        self.max = torch.as_tensor(max, device=alpha.device).broadcast_to(alpha.shape)
+        self.scale = self.max - self.min
+        self.eps = torch.finfo(alpha.dtype).eps
+        base_dist = Beta(alpha, beta)
+        super().__init__(base_dist, event_dims)
+
+    def sample(self, sample_shape: torch.Size = torch.Size()):
+        return super().sample(sample_shape) * self.scale + self.min
+
+    def rsample(self, sample_shape: torch.Size = torch.Size()):
+        return super().rsample(sample_shape) * self.scale + self.min
+
+    def log_prob(self, value: torch.Tensor):
+        return super().log_prob(((value - self.min) / self.scale).clamp(self.eps, 1.0 - self.eps))
 
 # --- TorchRL Modules ---
 def create_ppo_modules(config: Config, device: torch.device):
@@ -59,7 +87,7 @@ def create_ppo_modules(config: Config, device: torch.device):
         module=actor_cnn_base,
         in_keys=["actor"],  # Input key from observation spec
         # out_keys=["dist_params"],  # Intermediate output key
-        out_keys=["concentration1", "concentration0"],  # Intermediate output key
+        out_keys=["alpha", "beta"],  # Intermediate output key
     )
 
     action_spec = Bounded(
@@ -86,13 +114,14 @@ def create_ppo_modules(config: Config, device: torch.device):
 
     policy_module = ProbabilisticActor(
         module=TensorDictSequential(
-            actor_cnn_module,  # Outputs TD with "concentration1, concentration0"
+            actor_cnn_module,  # Outputs TD with "alpha, beta"
         ),
         spec=action_spec,
-        in_keys=["concentration1", "concentration0"],
+        in_keys=["alpha", "beta"],
         out_keys=["action"],
-        distribution_class=ind,
+        distribution_class=IndependentBeta,
         return_log_prob=True,
+        default_interaction_type=InteractionType.RANDOM,
     ).to(device)
 
     # Critic Network Base
