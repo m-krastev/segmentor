@@ -360,9 +360,6 @@ class SmallBowelEnv(EnvBase):
         # Set of voxels S on the line segment
         S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
 
-        if not self.seg_np[next_pos_vox]:
-            rt -= self.config.r_val1
-
         # --- 2. GDT-based reward ---
         next_gdt_val = self.gdt[next_pos_vox]
         if self.config.use_immediate_gdt_reward:
@@ -377,7 +374,7 @@ class SmallBowelEnv(EnvBase):
                 rt += (
                     -self.config.r_val2
                     if delta > self.config.gdt_max_increase_theta
-                    else self.config.r_val2 * (1+delta / self.config.gdt_max_increase_theta)
+                    else self.config.r_val2 * (delta / self.config.gdt_max_increase_theta)
                 )
 
                 self.max_gdt_achieved = next_gdt_val
@@ -393,13 +390,18 @@ class SmallBowelEnv(EnvBase):
 
         # --- 3. Wall-based penalty ---
         # print(f"{self.wall_map[S].mean()=}")
-        wall_map = self.wall_map[S].max()
-        rt -= 200 * self.config.r_val2 * wall_map
-        self.wall_gradient += wall_map.item()
+        wall_map = self.wall_map[S].max().item()
+        rt -= self.config.r_val2 * wall_map * 30
+        
+        self.wall_stuff = wall_map
+        self.wall_gradient += wall_map
 
         # --- 4. Revisiting penalty ---
         rt -= self.config.r_val1 * self.cumulative_path_mask[S].sum().bool()
         # print(f"{self.cumulative_path_mask[S].sum()=}")
+
+        if not self.seg_np[next_pos_vox]:
+            rt -= self.config.r_val1
 
         return rt, S
 
@@ -573,7 +575,8 @@ class SmallBowelEnv(EnvBase):
         termination_reason = ""
         if self.current_step_count >= self.config.max_episode_steps:
             done, truncated, termination_reason = True, True, "max_steps"
-        elif not (is_next_pos_valid_seg): # and self.seg_np[next_pos_vox]
+        elif not (is_next_pos_valid_seg) or not any(action_vox_delta) or self.wall_stuff > 0.03: # and self.seg_np[next_pos_vox]
+            reward.fill_(-self.config.r_zero_mov)
             done, terminated, termination_reason = True, True, "out_of_bounds"
         elif dist(next_pos_vox, self.goal) < self.config.cumulative_path_radius_vox:
             done, terminated, termination_reason = True, True, "reached_goal"
@@ -588,6 +591,7 @@ class SmallBowelEnv(EnvBase):
                 (final_coverage * self.config.r_final)
                 if termination_reason == "reached_goal"
                 else (final_coverage - 1) * self.config.r_final
+                # else 0.0
             )
             # nope doesn't work well at all
             # reward += self.config.r_final if termination_reason == "reached_goal" else 0

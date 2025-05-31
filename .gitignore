@@ -187,3 +187,4 @@ output*
 checkpoints
 *.pth
 ideas
+nnUNet*

@@ -48,7 +48,7 @@ class Config:
     r_zero_mov: float = 100.0
     r_final: float = 100.0
     # Reward for passing through must-pass nodes?
-    r_peaks: float = 2.0
+    r_peaks: float = 4.0
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
@@ -58,9 +58,9 @@ class Config:
     # Size of the buffer to store transitions
     frames_per_batch: int = 2048
     learning_rate: float = 3e-5
-    batch_size: int = 256  # Size of mini-batch for PPO update
+    batch_size: int = 128  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
-    gamma: float = 0.99
+    gamma: float = 0.999
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.1
     # Entropy coefficient for exploration (higher values encourage exploration)

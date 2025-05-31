@@ -40,22 +40,18 @@ class CriticNetwork(nn.Module):
         """
         super().__init__()
 
-        self.conv1 = ConvBlock(input_channels, 32, kernel_size=3, padding=1, num_groups=8)
-        self.pool1 = nn.Conv3d(32, 32, kernel_size=2, stride=2, padding=0, bias=False)
-        self.conv2 = ConvBlock(32, 64, kernel_size=3, padding=1, num_groups=16)
-        self.pool2 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
-        self.conv3 = ConvBlock(64, 128, kernel_size=3, padding=1, num_groups=32)
-        self.pool3 = nn.Conv3d(128, 128, kernel_size=2, stride=2, padding=0, bias=False)
-
+        self.conv1 = ConvBlock(input_channels, 16, kernel_size=3, padding=1, num_groups=8)
+        self.pool1 = nn.Conv3d(16, 16, kernel_size=2, stride=2, padding=0, bias=False)
+        self.conv2 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=16)
+        self.pool2 = nn.Conv3d(32, 32, kernel_size=2, stride=2, padding=0, bias=False)
+        self.conv3 = ConvBlock(32, 64, kernel_size=3, padding=1, num_groups=32)
+        self.pool3 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.LazyLinear(128),
-            nn.GroupNorm(8, 128),
+            nn.LazyLinear(256),
+            nn.GroupNorm(32, 256),
             nn.GELU(),
-            nn.Linear(128, 128),
-            nn.GroupNorm(8, 128),
-            nn.GELU(),
-            nn.Linear(128, 1),
+            nn.Linear(256, 1),
         )
 
     def forward(self, x):
