@@ -218,6 +218,8 @@ class SmallBowelEnv(EnvBase):
         self.cumulative_path_mask = torch.zeros_like(self.seg)
         self.local_peaks = local_peaks
         self.reward_map = np.zeros_like(self.seg_np)
+        # assert np.all(self.gdt_start[tuple(self.local_peaks.T)] > 0)
+        # assert np.all(self.gdt_end[tuple(self.local_peaks.T)] > 0)
 
         # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
@@ -412,16 +414,14 @@ class SmallBowelEnv(EnvBase):
 
         # Determine start position and select appropriate GDT
         rand = random.randint(0, 9) # 40-40-20
-        if rand <= 4:
+        if rand < 4:
             # Start at the beginning
             self.current_pos_vox = self.start_coord
             self.goal = self.end_coord
             self.gdt = self.gdt_start
         elif rand < 6:
             # Start at a random local peak
-            self.current_pos_vox = tuple(
-                self.local_peaks[random.randint(0, len(self.local_peaks) - 1)]
-            )
+            self.current_pos_vox = tuple(random.choice(self.local_peaks))
             # Randomly go in either direction
             if self.episodes_on_current_subject % 2:
                 self.goal = self.end_coord
@@ -435,16 +435,17 @@ class SmallBowelEnv(EnvBase):
             self.goal = self.start_coord
             self.gdt = self.gdt_end
 
+        # print(self.start_coord, self.end_coord, self._current_subject_data["id"], np.all(self.gdt_start==self.gdt_end))
+        # print(f"Reset called on patient: {self._current_subject_data['id']}")
         # TODO: Later move this into the init to only check start/end
         # Validate start position (simplified check)
         while not self._is_valid_pos(self.current_pos_vox) or not self.seg_np[self.current_pos_vox]:
-            candidate = tuple(
-                self.local_peaks[random.randint(0, len(self.local_peaks) - 1)]
-            )
+            candidate = tuple(random.choice(self.local_peaks))
 
             print(
                 f"Warning: Chosen start pos {self.current_pos_vox} invalid/outside seg. Using {candidate}.", flush=True
             )
+            
             self.current_pos_vox = candidate
             self.goal = self.end_coord
             self.gdt = self.gdt_end
@@ -468,6 +469,8 @@ class SmallBowelEnv(EnvBase):
         self.cum_reward.fill_(0)
         self.max_gdt_achieved = self.gdt[self.current_pos_vox]
         self.reward_map[tuple(self.local_peaks.T)] = 1
+        err_text = f"{self.max_gdt_achieved} at {self.current_pos_vox}, {self.start_coord}, {self.end_coord}, {self.local_peaks}, ID: {self._current_subject_data['id']}, {self.gdt.shape}"
+        assert self.max_gdt_achieved >= 0 and np.isfinite(self.max_gdt_achieved), f"Expected GDT>=0, got {err_text}"
 
         # --- Get Initial State Patches ---
         obs_dict = self._get_state_patches()
