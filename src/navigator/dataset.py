@@ -114,7 +114,7 @@ class SmallBowelDataset(Dataset):
             idx: Index of the subject
 
         Returns:
-            Dictionary with the loaded subject data (images/maps as tensors)
+            Dictionary with the loaded subject data
         """
         if isinstance(idx, int) or np.issubdtype(type(idx), np.integer):
             # Get the subject entry
@@ -127,13 +127,13 @@ class SmallBowelDataset(Dataset):
                 "seg": data["seg"],
                 "duodenum": data["duodenum"],
                 "colon": data["colon"],
-                "wall_map": data["wall_map"],  # Add wall_map tensor
-                "gdt_start": data["gdt_start"],  # Add gdt_start tensor
-                "gdt_end": data["gdt_end"],  # Add gdt_end tensor
-                "image_affine": data["image_affine"],  # Keep as numpy array
-                "spacing": data["spacing"],  # Keep spacing in (Z, Y, X) order
-                "start_coord": data["start_coord"],  # Keep as tuple/numpy
-                "end_coord": data["end_coord"],  # Keep as tuple/numpy
+                "wall_map": data["wall_map"],
+                "gdt_start": data["gdt_start"],
+                "gdt_end": data["gdt_end"],
+                "image_affine": data["image_affine"],
+                "spacing": data["spacing"],
+                "start_coord": data["start_coord"],
+                "end_coord": data["end_coord"],
                 "local_peaks": data["local_peaks"],
             }
 
@@ -162,26 +162,22 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     # --- Load Base Data ---
     image_nii: nib.nifti1.Nifti1Image = nib.load(subject_data["image"])
     image_np = image_nii.get_fdata(dtype=np.float32)
-    image_np = np.transpose(image_np, (2, 1, 0))  # Change to (Z, Y, X) format
 
     result["image"] = image_np
     result["image_affine"] = image_nii.affine
-    result["spacing"] = image_nii.header.get_zooms()[::-1]  # Get spacing in (Z, Y, X) order
+    result["spacing"] = image_nii.header.get_zooms()
 
     # Load segmentations (ensure they exist before loading)
-    sb_seg_nii = np.asanyarray(nib.load(subject_data["small_bowel"]).dataobj)
-    seg_np = np.transpose(sb_seg_nii, (2, 1, 0))
+    seg_np = np.asanyarray(nib.load(subject_data["small_bowel"]).dataobj)
     result["seg"] = (seg_np > 0).astype(np.uint8)
 
     if subject_data.get("duodenum"):
-        duodenum_seg_nii = np.asanyarray(nib.load(subject_data["duodenum"]).dataobj)
-        duodenum_np = np.transpose(duodenum_seg_nii, (2, 1, 0))
+        duodenum_np = np.asanyarray(nib.load(subject_data["duodenum"]).dataobj)
         result["duodenum"] = (duodenum_np > 0).astype(np.uint8)
     else:
         result["duodenum"] = None
     if subject_data.get("colon"):
-        colon_seg_nii = np.asanyarray(nib.load(subject_data["colon"]).dataobj)
-        colon_np = np.transpose(colon_seg_nii, (2, 1, 0))
+        colon_np = np.asanyarray(nib.load(subject_data["colon"]).dataobj)
         result["colon"] = (colon_np > 0).astype(np.uint8)
     else:
         result["colon"] = None
@@ -196,16 +192,15 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     # --- Load/Calculate Start/End Coordinates ---
     start_end_cache_path = cache_dir / CACHE_FILES["start_end"]
     if start_end_cache_path.exists():
-        # NOTE: Coords are saved in XYZ, so we transpose)
         start_coord_np, end_coord_np = np.loadtxt(start_end_cache_path, dtype=int)
-        start_coord = tuple(start_coord_np)[::-1]
-        end_coord = tuple(end_coord_np)[::-1]
+        start_coord = tuple(start_coord_np)
+        end_coord = tuple(end_coord_np)
     else:
         assert result["duodenum"] is not None, "Duodenum segmentation is required to find start/end coordinates."
         assert result["colon"] is not None, "Colon segmentation is required to find start/end coordinates."
         # Get them in XYZ order
         start_coord, end_coord = find_start_end(
-            duodenum_volume=np.transpose(result["duodenum"], (2,1,0)), colon_volume=np.transpose(result["colon"], (2,1,0)), small_bowel_volume=np.tranpose(result["seg"], (2,1,0))
+            duodenum_volume=result["duodenum"], colon_volume=result["colon"], small_bowel_volume=result["seg"]
         )
         np.savetxt(start_end_cache_path, (start_coord, end_coord), fmt="%d")
     result["start_coord"] = start_coord
@@ -214,55 +209,70 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     # --- Load/Calculate Wall Map ---
     wall_map_cache_path = cache_dir / CACHE_FILES["wall_map"]
     if wall_map_cache_path.exists():
-        wall_map_nii = nib.load(wall_map_cache_path)
-        wall_map_np = np.transpose(wall_map_nii.get_fdata(dtype=np.float32), (2, 1, 0))
+        wall_map_np = nib.load(wall_map_cache_path).get_fdata(dtype=np.float32)
     else:
         wall_map_np = compute_wall_map(result["image"], sigmas=config.wall_map_sigmas)
         # Save in Nifti format (preserving original orientation for saving)
-        wall_map_to_save = np.transpose(wall_map_np, (2, 1, 0))
-        wall_map_nii_save = nib.Nifti1Image(wall_map_to_save, result["image_affine"])
+        wall_map_nii_save = nib.Nifti1Image(wall_map_np, result["image_affine"])
         nib.save(wall_map_nii_save, wall_map_cache_path)
     result["wall_map"] = wall_map_np
 
     # --- Load/Calculate GDT (Start) ---
     gdt_start_cache_path = cache_dir / CACHE_FILES["gdt_start"]
     if gdt_start_cache_path.exists():
-        gdt_start_nii = nib.load(gdt_start_cache_path)
-        gdt_start_np = np.transpose(gdt_start_nii.get_fdata(dtype=np.float32), (2, 1, 0))
+        gdt_start_np = nib.load(gdt_start_cache_path).get_fdata(dtype=np.float32)
     else:
         # Use numpy seg and start_coord for calculation
-        gdt_start_tensor = compute_gdt(result["seg"], result["start_coord"], result["spacing"])
-        gdt_start_np = (
-            gdt_start_tensor.astype(np.float32)  # Save in Nifti format
-        )
-        gdt_start_to_save = np.transpose(gdt_start_np, (2, 1, 0))
-        gdt_start_nii_save = nib.Nifti1Image(gdt_start_to_save, result["image_affine"])
+        gdt_start_np = compute_gdt(result["seg"], result["start_coord"], result["spacing"])
+        # Save in Nifti format
+        gdt_start_np = gdt_start_np.astype(np.float32)
+        gdt_start_nii_save = nib.Nifti1Image(gdt_start_np, result["image_affine"])
         nib.save(gdt_start_nii_save, gdt_start_cache_path)
     result["gdt_start"] = gdt_start_np
 
     # --- Load/Calculate GDT (End) ---
     gdt_end_cache_path = cache_dir / CACHE_FILES["gdt_end"]
     if gdt_end_cache_path.exists():
-        gdt_end_nii = nib.load(gdt_end_cache_path)
-        gdt_end_np = np.transpose(gdt_end_nii.get_fdata(dtype=np.float32), (2, 1, 0))
+        gdt_end_np = nib.load(gdt_end_cache_path).get_fdata(dtype=np.float32)
     else:
         # Use numpy seg and end_coord for calculation
-        gdt_end_tensor = compute_gdt(result["seg"], result["end_coord"], result["spacing"])
-        gdt_end_np = gdt_end_tensor.astype(np.float32)
+        gdt_end_np = compute_gdt(result["seg"], result["end_coord"], result["spacing"])
+        gdt_end_np = gdt_end_np.astype(np.float32)
         # Save in Nifti format
-        gdt_end_to_save = np.transpose(gdt_end_np, (2, 1, 0))
-        gdt_end_nii_save = nib.Nifti1Image(gdt_end_to_save, result["image_affine"])
+        gdt_end_nii_save = nib.Nifti1Image(gdt_end_np, result["image_affine"])
         nib.save(gdt_end_nii_save, gdt_end_cache_path)
+    # Handles weird edge case related to the local peaks
+    # Disconnected segmentation components lead to wildly inconsistent result, in particular when using the GDT which turns any unreachable point into -inf.
     result["gdt_end"] = gdt_end_np
+    if np.isfinite(gdt_end_np).sum() < 1000:
+        result["gdt_end"] = gdt_start_np.max() - gdt_start_np.copy()
+        result["end_coord"] = np.unravel_index(gdt_start_np.argmax(), gdt_start_np.shape)
 
     local_peaks_cache_path = cache_dir / CACHE_FILES["local_peaks"]
     if local_peaks_cache_path.exists():
         local_peaks_np = np.loadtxt(local_peaks_cache_path, dtype=int)
-        local_peaks_np = np.fliplr(local_peaks_np)
     else:
-        distances = distance_transform_edt(result["seg"])
+        distances = distance_transform_edt(result["gdt_start"] > 0)
         local_peaks_np = peak_local_max(distances, min_distance=4, threshold_abs=3, num_peaks=1024)
-        np.savetxt(local_peaks_cache_path, np.fliplr(local_peaks_np), fmt="%d")
+        # Choose only peaks for which gdt > 0
+        # peaks = [peak for peak in local_peaks_np if gdt_start_np[tuple(peak)] > 0]
+        # local_peaks_np = np.array(peaks)
+        np.savetxt(local_peaks_cache_path, local_peaks_np, fmt="%d")
     result["local_peaks"] = local_peaks_np
+
+
+    if True:
+        # Transpose everything
+        result["image"] = np.transpose(result["image"], (2, 1, 0))
+        result["seg"] = np.transpose(result["seg"], (2, 1, 0))
+        result["duodenum"] = np.transpose(result["duodenum"], (2, 1, 0)) if result["duodenum"] is not None else None
+        result["colon"] = np.transpose(result["colon"], (2, 1, 0)) if result["colon"] is not None else None
+        result["spacing"] = result["spacing"][::-1]
+        result["start_coord"] = result["start_coord"][::-1]
+        result["end_coord"] = result["end_coord"][::-1]
+        result["wall_map"] = np.transpose(result["wall_map"], (2, 1, 0)) 
+        result["gdt_start"] = np.transpose(result["gdt_start"], (2, 1, 0)) 
+        result["gdt_end"] = np.transpose(result["gdt_end"], (2, 1, 0)) 
+        result["local_peaks"] = np.fliplr(result["local_peaks"])
 
     return result
