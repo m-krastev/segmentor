@@ -91,68 +91,46 @@ class SmallBowelEnv(EnvBase):
         self.num_episodes_per_sample = num_episodes_per_sample
         self.episodes_on_current_subject = num_episodes_per_sample  # Counter for episodes on current subject, set so that it refreshes at next step
 
+        self.dtype = torch.bfloat16 if config.use_bfloat16 and self.device.type == "cuda" else torch.float32
         # --- Define Specs ---
         # Set the specs *after* calling super().__init__
         self.observation_spec = Composite(
             actor=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 3, *config.patch_size_vox]),
-                dtype=torch.float32,
-                device=device,
+                shape=torch.Size([*batch_size, 3, *config.patch_size_vox]), dtype=self.dtype
             ),
             critic=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 3, *config.patch_size_vox]),
-                dtype=torch.float32,
-                device=device,
+                shape=torch.Size([*batch_size, 3, *config.patch_size_vox]), dtype=self.dtype
             ),
             final_coverage=BoundedContinuous(
-                low=0,
-                high=1,
-                shape=torch.Size([*batch_size, 1]),
-                dtype=torch.float32,
-                device=device,
+                low=0, high=1, shape=torch.Size([*batch_size, 1]), dtype=self.dtype
             ),
             final_step_count=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
+                shape=torch.Size([*batch_size, 1]), dtype=self.dtype
             ),
-            final_length=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
-            ),
+            final_length=UnboundedContinuous(shape=torch.Size([*batch_size, 1]), dtype=self.dtype),
             final_wall_gradient=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
+                shape=torch.Size([*batch_size, 1]), dtype=self.dtype
             ),
-
-            total_reward=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
-            ),
+            total_reward=UnboundedContinuous(shape=torch.Size([*batch_size, 1]), dtype=self.dtype),
             max_gdt_achieved=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 1]), dtype=torch.float32, device=device
+                shape=torch.Size([*batch_size, 1]), dtype=self.dtype
             ),
             shape=batch_size,
-            device=device,
         )
         self.state_spec = self.observation_spec.clone()
         self.action_spec = BoundedContinuous(
-            low=0,
-            high=1,
-            shape=torch.Size([*batch_size, 3]),
-            dtype=torch.float32,
-            device=device,
+            low=0, high=1, shape=torch.Size([*batch_size, 3]), dtype=self.dtype
         )
-        self.reward_spec = UnboundedContinuous(
-            shape=torch.Size([*batch_size, 1]),
-            dtype=torch.float32,
-            device=device,
-        )
+        self.reward_spec = UnboundedContinuous(shape=torch.Size([*batch_size, 1]), dtype=self.dtype)
         self.done_spec = Composite(
-            done=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool, device=device),
-            terminated=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool, device=device),
-            truncated=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool, device=device),
+            done=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool),
+            terminated=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool),
+            truncated=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool),
             shape=batch_size,
-            device=device,
         )
 
         self.max_gdt_achieved = 0.0
-        self.cum_reward = torch.tensor(0.0, device=self.device)
+        self.cum_reward = torch.tensor(0.0, device=self.device, dtype=self.dtype)
 
         # --- TorchRL Internal State Flags (per-batch element) ---
         self._is_done = torch.zeros(*self.batch_size, 1, dtype=torch.bool, device=self.device)
@@ -162,7 +140,7 @@ class SmallBowelEnv(EnvBase):
 
         # Placeholder tensor
         self.zeros_patch = torch.zeros(self.config.patch_size_vox, device=self.device)
-        self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=torch.float32)
+        self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=self.dtype)
         self.dilation = (
             torch.nn.Sequential(*[
                 BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 2 + 1)
@@ -224,10 +202,9 @@ class SmallBowelEnv(EnvBase):
         Updates the environment's internal data stores using data from the dataset.
         """
         # Store tensors directly
-        self.image = self.transform(torch.from_numpy(image).to(self.device))
+        self.image = self.transform(torch.from_numpy(image).to(self.device)).to(self.dtype)
         # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
         # save_nifti(np.transpose(self.image.numpy(force=True), (2,1,0)), f"image_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
-
         self.seg = torch.from_numpy(seg).to(device=self.device, dtype=torch.uint8)
         self.seg = self.dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze()
         # self.seg[tuple(start_coord)] = 3
@@ -235,7 +212,7 @@ class SmallBowelEnv(EnvBase):
         # save_nifti(np.transpose(self.seg.numpy(force=True), (2,1,0)), f"seg_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
         self.seg_np = self.seg.numpy(force=True)  # Keep numpy version for reference
         self.seg_volume = torch.sum(self.seg).item()
-        self.wall_map = torch.from_numpy(wall_map).to(self.device)
+        self.wall_map = torch.from_numpy(wall_map).to(device=self.device, dtype=self.dtype)
         self.gdt_start = gdt_start
         self.gdt_end = gdt_end
         self.cumulative_path_mask = torch.zeros_like(self.seg)
@@ -351,7 +328,7 @@ class SmallBowelEnv(EnvBase):
     ) -> Tuple[float, Tuple]:
         """Calculate the reward for the current step."""
 
-        rt = torch.tensor(0.0, device=self.device)
+        rt = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         # --- 1. Zero movement or goes out of the segmentation penalty ---
         if not any(action_vox) or not self._is_valid_pos(next_pos_vox):
             rt -= self.config.r_zero_mov
@@ -362,22 +339,18 @@ class SmallBowelEnv(EnvBase):
 
         # --- 2. GDT-based reward ---
         next_gdt_val = self.gdt[next_pos_vox]
-        if self.config.use_immediate_gdt_reward:
-            delta = next_gdt_val - self.gdt[self.current_pos_vox]
-            if isfinite(delta):
-                rt += delta * self.config.r_val2 if delta > 0 else self.config.r_pen2
-        else:
-            # If there is some progress
-            if next_gdt_val > self.max_gdt_achieved:
-                delta = next_gdt_val - self.max_gdt_achieved
-                # Penalty if too large, reward if within margins
-                rt += (
-                    -self.config.r_val2
-                    if delta > self.config.gdt_max_increase_theta
-                    else self.config.r_val2 * (delta / self.config.gdt_max_increase_theta)
-                )
-
-                self.max_gdt_achieved = next_gdt_val
+        # If there is some progress
+        if next_gdt_val > self.max_gdt_achieved:
+            delta = next_gdt_val - self.max_gdt_achieved
+            # Penalty if too large, reward if within margins
+            rt += (
+                -self.config.r_val2
+                if delta > self.config.gdt_max_increase_theta
+                else self.config.r_val2 * (delta / self.config.gdt_max_increase_theta)
+            )
+            
+            # Additional coverage reward... rt+=
+            self.max_gdt_achieved = next_gdt_val
 
         # 2.5 Peaks-based reward
         rt += self.reward_map[S].sum() * self.config.r_peaks
@@ -508,13 +481,13 @@ class SmallBowelEnv(EnvBase):
                 "done": self._is_done.clone(),
                 "terminated": self._is_done.clone(),
                 "truncated": self._is_done.clone(),
-                "final_step_count": torch.zeros_like(self._is_done, dtype=torch.float32),
-                "final_length": torch.zeros_like(self._is_done, dtype=torch.float32),
-                "final_wall_gradient": torch.zeros_like(self._is_done, dtype=torch.float32),
+                "final_step_count": torch.zeros_like(self._is_done, dtype=self.dtype),
+                "final_length": torch.zeros_like(self._is_done, dtype=self.dtype),
+                "final_wall_gradient": torch.zeros_like(self._is_done, dtype=self.dtype),
                 "final_coverage": self.placeholder_zeros.clone(),
                 "total_reward": self.placeholder_zeros.clone(),
                 "max_gdt_achieved": torch.as_tensor(
-                    self.max_gdt_achieved, dtype=torch.float32, device=self.device
+                    self.max_gdt_achieved, dtype=self.dtype, device=self.device
                 ).view_as(self._is_done),
             },
             batch_size=self.batch_size,
@@ -615,32 +588,31 @@ class SmallBowelEnv(EnvBase):
                 "done": torch.as_tensor(done, device=self.device).view_as(_reward),
                 "terminated": torch.as_tensor(terminated, device=self.device).view_as(_reward),
                 "truncated": torch.as_tensor(truncated, device=self.device).view_as(_reward),
-                "final_coverage": torch.as_tensor(final_coverage, device=self.device).view_as(
+                "final_coverage": torch.as_tensor(final_coverage, device=self.device, dtype=self.dtype).view_as(
                     _reward
                 )
                 if done
                 else self.placeholder_zeros,
                 "final_step_count": torch.as_tensor(
-                    self.current_step_count, device=self.device
+                    self.current_step_count, device=self.device, dtype=self.dtype
                 ).view_as(_reward)
                 if done
-                else torch.as_tensor(0, device=self.device).view_as(_reward),
+                else torch.as_tensor(0, device=self.device, dtype=self.dtype).view_as(_reward),
                 "final_length": torch.as_tensor(
-                    self.current_distance_traveled, device=self.device
+                    self.current_distance_traveled, device=self.device, dtype=self.dtype
                 ).view_as(_reward)
                 if done
-                else torch.as_tensor(0, device=self.device).view_as(_reward),
+                else torch.as_tensor(0, device=self.device, dtype=self.dtype).view_as(_reward),
                 "final_wall_gradient": torch.as_tensor(
-                    self.wall_gradient, device=self.device
+                    self.wall_gradient, device=self.device, dtype=self.dtype
                 ).view_as(_reward)
                 if done
-                else torch.as_tensor(0, device=self.device).view_as(_reward),
-                
+                else torch.as_tensor(0, device=self.device, dtype=self.dtype).view_as(_reward),
                 "total_reward": self.cum_reward.view_as(_reward)
                 if done
                 else self.placeholder_zeros,
                 "max_gdt_achieved": torch.as_tensor(
-                    self.max_gdt_achieved, dtype=torch.float32, device=self.device
+                    self.max_gdt_achieved, dtype=self.dtype, device=self.device
                 ).view_as(_reward),
             },
             batch_size=self.batch_size,

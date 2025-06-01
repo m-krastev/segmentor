@@ -72,6 +72,8 @@ class ActorNetwork(nn.Module):
         # Output layer for alpha/beta parameters (6 values = 3 dimensions × 2 params)
         self.alpha = nn.Linear(256, 3)
         self.beta = nn.Linear(256, 3)
+        self.alpha.bias.data.zero_()
+        self.beta.bias.data.zero_()
         self.eps = eps
 
     def forward(self, x):

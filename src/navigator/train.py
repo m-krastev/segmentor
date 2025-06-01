@@ -68,11 +68,15 @@ def validation_loop_torchrl(
             reward, step_count, final_coverage = 0, 0, 0
             must_load_new_subject = True
             for _ in range(10):
-                try:                    
-                    tensordict = val_env._reset(must_load_new_subject=must_load_new_subject)
-                    rollout = val_env.rollout(
-                        config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
-                    )
+                try:
+                    with torch.autocast(device.type, enabled=config.use_bfloat16):
+                        # Reset the environment for the current subject
+                        # This will load the new subject's data
+                        if must_load_new_subject:
+                            tensordict = val_env._reset(must_load_new_subject=must_load_new_subject)
+                            rollout = val_env.rollout(
+                                config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
+                            )
 
                     reward = rollout["next", "reward"].mean().item()
                     step_count = rollout["action"].shape[1]
@@ -154,7 +158,7 @@ def train_torchrl(
         lr=config.learning_rate,
     )
     # Mixed precision scaler
-    scaler = torch.GradScaler(device)
+    scaler = torch.GradScaler(device) if config.use_bfloat16 else None
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
@@ -256,19 +260,32 @@ def train_torchrl(
         for _ in range(config.update_epochs):
             batch_data = batch_data.reshape(-1)
 
-            with torch.no_grad():
+            with torch.no_grad(), torch.autocast(device.type, enabled=config.use_bfloat16):
                 adv_module(batch_data)
             for j in range(0, config.frames_per_batch, batch_size):
                 minibatch = batch_data[j : j + batch_size]
-                loss_dict = loss_module(minibatch)
+                with torch.autocast(device.type, enabled=config.use_bfloat16):
+                    loss_dict = loss_module(minibatch)
                 actor_loss = loss_dict["loss_objective"] + loss_dict["loss_entropy"]
                 critic_loss = loss_dict["loss_critic"]
-                actor_loss.backward()
-                critic_loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    loss_module.parameters(), config.max_grad_norm
-                )
-                optimizer.step()
+                
+                if scaler is not None:
+                    # Use mixed precision scaling
+                    scaler.scale(actor_loss).backward()
+                    scaler.scale(critic_loss).backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        loss_module.parameters(), config.max_grad_norm
+                    )
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    # Standard backward pass
+                    actor_loss.backward()
+                    critic_loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        loss_module.parameters(), config.max_grad_norm
+                    )
+                    optimizer.step()
                 optimizer.zero_grad()
 
                 # Log losses for this minibatch update

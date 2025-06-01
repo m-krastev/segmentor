@@ -23,6 +23,7 @@ class Config:
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training
     shuffle_dataset: bool = True  # Whether to shuffle dataset before splitting
+    use_bfloat16: bool = True
 
     # --- Wandb Logging ---
     track_wandb: bool = True  # Flag to enable/disable wandb

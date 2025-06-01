@@ -53,6 +53,8 @@ class CriticNetwork(nn.Module):
             nn.GELU(),
             nn.Linear(256, 1),
         )
+        
+        self.head[-1].bias.data.zero_()
 
     def forward(self, x):
         x = self.conv1(x)
