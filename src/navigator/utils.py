@@ -284,6 +284,52 @@ def draw_path_sphere(
                 if rr.size > 0 and cc.size > 0:
                     cumulative_path_mask[current_z, rr, cc] = 1.0
 
+def draw_sphere_point(array_3d: torch.Tensor, center_point: tuple[int, ...], radius: int, fill_value=1):
+    """
+    Fills a 3D NumPy array with a specified value inside a sphere.
+
+    Args:
+        array_3d (np.ndarray): The 3D NumPy array (e.g., of zeros) to modify.
+                                Its shape defines the coordinate space.
+        center_point (tuple or list or np.ndarray): The (x, y, z) coordinates
+                                                     of the sphere's center.
+        radius (float or int): The radius of the sphere.
+        fill_value (int or float, optional): The value to fill inside the sphere.
+                                             Defaults to 1.
+
+    Returns:
+        np.ndarray: The modified 3D array with the sphere filled.
+    """
+    # Generate 1D coordinate arrays for each axis using np.ogrid
+    # These will broadcast to the full 3D shape for the distance calculation
+    # We take the actual shape of the input array for coordinates
+    x, y, z = np.ogrid[0 : array_3d.shape[0], 0 : array_3d.shape[1], 0 : array_3d.shape[2]]
+    x, y, z = torch.from_numpy(x), torch.from_numpy(y), torch.from_numpy(z)
+    # Calculate the squared distance from the sphere's center for every point
+    distance_squared = (
+        (x - center_point[0]) ** 2 + (y - center_point[1]) ** 2 + (z - center_point[2]) ** 2
+    )
+    # Fill the array at the appropriate places using the boolean mask
+    return torch.where(distance_squared <= radius**2, fill_value, array_3d)
+
+def draw_path_sphere(array_3d: torch.Tensor, pts: tuple, radius: int, fill_value=True):
+    """
+    Draws a sphere around each point in the path defined by `pts` in the 3D array.
+
+    Args:
+        array_3d: The 3D array to update.
+        pts: A tuple containing the coordinates of the path points (e.g., from `line_nd_jax`).
+        radius: The radius for the spheres to be drawn around each point.
+        fill_value: The value to fill inside the spheres.
+    """
+    # Draw spheres around each point in the path
+    new_array_3d = torch.zeros_like(array_3d)
+    for pt in pts:
+        new_array_3d = draw_sphere_point(new_array_3d, pt, radius, fill_value)
+    # Update the original array with the new spheres
+    updated_array_3d = torch.maximum(array_3d, new_array_3d)
+    return updated_array_3d, new_array_3d
+
 
 def draw_path_sphere_2(
     cumulative_path_mask: torch.Tensor,
@@ -298,7 +344,7 @@ def draw_path_sphere_2(
         cumulative_path_mask: Tensor to modify
         voxels: List of voxel coordinates to draw (should be indexable)
         dilation_module: Dilation module to use for dilation
-        zero_buffer: Optional buffer for dilation
+        zero_buffer: Optional buffer for dilation [will be zeroed and can be used]
     """
     zero_buffer = (
         zero_buffer.zero_() if zero_buffer is not None else torch.zeros_like(cumulative_path_mask)
