@@ -139,7 +139,8 @@ def train_torchrl(
     )
 
     # --- Loss Function ---
-    loss_module = KLPENPPOLoss(
+    # loss_module = KLPENPPOLoss(
+    loss_module = ClipPPOLoss(
         actor_network=policy_module,
         critic_network=value_module,
         clip_epsilon=config.clip_epsilon,
@@ -316,6 +317,8 @@ def train_torchrl(
         wall_gradient = wall_gradient[wall_gradient.nonzero()].mean()
         total_reward = batch_data["next", "total_reward"]
         total_reward = total_reward[total_reward.nonzero()].mean()
+        action = (batch_data["action"] * 2 * config.max_step_vox - config.max_step_vox).round()
+        # np.savetxt("batch_data.npy", batch_data["next", "max_gdt_achieved"].numpy(force=True), fmt="%.5f")
         log_data = {
             "losses/policy_loss": avg_actor_loss,
             "losses/value_loss": avg_critic_loss,
@@ -324,9 +327,6 @@ def train_torchrl(
             "losses/grad_norm": grad_norm.item(),
             "losses/alpha": batch_data["alpha"].mean(),
             "losses/beta": batch_data["beta"].mean(),
-            "charts/learning_rate": optimizer.param_groups[0]["lr"],
-            "charts/max_gdt_achieved": batch_data["next", "max_gdt_achieved"].mean(),
-            "charts/num_updates": num_updates,
             "train/reward": avg_reward,
             "train/max_reward": max_reward,
             "train/step_count": step_count,
@@ -334,12 +334,20 @@ def train_torchrl(
             "train/episode_len": ep_len,
             "train/final_coverage": final_coverage,
             "train/total_reward": total_reward,
-            "charts/action_0": batch_data["action"][:, 0].mean(),
-            "charts/action_1": batch_data["action"][:, 1].mean(),
-            "charts/action_2": batch_data["action"][:, 2].mean(),
-            "charts/action_0_std": batch_data["action"][:, 0].std(),
-            "charts/action_1_std": batch_data["action"][:, 1].std(),
-            "charts/action_2_std": batch_data["action"][:, 2].std(),
+            "charts/learning_rate": optimizer.param_groups[0]["lr"],
+            "charts/max_gdt_achieved": batch_data["next", "max_gdt_achieved"].mean(),
+            "charts/max_gdt_achieved_std": batch_data["next", "max_gdt_achieved"].std(),
+            "charts/max_gdt_achieved_max": batch_data["next", "max_gdt_achieved"].max(),
+            "charts/num_updates": num_updates,
+            "charts/action_0": action[:, 0].mean(),
+            "charts/action_1": action[:, 1].mean(),
+            "charts/action_2": action[:, 2].mean(),
+            "charts/action_0_std": action[:, 0].std(),
+            "charts/action_1_std": action[:, 1].std(),
+            "charts/action_2_std": action[:, 2].std(),
+            "charts/action_0_mode": action[:, 0].cpu().mode()[0],
+            "charts/action_1_mode": action[:, 1].cpu().mode()[0],
+            "charts/action_2_mode": action[:, 2].cpu().mode()[0],
         }
 
         pbar.set_postfix(

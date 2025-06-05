@@ -56,6 +56,7 @@ class ActorNetwork(nn.Module):
         #     nn.GELU(),
         # )
 
+        # TODO: Add downscaled patch of the larger position 
         self.conv1 = ConvBlock(input_channels, 16, kernel_size=3, padding=1, num_groups=8)
         self.pool1 = nn.Conv3d(16, 16, kernel_size=2, stride=2, padding=0, bias=False)
         self.conv2 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=16)
@@ -119,4 +120,6 @@ class ActorNetwork(nn.Module):
         # betas = alpha_beta_pairs[..., 1]
         alphas, betas = self(obs_actor)
         dist = Beta(alphas, betas)
-        return dist
+        return dist # dist \in [0,1] -> 2 * dist - 1 -> [-1,1] * d -> [-d, d]
+    
+        # dist \in [0,1]^3 -> slow down speed by gradient 
