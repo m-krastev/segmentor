@@ -348,7 +348,7 @@ class SmallBowelEnv(EnvBase):
             rt += (
                 -self.config.r_val2
                 if delta > self.config.gdt_max_increase_theta
-                else self.config.r_val2 * (delta / self.config.gdt_max_increase_theta)
+                else self.config.r_val2 * (1 + delta / self.config.gdt_max_increase_theta)
             )
             
             # Additional coverage reward... rt+=
@@ -360,21 +360,27 @@ class SmallBowelEnv(EnvBase):
         # Discard the reward for visited nodes
         self.reward_map[S] = 0
         # print(f"Reward claimed!", flush=True)
+        
+        # Reward for coverage (based on Dice within the segmentation on the path)
+        # Will modify self.gt_path_vol in place and we can use it for coverage
+        coverage = self.cumulative_path_mask[S]
+        rt += ((coverage == 0).sum() / len(S[0])) * self.config.r_val2
 
         # Simple problem, toy problem might be a good way to solve this
 
         # --- 3. Wall-based penalty ---
-        # print(f"{self.wall_map[S].mean()=}")
+        # print(f"{self.wall_map[S].mean()=}
         wall_map = self.wall_map[S].max().item()
-        rt -= self.config.r_val2 * wall_map * 30
-        
+        rt -= self.config.r_val2 * wall_map * 30 # 10
+
         self.wall_stuff = wall_map
         self.wall_gradient += wall_map
 
         # --- 4. Revisiting penalty ---
-        rt -= self.config.r_val1 * self.cumulative_path_mask[S].sum().bool()
+        rt -= self.config.r_val1 * coverage.sum()
         # print(f"{self.cumulative_path_mask[S].sum()=}")
 
+        draw_path_sphere_2(self.cumulative_path_mask, S, self.dilation, self.gt_path_vol)
         if not self.seg_np[next_pos_vox]:
             rt -= self.config.r_val1
 
@@ -537,12 +543,6 @@ class SmallBowelEnv(EnvBase):
 
         # Calculate reward (needs to be before moving to the next pos)
         reward, S = self._calculate_reward(action_vox_delta, next_pos_vox)
-
-        if S:
-            # for vox in zip(*S):
-            #     draw_path_sphere(self.cumulative_path_mask, vox, self.config.cumulative_path_radius_vox)
-            draw_path_sphere_2(self.cumulative_path_mask, S, self.dilation, self.gt_path_vol)
-
         self.current_distance_traveled += dist(next_pos_vox, self.current_pos_vox)
         self.tracking_path_history.append(next_pos_vox)
         self.current_pos_vox = next_pos_vox
@@ -551,7 +551,7 @@ class SmallBowelEnv(EnvBase):
         termination_reason = ""
         if self.current_step_count >= self.config.max_episode_steps:
             done, truncated, termination_reason = True, True, "max_steps"
-        elif not (is_next_pos_valid_seg) or not any(action_vox_delta) or self.wall_stuff > 0.03: # and self.seg_np[next_pos_vox]
+        elif not (is_next_pos_valid_seg) or self.wall_stuff > 0.03: # and self.seg_np[next_pos_vox]
             reward.fill_(-self.config.r_zero_mov)
             done, terminated, termination_reason = True, True, "out_of_bounds"
         elif dist(next_pos_vox, self.goal) < self.config.cumulative_path_radius_vox:
@@ -563,14 +563,14 @@ class SmallBowelEnv(EnvBase):
             final_coverage = self._get_final_coverage()
             # Tbh that should only be added as a fine-tuning stage or something,
             # it must be messing with the value function
-            reward += (
-                (final_coverage * self.config.r_final)
-                if termination_reason == "reached_goal"
-                else (final_coverage - 1) * self.config.r_final
-                # else 0.0
-            )
+            # reward += (
+            #     (final_coverage * self.config.r_final)
+            #     if termination_reason == "reached_goal"
+            #     else (final_coverage - 1) * self.config.r_final
+            #     # else 0.0
+            # )
             # nope doesn't work well at all
-            # reward += self.config.r_final if termination_reason == "reached_goal" else 0
+            reward += self.config.r_final * final_coverage if termination_reason == "reached_goal" else (final_coverage - 1) * self.config.r_final
 
         # Get Next State Patches
         next_obs_dict = self._get_state_patches()

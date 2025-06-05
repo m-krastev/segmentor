@@ -245,7 +245,7 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     # Disconnected segmentation components lead to wildly inconsistent result, in particular when using the GDT which turns any unreachable point into -inf.
     result["gdt_end"] = gdt_end_np
     if np.isfinite(gdt_end_np).sum() < 1000:
-        result["gdt_end"] = gdt_start_np.max() - gdt_start_np.copy()
+        result["gdt_end"] = np.where(np.isfinite(gdt_start_np), gdt_start_np.max() - gdt_start_np.copy(), -np.inf)
         result["end_coord"] = np.unravel_index(gdt_start_np.argmax(), gdt_start_np.shape)
 
     local_peaks_cache_path = cache_dir / CACHE_FILES["local_peaks"]

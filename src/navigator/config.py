@@ -23,7 +23,7 @@ class Config:
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training
     shuffle_dataset: bool = True  # Whether to shuffle dataset before splitting
-    use_bfloat16: bool = True
+    use_bfloat16: bool = False
 
     # --- Wandb Logging ---
     track_wandb: bool = True  # Flag to enable/disable wandb
@@ -33,7 +33,7 @@ class Config:
 
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
-    patch_size_mm: int = 32
+    patch_size_mm: int = 28
     max_step_displacement_mm: float = 10.0
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 1024
@@ -53,7 +53,8 @@ class Config:
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
-    num_episodes_per_sample: int = 1638400  # 32768
+    num_episodes_per_sample: int = 1  # 32768
+    # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 20_000_000
     # Size of the buffer to store transitions
@@ -61,11 +62,11 @@ class Config:
     learning_rate: float = 3e-5
     batch_size: int = 128  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
-    gamma: float = 0.999
+    gamma: float = 0.998
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.1
     # Entropy coefficient for exploration (higher values encourage exploration)
-    ent_coef: float = 0.001
+    ent_coef: float = 0.003
     # Value function coefficient (higher values encourage accurate value estimates)
     vf_coef: float = 0.5
     num_workers: int = 1
