@@ -92,13 +92,13 @@ def main():
         value_module(dummy_input)
         print(f"Policy: {policy_module}")
     
-    # policy_module.compile()
-    # value_module.compile()
+    policy_module.compile(fullgraph=True)
+    value_module.compile()
 
     # Watch the model parameters
-    if config.track_wandb and wandb is not None:
-        wandb.watch(policy_module, log="all")
-        wandb.watch(value_module, log="all")
+    # if config.track_wandb and wandb is not None:
+    #     wandb.watch(policy_module, log="all")
+    #     wandb.watch(value_module, log="all")
 
     torch.serialization.add_safe_globals([Config])
     # --- Start Training ---

@@ -498,6 +498,11 @@ class ClipTransform(torch.nn.Module):
         return (torch.clamp(x, self.min, self.max) - self.min) / (self.max - self.min)
 
 
+class StandardizeTransform(torch.nn.Module):
+    def forward(self, x):
+        mean, std = torch.std_mean()
+        return (x-mean)/std
+
 class BinaryDilation3D(nn.Module):
     """
     Performs 3D binary morphological dilation using convolution with a
