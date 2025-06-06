@@ -1,5 +1,6 @@
 from functools import partial
 from itertools import cycle
+from math import prod
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,11 +12,17 @@ import flax.training.checkpoints as checkpoints  # For checkpointing
 import distrax
 import wandb
 import os
-from gymnax.gymnax.environments.medical import SmallBowel, SmallBowelParams
+from gymnax.environments.medical import SmallBowel, SmallBowelParams
 from navigator.config import Config, parse_args
 from navigator.dataset import SmallBowelDataset
 from tqdm import tqdm
 from torch.utils.data import Subset
+
+
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
 
 
 class ConvBlock(nnx.Module):
@@ -43,7 +50,7 @@ class ConvBlock(nnx.Module):
         )
         self.norm = nnx.GroupNorm(num_groups=num_groups, num_features=out_channels, rngs=rngs)
 
-    def forward(self, x):
+    def __call__(self, x):
         return nnx.gelu(self.norm(self.conv(x)))
 
 
@@ -56,21 +63,21 @@ class Actor(nnx.Module):
             rngs, input_channels, 16, kernel_size=(3, 3, 3), padding=1, num_groups=8
         )
         self.pool1 = nnx.Conv(
-            16, 16, kernel_size=(2, 2, 2), stride=2, padding=0, use_bias=False, rngs=rngs
+            16, 16, kernel_size=(2, 2, 2), strides=2, padding=0, use_bias=False, rngs=rngs
         )
         self.conv2 = ConvBlock(rngs, 16, 32, kernel_size=(3, 3, 3), padding=1, num_groups=16)
         self.pool2 = nnx.Conv(
-            32, 32, kernel_size=(2, 2, 2), stride=2, padding=0, use_bias=False, rngs=rngs
+            32, 32, kernel_size=(2, 2, 2), strides=2, padding=0, use_bias=False, rngs=rngs
         )
         self.conv3 = ConvBlock(rngs, 32, 64, kernel_size=(3, 3, 3), padding=1, num_groups=32)
         self.pool3 = nnx.Conv(
-            64, 64, kernel_size=(2, 2, 2), stride=2, padding=0, use_bias=False, rngs=rngs
+            64, 64, kernel_size=(2, 2, 2), strides=2, padding=0, use_bias=False, rngs=rngs
         )
 
         self.linear = nnx.Linear(
-            64 * (patch_size[0] // 8) * (patch_size[1] // 8) * (patch_size[2] // 8), 256, rngs=rngs
+            64 * np.prod(np.asarray(patch_size) // (2**3)), 256, rngs=rngs
         )
-        self.gn = nnx.GroupNorm(32, 256, rngs=rngs)
+        self.gn = nnx.GroupNorm(num_features=256, num_groups=32, rngs=rngs)
 
         # Output layer for alpha/beta parameters (6 values = 3 dimensions × 2 params)
         self.alpha = nnx.Linear(256, 3, rngs=rngs)
@@ -78,14 +85,17 @@ class Actor(nnx.Module):
 
     def __call__(self, x):
         # Forward pass through the actor network
+        x = jnp.swapaxes(x, 0, -1)
         x = self.pool1(self.conv1(x))
         x = self.pool2(self.conv2(x))
         x = self.pool3(self.conv3(x))
         # Flatten and pass through linear layers
-        x = x.reshape(x.shape[0], -1)  # Flatten the output
+        x = x.reshape(1, -1)  # Flatten the output
         x = nnx.gelu(self.gn(self.linear(x)))
+        alpha = jax.nn.softplus(self.alpha(x)) + 1
+        beta = jax.nn.softplus(self.beta(x)) + 1
         # Output alpha and beta parameters
-        return self.alpha(x), self.beta(x)
+        return alpha.flatten(), beta.flatten()
 
     def get_action_dist(self, x):
         """
@@ -106,38 +116,35 @@ class Critic(nnx.Module):
             rngs, input_channels, 16, kernel_size=(3, 3, 3), padding=1, num_groups=8
         )
         self.pool1 = nnx.Conv(
-            16, 16, kernel_size=(2, 2, 2), stride=2, padding=0, use_bias=False, rngs=rngs
+            16, 16, kernel_size=(2, 2, 2), strides=2, padding=0, use_bias=False, rngs=rngs
         )
         self.conv2 = ConvBlock(rngs, 16, 32, kernel_size=(3, 3, 3), padding=1, num_groups=16)
         self.pool2 = nnx.Conv(
-            32, 32, kernel_size=(2, 2, 2), stride=2, padding=0, use_bias=False, rngs=rngs
+            32, 32, kernel_size=(2, 2, 2), strides=2, padding=0, use_bias=False, rngs=rngs
         )
         self.conv3 = ConvBlock(rngs, 32, 64, kernel_size=(3, 3, 3), padding=1, num_groups=32)
         self.pool3 = nnx.Conv(
-            64, 64, kernel_size=(2, 2, 2), stride=2, padding=0, use_bias=False, rngs=rngs
+            64, 64, kernel_size=(2, 2, 2), strides=2, padding=0, use_bias=False, rngs=rngs
         )
 
         self.linear = nnx.Linear(
-            64 * (patch_size[0] // 8) * (patch_size[1] // 8) * (patch_size[2] // 8), 256, rngs=rngs
+            64 * np.prod(np.asarray(patch_size) // (2**3)), 256, rngs=rngs
         )
-        self.gn = nnx.GroupNorm(32, 256, rngs=rngs)
+        self.gn = nnx.GroupNorm(num_features=256, num_groups=32, rngs=rngs)
 
         # Output layer for value prediction
         self.value = nnx.Linear(256, 1, rngs=rngs)
 
     def __call__(self, x):
         # Forward pass through the critic network
-        x = self.conv1(x)
-        x = self.pool1(x)
-        x = self.conv2(x)
-        x = self.pool2(x)
-        x = self.conv3(x)
-        x = self.pool3(x)
-
+        x = jnp.swapaxes(x, 0, -1)
+        x = self.pool1(self.conv1(x))
+        x = self.pool2(self.conv2(x))
+        x = self.pool3(self.conv3(x))
         # Flatten and pass through linear layers
-        x = x.reshape(x.shape[0], -1)  # Flatten the output
+        x = x.reshape(1, -1)  # Flatten the output
         x = nnx.gelu(self.gn(self.linear(x)))
-        return self.value(x)
+        return self.value(x).flatten()
 
 
 class ActorCritic(nnx.Module):
@@ -152,7 +159,7 @@ class ActorCritic(nnx.Module):
         return dist, value
 
     def get_action_dist(self, x):
-        return self.actor.get_action_dist(x[:3])
+        return self.actor.get_action_dist(x)
 
 
 # --- Transition NamedTuple ---
@@ -217,8 +224,10 @@ def dataset_sample_to_envparams(sample: Dict[str, Any], config: Config):
         gdt_end=jnp.asarray(sample["gdt_end"]),
         start_coord=jnp.asarray(sample["start_coord"]),
         end_coord=jnp.asarray(sample["end_coord"]),
+        local_peaks=jnp.asarray(sample["local_peaks"]),
         seg_volume=seg.sum(),
         image_shape=jnp.asarray(img.shape),
+        patch_size_vox=config.patch_size_vox
     )
 
 
@@ -244,14 +253,14 @@ class RolloutWrapperSmallBowel:
         """Reshape parameter vector and evaluate the generation."""
         # Evaluate population of nets on gymnax task - vmap over key & params
         pop_rollout = jax.vmap(self.batch_rollout, in_axes=(None, 0))
-        return pop_rollout(key_eval)
+        return pop_rollout(self, key_eval)
 
     @partial(jax.jit, static_argnames=("self",))
     def batch_rollout(self, key_eval):
         """Evaluate a generation of networks on RL/Supervised/etc. task."""
         # vmap over different MC fitness evaluations for single network
-        batch_rollout = jax.vmap(self.single_rollout, in_axes=(0, None))
-        return batch_rollout(key_eval)
+        batch_rollout = jax.vmap(self.single_rollout, in_axes=(0,None))
+        return batch_rollout(key_eval, True)
 
     @partial(jax.jit, static_argnames=("self",))
     def single_rollout(self, key_input, deterministic=True):
@@ -262,44 +271,33 @@ class RolloutWrapperSmallBowel:
 
         def policy_step(state_input, _):
             """lax.scan compatible step transition in jax env."""
-            obs, state, key, cum_reward, valid_mask = state_input
+            env_state, last_obs, key = state_input
+    
+            # Select action
             key, key_step, key_net = jax.random.split(key, 3)
             dist = self.model.get_action_dist(obs[:3])
             action = dist.mode() if deterministic else dist.sample(seed=key_net)
-            next_obs, next_state, reward, done, _ = self.env.step(
-                key_step, state, action, self.env_params
+            log_prob = dist.log_prob(action)
+            
+            # Step
+            next_obs, next_state, reward, done, info = self.env.step(
+                key_step, env_state, action, self.env_params
             )
-            new_cum_reward = cum_reward + reward * valid_mask
-            new_valid_mask = valid_mask * (1 - done)
-            carry = [
-                next_obs,
-                next_state,
-                key,
-                _,
-                new_cum_reward,
-                new_valid_mask,
-            ]
-            y = [obs, action, reward, next_obs, done]
-            return carry, y
+
+            transition = TransitionJax(last_obs, action, reward, done, 0, log_prob, info)
+            carry = [next_state, next_obs, key]
+            return carry, transition
 
         # Scan over episode step loop
-        carry_out, scan_out = jax.lax.scan(
+        carry_out, transitions = jax.lax.scan(
             policy_step,
-            [
-                obs,
-                state,
-                key_episode,
-                jnp.array([0.0]),
-                jnp.array([1.0]),
-            ],
+            [state, obs, key_episode],
             (),
             self.num_env_steps,
         )
         # Return the sum of rewards accumulated by agent in episode rollout
-        obs, action, reward, next_obs, done = scan_out
-        cum_return = carry_out[-2]
-        state = carry_out[1]
-        return obs, action, reward, next_obs, done, cum_return, state
+        next_state, next_obs, key = carry_out
+        return transitions, next_obs # Needed for GAE calculation
 
     @property
     def input_shape(self):
@@ -327,7 +325,7 @@ def validation_loop_jax(
         best_subject_metrics = {}
         env_params = dataset_sample_to_envparams(subj, config)
         rolloutwrapper.env_params = env_params
-        for _ in range(config.get("val_rollouts_per_subject", 10)):
+        for _ in range(getattr(config, "val_rollouts_per_subject", 10)):
             rng_key, rollout_key = jax.random.split(rng_key, 3)
 
             obs, action, reward, next_obs, done, cum_return, state = rolloutwrapper.single_rollout(
@@ -355,35 +353,31 @@ def validation_loop_jax(
     return final_metrics, rng_key
 
 
-# --- GAE Calculation Function ---
-def calculate_gae_jax(
-    trajectories: TransitionJax,  # Shape: (num_steps, num_envs, ...)
-    last_values: jnp.ndarray,  # Shape: (num_envs,) V(s_T)
-    gamma: float,
-    gae_lambda: float,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:  # advantages, targets
-    """Calculates GAE and value targets."""
-
-    def _calc_gae_step(gae_next_val_carry, transition_step):
-        gae, next_val = gae_next_val_carry
-        # transition_step has fields like .reward, .done, .value, all shaped (num_envs,)
-        delta = (
-            transition_step.reward
-            + gamma * next_val * (1 - transition_step.done)
-            - transition_step.value
+# --- GAE ---
+def calculate_gae(traj_batch, last_val, gamma, gae_lambda):
+    def _get_advantages(gae_and_next_value, transition):
+        gae, next_value = gae_and_next_value
+        done, value, reward = (
+            transition.done,
+            transition.value,
+            transition.reward,
         )
-        gae = delta + gamma * gae_lambda * (1 - transition_step.done) * gae
-        return (gae, transition_step.value), gae
+        delta = reward + gamma * next_value * (1 - done) - value
+        gae = (
+            delta
+            + gamma * gae_lambda * (1 - done) * gae
+        )
+        return (gae, value), gae
 
-    # Scan over the steps dimension (axis 0 of trajectories)
     _, advantages = jax.lax.scan(
-        _calc_gae_step,
-        (jnp.zeros_like(last_values), last_values),  # initial (gae, next_val)
-        trajectories,  # PyTree of arrays with leading dim num_steps
+        _get_advantages,
+        (jnp.zeros_like(last_val), last_val),
+        traj_batch,
         reverse=True,
+        unroll=16,
     )
-    targets = advantages + trajectories.value  # Q-value estimate using GAE
-    return advantages, targets
+    return advantages, advantages + traj_batch.value
+
 
 
 def save_checkpoint(
@@ -419,21 +413,20 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
     rng_key = jax.random.key(config.seed)
     rngs = nnx.Rngs(rng_key)
 
-    if config.get("track_wandb", False):
+    if getattr(config, "track_wandb", False):
         wandb.init(
             project=getattr(config, "wandb_project", "jax_ppo_sb"),
             config=config,
             name=getattr(config, "run_name", "ppo_jax"),
         )
 
-    num_envs = config.num_envs
     env_instance = SmallBowel()
-    action_dim = env_instance.action_dim
+    num_envs = 1
 
     model = ActorCritic(
         rngs=rngs,
-        input_channels=env_instance.observation_space.shape[0],
-        patch_size=env_instance.default_params.image_shape[:3],
+        input_channels=3,
+        patch_size=config.patch_size_vox,
     )
 
     rng_key, model_init_key = jax.random.split(rng_key)
@@ -460,7 +453,7 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
 
     collected_frames_total, num_gradient_updates_total = 0, 0
     current_ppo_update_idx, best_val_metric = 0, -float("inf")
-    if config.get("reload_checkpoint_path"):
+    if getattr(config, "reload_checkpoint_path"):
         try:
             restored_target = {
                 "train_state": train_state,
@@ -513,76 +506,120 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
         num_env_steps=config.max_episode_steps,
         env_params=env_instance.default_params,
     )
+    
+    config.num_minibatches = config.max_episode_steps * num_envs // config.batch_size
 
     dataset_iterator = cycle(iter(train_dataset))
     for ppo_update_idx in range(current_ppo_update_idx, num_ppo_updates):
         subj = next(dataset_iterator)
         env_params = dataset_sample_to_envparams(subj, config)
         rollout_wrapper.env_params = env_params
-        trajectories = rollout_wrapper.batch_rollout(rng_key)
-
-        # Stack trajectories: list of PyTrees -> PyTree of stacked arrays
-        # Each leaf will have shape (frames_per_batch, num_envs, ...)
-        batch_trajectories = jax.tree_util.tree_map(lambda *xs: jnp.stack(xs), *trajectories)
+        # Skip the state, as it can't be stacked
+        trajectories, last_obs = rollout_wrapper.single_rollout(rng_key)
+        num_frames = len(trajectories.obs)
+        collected_frames_total += num_frames
+        pbar.update(num_frames)
+        
         # --- GAE Calculation ---
-        last_values = model.critic(
-            batch_trajectories["obs"][3:]
+        critic_vmap = jax.vmap(model.critic)
+        last_values = critic_vmap(
+            jnp.concatenate((trajectories.obs, last_obs[None]))[:, 3:]
         )  # Use the critic for last value estimation
-        advantages, targets = calculate_gae_jax(
-            batch_trajectories, last_values, config.gamma, config.gae_lambda
+
+        trajectories = trajectories._replace(value=last_values[:-1], done=trajectories.done.astype(jnp.float32))
+        last_value = last_values[-1]
+        advantages, targets = calculate_gae(
+            trajectories, last_value, config.gamma, config.gae_lambda
         )
 
-        def _update_epoch(update_state: nnx.Optimizer, unused):
+        @nnx.jit
+        def _update_epoch(update_state, unused):
+            def _update_minibatch(train_state: nnx.Optimizer, batch_info):
+                sub_state: nnx.Optimizer = nnx.merge(*train_state)
+                traj_batch, advantages, targets = batch_info
+                def _loss_fn(func: ActorCritic, traj, adv, target):
+                    # Rerun network
+                    pi, value_pred = jax.vmap(func)(traj.obs)
+                    log_prob_new, entropy = pi.log_prob(traj.action), pi.entropy().mean()
 
-            def _loss_fn(traj, adv, target):
-                # Rerun network
-                pi, value_pred = update_state.model(traj.obs)
-                log_prob_new, entropy = pi.log_prob(traj.action), pi.entropy().mean()
+                    ratio = jnp.exp(log_prob_new - traj.log_prob)
+                    loss_actor = -jnp.minimum(
+                        ratio * adv,
+                        jnp.clip(ratio, 1 - config.clip_epsilon, 1 + config.clip_epsilon) * adv,
+                    ).mean()
 
-                ratio = jnp.exp(log_prob_new - traj.log_prob)
-                loss_actor = -jnp.minimum(
-                    ratio * adv,
-                    jnp.clip(ratio, 1 - config.clip_epsilon, 1 + config.clip_epsilon) * adv,
-                ).mean()
+                    loss_critic = optax.huber_loss(value_pred, target).mean()
+                    # value_pred_clipped = traj_batch.value + (
+                    #     value - traj_batch.value
+                    # ).clip(-config.clip_eps, config.clip_eps)
+                    # value_losses = jnp.square(value - targets)
+                    # value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                    # value_loss = (
+                    #     0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+                    # )
 
-                loss_critic = optax.huber_loss(value_pred, target).mean()
-                # value_pred_clipped = traj_batch.value + (
-                #     value - traj_batch.value
-                # ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
-                # value_losses = jnp.square(value - targets)
-                # value_losses_clipped = jnp.square(value_pred_clipped - targets)
-                # value_loss = (
-                #     0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
-                # )
+                    total_loss = (
+                        loss_actor + config.vf_coef * loss_critic - config.ent_coef * entropy
+                    )
+                    kl_approx = ((ratio - 1) - jnp.log(ratio)).mean()
+                    return total_loss, (loss_actor, loss_critic, entropy, kl_approx)
 
-                total_loss = (
-                    loss_actor + config.vf_coef * loss_critic - config.ent_coef * entropy
-                )
-                kl_approx = ((ratio - 1) - jnp.log(ratio)).mean()
+                (loss, aux), grads = nnx.value_and_grad(_loss_fn, has_aux=True)(sub_state.model, traj_batch, advantages, targets)
+                sub_state.update(grads)
 
-                return total_loss, (loss_actor, loss_critic, entropy, kl_approx)
+                state = nnx.state(sub_state)
+                train_state = (train_state[0], state)
+                return train_state, aux
 
-            grads, aux = nnx.grad(_loss_fn, has_aux=True)(update_state.model)
-            update_state.update(grads)
+            train_state, traj_batch, advantages, targets, rng = update_state
+            rng, _rng = jax.random.split(rng)
+            batch_size = config.batch_size * config.num_minibatches
+            
+            permutation = jax.random.permutation(_rng, batch_size)
+            batch = (traj_batch, advantages, targets)
+            # # Apply if using multiple environments
+            # batch = jax.tree_util.tree_map(
+            #     lambda x: x.reshape((batch_size,) + x.shape[2:]), batch
+            # )
+            shuffled_batch = jax.tree_util.tree_map(
+                lambda x: jnp.take(x, permutation, axis=0), batch
+            )
+           
+            # Mini-batch Updates
+            minibatches = jax.tree_util.tree_map(
+                lambda x: jnp.reshape(
+                    x, [config.num_minibatches, -1] + list(x.shape[1:])
+                ),
+                shuffled_batch,
+            )
+            train_state, aux = jax.lax.scan(
+                _update_minibatch, train_state, minibatches
+            )
+            
+            update_state = (train_state, traj_batch, advantages, targets, rng)
             return update_state, aux
-        # --- PPO Update ---
-        train_state, infos = jax.lax.scan(
-            _update_epoch,
-            train_state,
-            (batch_trajectories, advantages, targets),
-            length=config.update_epochs,
+        
+        # Updating Training State and Metrics:
+        graph_def, state = nnx.split(train_state)
+        update_state = ((graph_def, state), trajectories, advantages, targets, rng_key)
+        update_state, infos = jax.lax.scan(
+            _update_epoch, update_state, None, config.update_epochs
         )
+        # Extract the state again
+        nnx.update(train_state, update_state[0][1])
+
         avg_losses_dict = {
             "actor": jnp.mean(infos[0]),
             "critic": jnp.mean(infos[1]),
             "entropy": jnp.mean(infos[2]),
             "kl": jnp.mean(infos[3]),
         }
-        grad_norm = jnp.linalg.norm(train_state.optimizer.target.gradients)
+        # grad_norm = jnp.linalg.norm(train_state.optimizer.target.gradients)
+        grad_norm = 0.
 
         # --- Logging ---
         def get_mean_ep_stat(key):
-            vals = batch_trajectories.info.get(key)  # Use unflattened for info
+            vals = trajectories.info.get(key)  # Use unflattened for info
             return jnp.nanmean(vals) if vals is not None and vals.size > 0 else jnp.nan
 
         log_data = {
@@ -596,7 +633,7 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
             else lr_scheduler_fn,  # train_state.step is num gradient updates
             "charts/num_gradient_updates": train_state.step,
             "charts/num_ppo_updates": ppo_update_idx + 1,
-            "train/reward_mean_rollout": batch_trajectories.reward.mean(),
+            "train/reward_mean_rollout": trajectories.reward.mean(),
             "train/ep_reward_mean": get_mean_ep_stat("returned_episode_reward"),
             "train/ep_length_mean": get_mean_ep_stat("returned_episode_length"),
             "train/ep_coverage_mean": get_mean_ep_stat("returned_episode_coverage"),
@@ -610,20 +647,20 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
             if isinstance(v, (float, np.ndarray, jax.Array))
             and ("loss" in k or "reward" in k or "coverage" in k)
         })
-        if config.get("track_wandb"):
+        if config.track_wandb:
             log_wandb(log_data, step=collected_frames_total)
 
         # --- Validation and Checkpointing ---
-        if (ppo_update_idx + 1) % config["eval_interval"] == 0:
+        if (ppo_update_idx + 1) % config.eval_interval == 0:
             rng_key, val_rng = jax.random.split(rng_key)
             # Pass only params for validation to avoid TrainState issues if not needed
             val_metrics, rng_key = validation_loop_jax(
                 train_state.model.actor, config, val_dataset, val_rng
             )
-            if config.get("track_wandb"):
+            if config.track_wandb:
                 log_wandb(val_metrics, step=collected_frames_total)
 
-            current_metric_val = val_metrics.get(config["metric_to_optimize"], -float("inf"))
+            current_metric_val = val_metrics.get(config.metric_to_optimize, -float("inf"))
             if current_metric_val > best_val_metric:
                 best_val_metric = current_metric_val
                 print(
@@ -641,7 +678,7 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
                     overwrite=True,
                 )
 
-        if (ppo_update_idx + 1) % config["save_freq"] == 0:
+        if (ppo_update_idx + 1) % config.save_freq == 0:
             save_checkpoint(
                 train_state,
                 collected_frames_total,
@@ -653,7 +690,7 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
                 keep=3,
             )
 
-        if collected_frames_total >= config["total_timesteps"]:
+        if collected_frames_total >= config.total_timesteps:
             break
 
     pbar.close()
@@ -670,7 +707,7 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
     )
 
     print(f"Final model saved at frame {collected_frames_total}.")
-    if config.get("track_wandb"):
+    if getattr(config, "track_wandb", False):
         wandb.finish()
 
 
