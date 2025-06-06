@@ -259,10 +259,10 @@ class RolloutWrapperSmallBowel:
     def batch_rollout(self, key_eval):
         """Evaluate a generation of networks on RL/Supervised/etc. task."""
         # vmap over different MC fitness evaluations for single network
-        batch_rollout = jax.vmap(self.single_rollout, in_axes=(0,None))
+        batch_rollout = jax.vmap(self.single_rollout, in_axes=(0, 0))
         return batch_rollout(key_eval, True)
 
-    @partial(jax.jit, static_argnames=("self",))
+    @partial(jax.jit, static_argnames=("self", "deterministic"))
     def single_rollout(self, key_input, deterministic=True):
         """Rollout a pendulum episode with lax.scan."""
         # Reset the environment
@@ -507,15 +507,15 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
         env_params=env_instance.default_params,
     )
     
-    config.num_minibatches = config.max_episode_steps * num_envs // config.batch_size
+    num_minibatches = config.max_episode_steps * num_envs // config.batch_size
 
     dataset_iterator = cycle(iter(train_dataset))
     for ppo_update_idx in range(current_ppo_update_idx, num_ppo_updates):
         subj = next(dataset_iterator)
         env_params = dataset_sample_to_envparams(subj, config)
         rollout_wrapper.env_params = env_params
-        # Skip the state, as it can't be stacked
-        trajectories, last_obs = rollout_wrapper.single_rollout(rng_key)
+        rng_key, _rng = jax.random.split(rng_key)
+        trajectories, last_obs = rollout_wrapper.single_rollout(_rng, True)
         num_frames = len(trajectories.obs)
         collected_frames_total += num_frames
         pbar.update(num_frames)
@@ -548,15 +548,15 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
                         jnp.clip(ratio, 1 - config.clip_epsilon, 1 + config.clip_epsilon) * adv,
                     ).mean()
 
-                    loss_critic = optax.huber_loss(value_pred, target).mean()
-                    # value_pred_clipped = traj_batch.value + (
-                    #     value - traj_batch.value
-                    # ).clip(-config.clip_eps, config.clip_eps)
-                    # value_losses = jnp.square(value - targets)
-                    # value_losses_clipped = jnp.square(value_pred_clipped - targets)
-                    # value_loss = (
-                    #     0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
-                    # )
+                    value_pred_clipped = traj_batch.value + (
+                        value_pred - traj_batch.value
+                    ).clip(-config.clip_epsilon, config.clip_epsilon)
+                    value_losses = jnp.square(value_pred - targets)
+                    value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                    loss_critic = (
+                        0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+                    )
+                    # loss_critic = optax.huber_loss(value_pred, target).mean()
 
                     total_loss = (
                         loss_actor + config.vf_coef * loss_critic - config.ent_coef * entropy
@@ -573,7 +573,7 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
 
             train_state, traj_batch, advantages, targets, rng = update_state
             rng, _rng = jax.random.split(rng)
-            batch_size = config.batch_size * config.num_minibatches
+            batch_size = config.batch_size * num_minibatches
             
             permutation = jax.random.permutation(_rng, batch_size)
             batch = (traj_batch, advantages, targets)
@@ -588,7 +588,7 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
             # Mini-batch Updates
             minibatches = jax.tree_util.tree_map(
                 lambda x: jnp.reshape(
-                    x, [config.num_minibatches, -1] + list(x.shape[1:])
+                    x, [num_minibatches, -1] + list(x.shape[1:])
                 ),
                 shuffled_batch,
             )
@@ -614,8 +614,6 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
             "entropy": jnp.mean(infos[2]),
             "kl": jnp.mean(infos[3]),
         }
-        # grad_norm = jnp.linalg.norm(train_state.optimizer.target.gradients)
-        grad_norm = 0.
 
         # --- Logging ---
         def get_mean_ep_stat(key):
@@ -627,22 +625,21 @@ def train_jax_ppo(config: Config, train_dataset: SmallBowelDataset, val_dataset:
             "losses/value_loss": avg_losses_dict["critic"],
             "losses/entropy": avg_losses_dict["entropy"],
             "losses/kl_div": avg_losses_dict["kl"],
-            "losses/grad_norm": grad_norm,
             "charts/learning_rate": lr_scheduler_fn(train_state.step)
             if callable(lr_scheduler_fn)
             else lr_scheduler_fn,  # train_state.step is num gradient updates
             "charts/num_gradient_updates": train_state.step,
             "charts/num_ppo_updates": ppo_update_idx + 1,
-            "train/reward_mean_rollout": trajectories.reward.mean(),
-            "train/ep_reward_mean": get_mean_ep_stat("returned_episode_reward"),
-            "train/ep_length_mean": get_mean_ep_stat("returned_episode_length"),
-            "train/ep_coverage_mean": get_mean_ep_stat("returned_episode_coverage"),
-            "train/ep_wall_gradient_mean": get_mean_ep_stat("wall_gradient"),
+            "train/r_rollout_mean": trajectories.reward.mean(),
+            "train/ep/r_mean": get_mean_ep_stat("returned_episode_reward"),
+            "train/ep/cov_mean": get_mean_ep_stat("returned_episode_coverage"),
+            "train/ep/len_mean": get_mean_ep_stat("returned_episode_length"),
+            "train/ep/wall_gradient_mean": get_mean_ep_stat("wall_gradient"),
             "charts/max_gdt_achieved": get_mean_ep_stat("max_gdt_achieved"),
             "charts/action_mean": trajectories.action.astype(jnp.float32).mean(),
         }
         pbar.set_postfix({
-            k.split("/")[-1]: f"{v:.2f}"
+            k.split("/")[-1][:4]: f"{v:.2f}"
             for k, v in log_data.items()
             if isinstance(v, (float, np.ndarray, jax.Array))
             and ("loss" in k or "reward" in k or "coverage" in k)
