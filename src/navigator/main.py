@@ -110,6 +110,10 @@ def main():
         data = torch.load(config.load_from_checkpoint)
         policy_module.load_state_dict(data["policy_module_state_dict"])
         validation_loop_torchrl(policy_module, config, val_set, config.device)
+    elif config.train_gym_env:
+        print("Training dummy Gym environment.")
+        from .train import train_gym_environment # Import here to avoid circular dependency if not needed
+        train_gym_environment(config)
     else:
         if config.load_from_checkpoint:
             print(f"Loading data from {config.load_from_checkpoint}")

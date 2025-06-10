@@ -20,6 +20,7 @@ class Config:
     reload_checkpoint_path: Optional[str] = None  # Path to checkpoint for evaluation
     seed: int = 42  # Random seed for reproducibility
     td3: bool = False
+    train_gym_env: bool = False # Dummy flag to train a gym environment
 
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training
