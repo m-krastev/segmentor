@@ -10,12 +10,27 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 # TorchRL components
-from torchrl.collectors import SyncDataCollector, MultiSyncDataCollector, MultiaSyncDataCollector
-from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage, SamplerWithoutReplacement
-from torchrl.objectives import ClipPPOLoss, KLPENPPOLoss
+from torchrl.collectors import (
+    SyncDataCollector,
+    MultiSyncDataCollector,
+    MultiaSyncDataCollector,
+)
+from torchrl.data import (
+    TensorDictReplayBuffer,
+    LazyTensorStorage,
+    SamplerWithoutReplacement,
+)
+from torchrl.objectives import (
+    ClipPPOLoss,
+    KLPENPPOLoss,
+    TD3Loss,
+    SoftUpdate,
+    HardUpdate,
+)
 from torchrl.objectives.value import GAE
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 from tensordict.nn import set_composite_lp_aggregate
+
 # Your project components
 from .config import Config
 from .dataset import SmallBowelDataset  # Keep for creating the iterator
@@ -24,7 +39,9 @@ from .dataset import SmallBowelDataset  # Keep for creating the iterator
 from .environment import make_sb_env, SmallBowelEnv
 
 torch.set_float32_matmul_precision("medium")
+torch._dynamo.config.capture_dynamic_output_shape_ops = True
 set_composite_lp_aggregate(False).set()
+
 
 def log_wandb(data: dict, **kwargs):
     """Log data to wandb."""
@@ -72,11 +89,16 @@ def validation_loop_torchrl(
                     with torch.autocast(device.type, enabled=config.use_bfloat16):
                         # Reset the environment for the current subject
                         # This will load the new subject's data
-                        if must_load_new_subject:
-                            tensordict = val_env._reset(must_load_new_subject=must_load_new_subject)
-                            rollout = val_env.rollout(
-                                config.max_episode_steps, actor_module, auto_reset=False, tensordict=tensordict
-                            )
+                        tensordict = val_env._reset(
+                            must_load_new_subject=must_load_new_subject
+                        )
+                        rollout = val_env.rollout(
+                            config.max_episode_steps,
+                            actor_module,
+                            auto_reset=False,
+                            tensordict=tensordict,
+                        )
+                        must_load_new_subject=False
 
                     reward = rollout["next", "reward"].mean().item()
                     step_count = rollout["action"].shape[1]
@@ -89,7 +111,14 @@ def validation_loop_torchrl(
                     print(f"Error during validation rollout for subject {i}: {e}")
 
             # Choose the best result from the 10 rollouts
-            best_run = intermediate_results.index(max(intermediate_results, key=lambda x: x[0]))
+            if len(intermediate_results) == 0:
+                print(
+                    f"Too many errors caused no successful rollout to be generated. Skipping subject: {i}"
+                )
+                continue
+            best_run = intermediate_results.index(
+                max(intermediate_results, key=lambda x: x[0])
+            )
             reward, step_count, final_coverage = intermediate_results[best_run]
             path = paths[best_run]
             path_mask = path_masks[best_run]
@@ -127,6 +156,7 @@ def train_torchrl(
     train_set: SmallBowelDataset,
     val_set: SmallBowelDataset,
     device: torch.device = None,
+    qnets: bool = False,
 ):
     """Main PPO training loop using TorchRL."""
     # --- Setup ---
@@ -140,17 +170,30 @@ def train_torchrl(
 
     # --- Loss Function ---
     # loss_module = KLPENPPOLoss(
-    loss_module = ClipPPOLoss(
-        actor_network=policy_module,
-        critic_network=value_module,
-        clip_epsilon=config.clip_epsilon,
-        entropy_coef=config.ent_coef,
-        # entropy_bonus=True,
-        critic_coef=config.vf_coef,
-        loss_critic_type="smooth_l1",  # TorchRL standard
-        # value_loss_type="huber", # Or "mse"
-        normalize_advantage=True,  # Recommended for PPO
+    loss_module = (
+        ClipPPOLoss(
+            actor_network=policy_module,
+            critic_network=value_module,
+            clip_epsilon=config.clip_epsilon,
+            entropy_coef=config.ent_coef,
+            entropy_bonus=bool(config.ent_coef),
+            critic_coef=config.vf_coef,
+            loss_critic_type="smooth_l1",  # TorchRL standard
+            # loss_critic_type="l2",
+            normalize_advantage=True,
+        )
+        if not qnets
+        else TD3Loss(
+            actor_network=policy_module,
+            qvalue_network=value_module,
+            bounds=(0, 1),
+            num_qvalue_nets=2,
+        )
     )
+
+    if qnets:
+        updater = HardUpdate(loss_module, value_network_update_interval=100)
+        loss_module.make_value_estimator(loss_module.value_type, gamma=config.gamma)
 
     # --- Optimizer ---
     optimizer = optim.AdamW(
@@ -186,9 +229,13 @@ def train_torchrl(
             num_updates = checkpoint.get("num_updates", 0)
             best_val_metric = checkpoint.get("best_val_metric", float("-inf"))
             print("Checkpoint loaded successfully.")
-            print(f"Resuming training from collected_frames: {collected_frames}, num_updates: {num_updates}")
+            print(
+                f"Resuming training from collected_frames: {collected_frames}, num_updates: {num_updates}"
+            )
         except FileNotFoundError:
-            print(f"Error: Checkpoint file not found at {config.reload_checkpoint_path}")
+            print(
+                f"Error: Checkpoint file not found at {config.reload_checkpoint_path}"
+            )
             # Decide how to handle this: exit, start fresh, etc.
             # For now, we'll print an error and continue without loading
             exit(1)
@@ -207,12 +254,12 @@ def train_torchrl(
     # --- Collector ---
     # Collects data by interacting policy_module with environment instances
     env_maker = lambda: make_sb_env(
-            config,
-            train_set,
-            device,
-            num_episodes_per_sample=config.num_episodes_per_sample,
-            check_env=False,
-        )
+        config,
+        train_set,
+        device,
+        num_episodes_per_sample=config.num_episodes_per_sample,
+        check_env=False,
+    )
     collector = SyncDataCollector(
         create_env_fn=env_maker,  # Function to create environments
         policy=policy_module,  # Policy module to use for action selection
@@ -242,12 +289,14 @@ def train_torchrl(
         gamma=config.gamma,
         lmbda=config.gae_lambda,
         value_network=value_module,  # Pass the value module instance
-        average_gae=False,
+        average_gae=True, # Standardize GAE
     )
 
     # --- Training Loop ---
     print(f"Starting training for {total_timesteps} total steps...")
-    pbar = tqdm(total=total_timesteps, desc="Training", unit="steps", initial=collected_frames)
+    pbar = tqdm(
+        total=total_timesteps, desc="Training", unit="steps", initial=collected_frames
+    )
     # Use a specific metric like coverage or reward
     best_val_metric = float("-inf")
     # Use collector's iterator
@@ -261,15 +310,25 @@ def train_torchrl(
         for _ in range(config.update_epochs):
             batch_data = batch_data.reshape(-1)
 
-            with torch.no_grad(), torch.autocast(device.type, enabled=config.use_bfloat16):
-                adv_module(batch_data)
+            with (
+                torch.no_grad(),
+                torch.autocast(device.type, enabled=config.use_bfloat16),
+            ):
+                if not qnets:
+                    adv_module(batch_data)
+
             for j in range(0, config.frames_per_batch, batch_size):
                 minibatch = batch_data[j : j + batch_size]
                 with torch.autocast(device.type, enabled=config.use_bfloat16):
                     loss_dict = loss_module(minibatch)
-                actor_loss = loss_dict["loss_objective"] + loss_dict["loss_entropy"]
-                critic_loss = loss_dict["loss_critic"]
-                
+
+                if qnets:
+                    actor_loss = loss_dict["loss_actor"]
+                    critic_loss = loss_dict["loss_qvalue"]
+                else:
+                    actor_loss = loss_dict["loss_objective"] + loss_dict["loss_entropy"]
+                    critic_loss = loss_dict["loss_critic"]
+
                 if scaler is not None:
                     # Use mixed precision scaling
                     scaler.scale(actor_loss).backward()
@@ -290,13 +349,19 @@ def train_torchrl(
                 optimizer.zero_grad()
 
                 # Log losses for this minibatch update
-                actor_losses.append(loss_dict["loss_objective"])
-                critic_losses.append(loss_dict["loss_critic"])
-                entropy_losses.append(loss_dict["loss_entropy"])
-                kl_div.append(loss_dict["kl_approx"])
+                actor_losses.append(actor_loss)
+                critic_losses.append(critic_loss)
+                entropy_losses.append(
+                    loss_dict["loss_entropy"] if not qnets else torch.tensor(0.0)
+                )
+                kl_div.append(
+                    loss_dict["kl_approx"] if not qnets else torch.tensor(0.0)
+                )
 
             scheduler.step()
             # scheduler_c.step()
+            if qnets:
+                updater.step()
             num_updates += 1  # Count PPO update cycles
 
         # --- Logging ---
@@ -306,25 +371,36 @@ def train_torchrl(
         avg_kldiv = torch.stack(kl_div).mean().item()
         avg_reward = batch_data["next", "reward"].mean().item()
         max_reward = batch_data["next", "reward"].max().item()
+        idx = batch_data["next", "done"]
         # Log episode stats from collected batch_data
-        final_coverage = batch_data["next", "final_coverage"]
-        final_coverage = final_coverage[final_coverage.nonzero()].mean()
-        step_count = batch_data["next", "final_step_count"].float()
-        step_count = step_count[step_count.nonzero()].mean()
-        ep_len = batch_data["next", "final_length"].float()
-        ep_len = ep_len[ep_len.nonzero()].mean()
-        wall_gradient = batch_data["next", "final_wall_gradient"].float()
-        wall_gradient = wall_gradient[wall_gradient.nonzero()].mean()
-        total_reward = batch_data["next", "total_reward"]
-        total_reward = total_reward[total_reward.nonzero()].mean()
-        action = (batch_data["action"] * 2 * config.max_step_vox - config.max_step_vox).round()
-        # np.savetxt("batch_data.npy", batch_data["next", "max_gdt_achieved"].numpy(force=True), fmt="%.5f")
+        final_coverage = batch_data["next", "info", "final_coverage"]
+        final_coverage = final_coverage[idx].mean()
+        step_count = batch_data["info", "final_step_count"].float()
+        step_count = step_count[idx].mean()
+        ep_len = batch_data["next", "info", "final_length"].float()
+        ep_len = ep_len[idx].mean()
+        wall_gradient = batch_data["next", "info", "final_wall_gradient"].float()
+        wall_gradient = wall_gradient[idx].mean()
+        total_reward = batch_data["next", "info", "total_reward"]
+        total_reward = total_reward[idx].mean()
+        action = (
+            (batch_data["action"] * 2 - 1) * config.max_step_vox
+        ).round()
+        max_gdt_achieved = batch_data["next", "info", "max_gdt_achieved"][idx]
+        max_std, max_mean = torch.std_mean(max_gdt_achieved)
+        np.savetxt("batch_data.npy", batch_data["next", "reward"].numpy(force=True), fmt="%.5f")
+        np.savetxt("batch_data_2.npy", batch_data["advantage"].numpy(force=True), fmt="%.5f")
+        np.savetxt(
+            "total_reward.npy",
+            batch_data["next", "info", "total_reward"].numpy(force=True),
+            fmt="%.5f",
+        )
         log_data = {
             "losses/policy_loss": avg_actor_loss,
             "losses/value_loss": avg_critic_loss,
             "losses/entropy": avg_entropy_loss,
             "losses/kl_div": avg_kldiv,
-            "losses/grad_norm": grad_norm.item(),
+            "losses/grad_norm": grad_norm,
             "losses/alpha": batch_data["alpha"].mean(),
             "losses/beta": batch_data["beta"].mean(),
             "train/reward": avg_reward,
@@ -335,9 +411,9 @@ def train_torchrl(
             "train/final_coverage": final_coverage,
             "train/total_reward": total_reward,
             "charts/learning_rate": optimizer.param_groups[0]["lr"],
-            "charts/max_gdt_achieved": batch_data["next", "max_gdt_achieved"].mean(),
-            "charts/max_gdt_achieved_std": batch_data["next", "max_gdt_achieved"].std(),
-            "charts/max_gdt_achieved_max": batch_data["next", "max_gdt_achieved"].max(),
+            "charts/max_gdt_achieved": max_mean,
+            "charts/max_gdt_achieved_std": max_std,
+            "charts/max_gdt_achieved_max": max_gdt_achieved.max(),
             "charts/num_updates": num_updates,
             "charts/action_0": action[:, 0].mean(),
             "charts/action_1": action[:, 1].mean(),
@@ -350,14 +426,12 @@ def train_torchrl(
             "charts/action_2_mode": action[:, 2].cpu().mode()[0],
         }
 
-        pbar.set_postfix(
-            {
-                "R": f"{avg_reward:.1f}",
-                "Cov": f"{final_coverage:.1f}",
-                "loss_P": f"{avg_actor_loss:.2f}",
-                "loss_V": f"{avg_critic_loss:.2f}",
-            }
-        )
+        pbar.set_postfix({
+            "R": f"{avg_reward:.1f}",
+            "Cov": f"{final_coverage:.1f}",
+            "loss_P": f"{avg_actor_loss:.2f}",
+            "loss_V": f"{avg_critic_loss:.2f}",
+        })
 
         if config.track_wandb and wandb is not None:
             log_wandb(log_data, step=collected_frames)
@@ -386,7 +460,9 @@ def train_torchrl(
                 print(
                     f"  New best validation metric ({config.metric_to_optimize}): {best_val_metric:.4f}"
                 )
-                best_model_path = os.path.join(config.checkpoint_dir, "best_model_torchrl.pth")
+                best_model_path = os.path.join(
+                    config.checkpoint_dir, "best_model_torchrl.pth"
+                )
                 save_dict = {
                     # Save TorchRL modules' state_dicts
                     "policy_module_state_dict": policy_module.state_dict(),

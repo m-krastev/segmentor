@@ -78,21 +78,22 @@ def main():
     print(f"Val indices \t({len(dataset)-train_size:0>2}/{len(dataset)}): {val_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in val_indices]}")
 
     # --- Models ---
-    policy_module, value_module = create_ppo_modules(config, config.device)
+    policy_module, value_module = create_ppo_modules(config, config.device, qnets=config.td3, in_channels_actor=4, in_channels_critic=4)
 
     # Init the lazy modules
     with torch.no_grad():
         dummy_input = TensorDict(
             {
-                "actor": torch.zeros(1, 3, *config.patch_size_vox, device=config.device),
-                "critic": torch.zeros(1, 3, *config.patch_size_vox, device=config.device),
+                "actor": torch.zeros(1, 4, *config.patch_size_vox, device=config.device),
+                "critic": torch.zeros(1, 4, *config.patch_size_vox, device=config.device),
+                "action": torch.zeros(1, 3, device=config.device)
             },
         )
         policy_module(dummy_input)
         value_module(dummy_input)
         print(f"Policy: {policy_module}")
     
-    policy_module.compile(fullgraph=True)
+    policy_module.compile(fullgraph=True, dynamic=False)
     value_module.compile()
 
     # Watch the model parameters
@@ -116,7 +117,7 @@ def main():
             policy_module.load_state_dict(data["policy_module_state_dict"])
             value_module.load_state_dict(data["value_module_state_dict"])
 
-        train_torchrl(policy_module, value_module, config, train_set, val_set)
+        train_torchrl(policy_module, value_module, config, train_set, val_set, qnets=config.td3)
     # try:
     #     train_torchrl(config, dataset)
     # except Exception as e:

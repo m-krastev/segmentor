@@ -309,12 +309,12 @@ def save_coordinates_to_txt(start_coord_zyx, end_coord_zyx, filepath):
     with open(filepath, "w") as f:
         if start_coord_zyx is not None:
             # Convert ZYX to XYZ for output
-            f.write(f"{start_coord_zyx[2]} {start_coord_zyx[1]} {start_coord_zyx[0]}\n")
+            f.write(f"{start_coord_zyx[0]} {start_coord_zyx[0]} {start_coord_zyx[2]}\n")
         else:
             f.write("N/A N/A N/A\n")  # Placeholder if no start coordinate
 
         if end_coord_zyx is not None:
-            f.write(f"{end_coord_zyx[2]} {end_coord_zyx[1]} {end_coord_zyx[0]}\n")
+            f.write(f"{end_coord_zyx[0]} {end_coord_zyx[1]} {end_coord_zyx[2]}\n")
         else:
             f.write("N/A N/A N/A\n")  # Placeholder if no end coordinate
     print(f"Saved start/end coordinates to: {filepath}")

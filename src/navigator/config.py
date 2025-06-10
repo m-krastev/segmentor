@@ -19,6 +19,7 @@ class Config:
     load_from_checkpoint: Optional[str] = None  # Path to checkpoint for evaluation
     reload_checkpoint_path: Optional[str] = None  # Path to checkpoint for evaluation
     seed: int = 42  # Random seed for reproducibility
+    td3: bool = False
 
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training
@@ -33,8 +34,8 @@ class Config:
 
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
-    patch_size_mm: int = 28
-    max_step_displacement_mm: float = 10.0
+    patch_size_mm: int = 16
+    max_step_displacement_mm: float = 6
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 1024
     cumulative_path_radius_mm: float = 6.0
@@ -47,26 +48,26 @@ class Config:
     # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
     r_zero_mov: float = 100.0
-    r_final: float = 100.0
+    r_final: float = 1000 # Seems to work okay with 1600
     # Reward for passing through must-pass nodes?
     r_peaks: float = 4.0
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
-    num_episodes_per_sample: int = 1  # 32768
+    num_episodes_per_sample: int = 256  # 32768
     # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 20_000_000
     # Size of the buffer to store transitions
-    frames_per_batch: int = 2048
-    learning_rate: float = 3e-5
-    batch_size: int = 128  # Size of mini-batch for PPO update
+    frames_per_batch: int = 4096
+    learning_rate: float = 5e-5
+    batch_size: int = 256  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
-    gamma: float = 0.998
+    gamma: float = 0.999
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.1
     # Entropy coefficient for exploration (higher values encourage exploration)
-    ent_coef: float = 0.003
+    ent_coef: float = 0.01
     # Value function coefficient (higher values encourage accurate value estimates)
     vf_coef: float = 0.5
     num_workers: int = 1

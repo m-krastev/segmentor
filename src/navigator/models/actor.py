@@ -65,14 +65,12 @@ class ActorNetwork(nn.Module):
         self.pool3 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.LazyLinear(256),
-            nn.GroupNorm(32, 256),
-            nn.GELU(),
+            nn.LazyLinear(512),
         )
 
         # Output layer for alpha/beta parameters (6 values = 3 dimensions × 2 params)
-        self.alpha = nn.Linear(256, 3)
-        self.beta = nn.Linear(256, 3)
+        self.alpha = nn.Linear(512, 3)
+        self.beta = nn.Linear(512, 3)
         self.alpha.bias.data.zero_()
         self.beta.bias.data.zero_()
         self.eps = eps

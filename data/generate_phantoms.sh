@@ -7,19 +7,24 @@ DIR=./phantoms
 # Create a base output directory if it doesn't exist
 mkdir -p $DIR
 
+DIM_LOW=100
+DIM_HIGH=150
+CONTROL_LOW=20
+CONTROL_HIGH=40
+
 # Loop 100 times to generate 100 scans
 for i in $(seq 1 100)
 do
   echo "Generating phantom $i of 100..."
 
-  # Generate random volume shapes (between 70 and 140 for each dimension)
-  shape_x=$(( RANDOM % (140 - 70 + 1) + 70 ))
-  shape_y=$(( RANDOM % (140 - 70 + 1) + 70 ))
-  shape_z=$(( RANDOM % (140 - 70 + 1) + 70 ))
+  # Generate random volume shapes (between DIM_LOW and DIM_HIGH for each dimension)
+  shape_x=$(( RANDOM % (DIM_HIGH - DIM_LOW + 1) + DIM_LOW ))
+  shape_y=$(( RANDOM % (DIM_HIGH - DIM_LOW + 1) + DIM_LOW ))
+  shape_z=$(( RANDOM % (DIM_HIGH - DIM_LOW + 1) + DIM_LOW ))
   volume_shape="${shape_x},${shape_y},${shape_z}"
 
-  # Generate random number of control points (between 4 and 10)
-  n_control_points=$(( RANDOM % (10 - 4 + 1) + 4 ))
+  # Generate random number of control points (between CONTROL_LOW and CONTROL_HIGH)
+  n_control_points=$(( RANDOM % (CONTROL_HIGH - CONTROL_LOW + 1) + CONTROL_LOW ))
 
   # Generate a random seed
   seed=$RANDOM

@@ -13,7 +13,7 @@ from torchrl.data import Bounded
 from torchrl.modules.distributions import TanhNormal
 from torch.distributions import Beta, Independent
 from .actor import ActorNetwork
-from .critic import CriticNetwork
+from .critic import CriticNetwork, StateActionValueNetwork
 from ..config import Config
 
 __all__ = ["ActorNetwork", "CriticNetwork", "create_ppo_modules"]
@@ -74,12 +74,12 @@ class IndependentBeta(Independent):
         return super().log_prob(((value - self.min) / self.scale).clamp(self.eps, 1.0 - self.eps))
 
 # --- TorchRL Modules ---
-def create_ppo_modules(config: Config, device: torch.device):
+def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False, in_channels_actor = 3, in_channels_critic = 3):
     """Creates the PPO actor and critic modules compatible with TorchRL."""
 
     # Actor Network Base
     actor_cnn_base = ActorNetwork(
-        input_channels=3,
+        input_channels=in_channels_actor,
     ).to(device)
 
     # Wrap CNN base to extract "actor" obs and output "dist_params"
@@ -124,16 +124,19 @@ def create_ppo_modules(config: Config, device: torch.device):
         default_interaction_type=InteractionType.RANDOM,
     ).to(device)
 
-    # Critic Network Base
-    critic_base = CriticNetwork(
-        input_channels=3,
-    ).to(device)
+    if qnets:
+        critic_base = StateActionValueNetwork(in_channels_critic, 3).to(device)
+    else:
+        # Critic Network Base
+        critic_base = CriticNetwork(
+            input_channels=in_channels_critic,
+        ).to(device)
 
     # Wrap critic using ValueOperator
     value_module = ValueOperator(
         module=critic_base,
-        in_keys=["critic"],  # Input key from observation spec
-        out_keys=["state_value"],  # Standard output key for value estimates
+        in_keys=["actor", "action"] if qnets else ["actor"],  # Input key from observation spec
+        out_keys=["state_action_value" if qnets else "state_value"],  # Standard output key for value estimates
     ).to(device)
 
     return policy_module, value_module
