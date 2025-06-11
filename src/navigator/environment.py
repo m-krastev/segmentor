@@ -135,7 +135,6 @@ class SmallBowelEnv(EnvBase):
             ),
             shape=batch_size,
         )
-        self.state_spec = self.observation_spec.clone()
         self.action_spec = BoundedContinuous(
             low=0, high=1, shape=torch.Size([*batch_size, 3]), dtype=self.dtype
         )
@@ -153,22 +152,20 @@ class SmallBowelEnv(EnvBase):
         # --- TorchRL Internal State Flags (per-batch element) ---
         self._is_done = torch.zeros(*self.batch_size, 1, dtype=torch.bool, device=self.device)
 
-        self.ct_transform = ClipTransform(30 - 160, 30 + 160)  # -150, 250
-        self.ct_transform.compile()
-
-        self.wall_transform = ClipTransform(0.0, 0.1)
-        self.wall_transform.compile()
+        self.ct_transform = torch.compile(ClipTransform(30 - 150, 30 + 150))  # -150, 250
+        self.wall_transform = torch.compile(ClipTransform(0.0, 0.1))
 
         # Placeholder tensor
         self.zeros_patch = torch.zeros(self.config.patch_size_vox, device=self.device)
         self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=self.dtype)
-        self.dilation = torch.nn.Sequential(*[
-            BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 2 + 1)
-        ]).to(self.device)
-        self.maxarea_dilation = torch.nn.Sequential(*[BinaryDilation3D() for _ in range(10)]).to(
-            self.device
-        )
-        self.dilation.compile()
+        self.dilation = torch.compile(
+            torch.nn.Sequential(*[
+                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 2 + 1)
+            ])
+        ).to(self.device)
+        self.maxarea_dilation = torch.compile(
+            torch.nn.Sequential(*[BinaryDilation3D() for _ in range(10)])
+        ).to(self.device)
 
     # --- Data Loading Method (Internal) ---
     def _load_next_subject(self) -> bool:
@@ -238,20 +235,18 @@ class SmallBowelEnv(EnvBase):
         self.gdt_start = gdt_start
         self.gdt_end = gdt_end
         self.cumulative_path_mask = torch.zeros_like(self.seg)
-        self.local_peaks = local_peaks[30:-30] # Restrict to center positions TODO: Remove
+        self.local_peaks = local_peaks[30:-30]  # Restrict to center positions TODO: Remove sometime
+        # self.image[tuple(local_peaks.T)] = 0.5
         self.reward_map = np.zeros_like(self.gdt_start, dtype=np.uint8)
         self.allowed_area = (
             self.maxarea_dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze().numpy(force=True)
         )
-        # assert np.all(self.gdt_start[tuple(self.local_peaks.T)] > 0)
-        # assert np.all(self.gdt_end[tuple(self.local_peaks.T)] > 0)
 
         # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
         self.image_affine = image_affine if image_affine is not None else np.eye(4)
         self.start_coord = tuple(start_coord)
         self.end_coord = tuple(end_coord)
-        # self.zeros_cache = torch.zeros_like(self.seg)
 
         # Update ground truth path if provided
         self.gt_path_voxels = gt_path
@@ -286,9 +281,9 @@ class SmallBowelEnv(EnvBase):
         cum_path_patch = get_patch(
             self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
         )
-        #     gt_path_patch = get_patch(
-        #         self.gt_path_vol, self.current_pos_vox, self.config.patch_size_vox
-        #     )
+        # gt_path_patch = get_patch(
+        #     self.gt_path_vol, self.current_pos_vox, self.config.patch_size_vox
+        # )
         # save_nifti(np.transpose(img_patch.numpy(force=True), (2,1,0)), "img_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
         # save_nifti(np.transpose(wall_patch.numpy(force=True), (2,1,0)), "wall_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
         # save_nifti(np.transpose(cum_path_patch.numpy(force=True), (2,1,0)), "cum_path_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
@@ -305,10 +300,8 @@ class SmallBowelEnv(EnvBase):
 
     def _get_final_coverage(self) -> float:
         """Calculate coverage. Assumes tensors are valid."""
-        # mask = self.dilation(self.cumulative_path_mask.unsqueeze(0).unsqueeze(0)).squeeze()
-        mask = self.cumulative_path_mask
-        intersection = torch.sum(mask * self.seg)
-        union = self.seg_volume + mask.sum()
+        intersection = torch.sum(self.cumulative_path_mask * self.seg)
+        union = self.seg_volume + self.cumulative_path_mask.sum()
         return (2 * intersection / union) if union != 0 else 0
 
     def get_tracking_history(self) -> np.ndarray:
@@ -361,15 +354,15 @@ class SmallBowelEnv(EnvBase):
         rt = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         # --- 1. Zero movement or goes out of the segmentation penalty ---
         if not any(action_vox):
-            rt -= self.config.r_zero_mov  # self.config.r_zero_mov
+            rt -= self.config.r_val2  # self.config.r_val1
             return rt, ()
 
         if not self._is_valid_pos(next_pos_vox) or not self.allowed_area[next_pos_vox]:
-            rt -= self.config.r_zero_mov
+            rt -= self.config.r_val2
             return rt, ()
 
         # Set of voxels S on the line segment
-        S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
+        S = line_nd(self.current_pos_vox, next_pos_vox)
 
         # --- 2. GDT-based reward ---
         next_gdt_val = self.gdt[next_pos_vox]
@@ -377,14 +370,10 @@ class SmallBowelEnv(EnvBase):
         if next_gdt_val > self.max_gdt_achieved:
             delta = next_gdt_val - self.max_gdt_achieved
             # Penalty if too large, reward if within margins
-            rt += self.config.r_val2 * (
-                (1 + delta / self.config.gdt_max_increase_theta)
-                if delta < self.config.gdt_max_increase_theta
-                else -1
-            )
-
-            # 3.3 Add shaping
             if delta < self.config.gdt_max_increase_theta:
+                # Base reward
+                rt += self.config.r_val2 * delta / self.config.gdt_max_increase_theta
+                # 3.3 Add shaping
                 dist_before = abs(self.goal_gdt - self.max_gdt_achieved)
                 dist_after = abs(self.goal_gdt - next_gdt_val)
 
@@ -394,8 +383,7 @@ class SmallBowelEnv(EnvBase):
                 shaping_bonus = self.config.gamma * phi_after - phi_before
                 rt += 1 + shaping_bonus / self.config.gdt_max_increase_theta
             else:
-                rt -= 1
-
+                rt -= self.config.r_val2
 
             # Additional coverage reward... rt+=
             self.max_gdt_achieved = next_gdt_val
@@ -403,31 +391,25 @@ class SmallBowelEnv(EnvBase):
         phi_t = self.current_step_count - 1
         phi_tp1 = self.current_step_count
         rt += self.config.gamma * phi_tp1 - phi_t
+
         # 2.5 Peaks-based reward
         # rt += self.reward_map[S].sum() * self.config.r_peaks
-        # print(f"{self.reward_map[S].sum()=}")
-        # Discard the reward for visited nodes
         # self.reward_map[S] = 0
-        # print(f"Reward claimed!", flush=True)
-
-        # Reward for coverage (based on Dice within the segmentation on the path)
-        wall_map = self.wall_map[S].max()
-        rt -= self.config.r_val2 * wall_map  # 10
-
-        self.wall_stuff = wall_map
-        self.wall_gradient += wall_map
-        # Will modify self.gt_path_vol in place and we can use it for coverage
-        coverage = self.cumulative_path_mask[S]
-        # rt += ((coverage == 0).sum() / len(S[0])) * self.config.r_val2
-
-        # Simple problem, toy problem might be a good way to solve this
 
         # --- 3. Wall-based penalty ---
-        # --- 4. Revisiting penalty ---
-        rt -= self.config.r_val1 * coverage.any()
-        # print(f"{self.cumulative_path_mask[S].sum()=}")
+        wall_map = self.wall_map[S].max()
+        rt -= self.config.r_val2 * wall_map
 
-        rt -= self.config.r_val1 * self.seg[next_pos_vox].logical_not()
+        self.wall_gradient += wall_map
+
+        # Reward for coverage (based on Dice within the segmentation on the path)
+        # S always includes the start pixels, (and due to the dilation the pixels surrounding the start will always be white, therefore invoking this reward consistently)
+
+        # --- 4. Revisiting penalty ---
+        # coverage = self.cumulative_path_mask[S][3:]
+        # rt -= self.config.r_val3 * coverage.any()
+
+        rt -= self.config.r_val3 * self.seg[next_pos_vox].logical_not()
         return rt, S
 
     def _reset(
@@ -451,16 +433,11 @@ class SmallBowelEnv(EnvBase):
             # Reset counter *before* loading, as loading signifies starting fresh
             self.episodes_on_current_subject = 0
             self._load_next_subject()
-            self.goal = (0, 0, 0)
 
         # --- Reset internal episode state ---
         self.current_step_count = 0
         self.current_distance_traveled = 0
         self.wall_gradient = 0
-
-        # Reset goal marker (some slight indication that the goal is there)
-        # self.wall_map[self.goal] = 0
-        # self.image[self.goal] = 0
 
         # Determine start position and select appropriate GDT
         rand = random.randint(0, 9)  # 40-40-20
@@ -484,25 +461,16 @@ class SmallBowelEnv(EnvBase):
             self.current_pos_vox = self.end_coord
             self.goal = self.start_coord
             self.gdt = self.gdt_end
-            
-        self._start = self.current_pos_vox
 
-        # Reset goal marker (small indication to add prior information to the tracker to move towards)
-        # self.wall_map[self.goal] = -2
-        # self.image[self.goal] = 2
+        self._start = self.current_pos_vox
 
         # Initialize path tracking
         self.cumulative_path_mask.zero_()
-        draw_path_sphere_2(
-            self.cumulative_path_mask,
-            self.current_pos_vox,
-            self.dilation,
-            self.gt_path_vol,
-        )
+        self.cumulative_path_mask[self.current_pos_vox] = 1
 
         # Initialize various tracking variables
         self.tracking_path_history = [self.current_pos_vox]
-        self.cum_reward = torch.tensor(0., dtype=self.dtype, device=self.device)
+        self.cum_reward = torch.tensor(0.0, dtype=self.dtype, device=self.device)
         self.max_gdt_achieved = self.gdt[self.current_pos_vox]
         self.goal_gdt = self.gdt.max()
         self.reward_map[tuple(self.local_peaks.T)] = 1
@@ -580,10 +548,7 @@ class SmallBowelEnv(EnvBase):
         termination_reason = TReason.NOT_DONE
         if self.current_step_count >= self.config.max_episode_steps:
             truncated, termination_reason = True, TReason.MAX_STEPS
-        elif (
-            not is_next_pos_valid_seg or not self.allowed_area[next_pos_vox]
-        ):  # and self.seg_np[next_pos_vox]
-            # reward -= (-self.config.r_zero_mov * 2)
+        elif not is_next_pos_valid_seg or not self.allowed_area[next_pos_vox]:
             terminated, termination_reason = True, TReason.OOB
         elif dist(next_pos_vox, self.goal) < self.config.cumulative_path_radius_vox:
             terminated, termination_reason = True, TReason.GOAL_REACHED
@@ -597,7 +562,7 @@ class SmallBowelEnv(EnvBase):
                 self.dilation,
                 self.gt_path_vol,
             )
-        truncated = terminated
+        terminated = truncated | terminated
         done = terminated | truncated
 
         # Final Reward Adjustment
@@ -646,7 +611,7 @@ class SmallBowelEnv(EnvBase):
         self._is_done[:] = done
         self.cum_reward += reward
         _reward = reward.view_as(self._is_done)  # B, T, 1
-    
+
         output_td = TensorDict(
             {
                 "actor": next_obs_dict.unsqueeze(0),
@@ -675,7 +640,7 @@ class SmallBowelEnv(EnvBase):
                         device=self.device,
                         dtype=self.dtype,
                     ).view_as(_reward),
-                    "total_reward": self.cum_reward.view_as(_reward)
+                    "total_reward": self.cum_reward.view_as(_reward).clone()
                     if done
                     else self.placeholder_zeros.clone(),
                     "max_gdt_achieved": torch.as_tensor(

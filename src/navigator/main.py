@@ -78,14 +78,15 @@ def main():
     print(f"Val indices \t({len(dataset)-train_size:0>2}/{len(dataset)}): {val_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in val_indices]}")
 
     # --- Models ---
-    policy_module, value_module = create_ppo_modules(config, config.device, qnets=config.td3, in_channels_actor=4, in_channels_critic=4)
+    in_act, in_crit = 4, 4
+    policy_module, value_module = create_ppo_modules(config, config.device, qnets=config.td3, in_channels_actor=in_act, in_channels_critic=in_crit)
 
     # Init the lazy modules
     with torch.no_grad():
         dummy_input = TensorDict(
             {
-                "actor": torch.zeros(1, 4, *config.patch_size_vox, device=config.device),
-                "critic": torch.zeros(1, 4, *config.patch_size_vox, device=config.device),
+                "actor": torch.zeros(1, in_act, *config.patch_size_vox, device=config.device),
+                "critic": torch.zeros(1, in_crit, *config.patch_size_vox, device=config.device),
                 "action": torch.zeros(1, 3, device=config.device)
             },
         )

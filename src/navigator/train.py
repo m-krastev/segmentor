@@ -384,7 +384,7 @@ def train_torchrl(
         # Log episode stats from collected batch_data
         final_coverage = batch_data["next", "info", "final_coverage"]
         final_coverage = final_coverage[idx].mean()
-        step_count = batch_data["info", "final_step_count"].float()
+        step_count = batch_data["next", "info", "final_step_count"].float()
         step_count = step_count[idx].mean()
         ep_len = batch_data["next", "info", "final_length"].float()
         ep_len = ep_len[idx].mean()
@@ -397,13 +397,6 @@ def train_torchrl(
         ).round()
         max_gdt_achieved = batch_data["next", "info", "max_gdt_achieved"][idx]
         max_std, max_mean = torch.std_mean(max_gdt_achieved)
-        np.savetxt("batch_data.npy", batch_data["next", "reward"].numpy(force=True), fmt="%.5f")
-        np.savetxt("batch_data_2.npy", batch_data["advantage"].numpy(force=True), fmt="%.5f")
-        np.savetxt(
-            "total_reward.npy",
-            batch_data["next", "info", "total_reward"].numpy(force=True),
-            fmt="%.5f",
-        )
         log_data = {
             "losses/policy_loss": avg_actor_loss,
             "losses/value_loss": avg_critic_loss,
@@ -522,7 +515,7 @@ def train_gym_environment(config: Config):
     print("Starting dummy Gym environment training...")
 
     device = torch.device(config.device)
-    total_timesteps = 100_000 # A smaller number for a dummy run
+    total_timesteps = 3_000_000 # A smaller number for a dummy run
     frames_per_batch = 2048
     batch_size = 256
     update_epochs = 5
@@ -541,13 +534,14 @@ def train_gym_environment(config: Config):
 
     # 1. Create GymEnv
     # Using 'CartPole-v1' as a simple example
-    env = GymEnv("CartPole-v1", device=device)
+    env = GymEnv("Acrobot-v1", device=device)
     print(f"Gym Environment created: {env.env_name}")
     print(f"Observation spec: {env.observation_spec}")
     print(f"Action spec: {env.action_spec}")
 
     # 2. Create dummy actor and critic networks
-    actor_module, value_module = make_dummy_actor_critic(env.specs)
+    print(env.specs)
+    actor_module, value_module = make_dummy_actor_critic(env.observation_spec, env.action_spec)
 
     # Wrap actor_module with ProbabilisticActor for discrete actions
     actor_module = ProbabilisticActor(
@@ -560,8 +554,7 @@ def train_gym_environment(config: Config):
 
     # Wrap value_module with ValueOperator
     value_module = ValueOperator(
-        module=value_module,
-        in_keys=["state_value"],
+        module=value_module
     )
 
     actor_module.to(device)
@@ -595,13 +588,13 @@ def train_gym_environment(config: Config):
 
     # 6. Collector
     collector = SyncDataCollector(
-        create_env_fn=lambda: GymEnv("CartPole-v1", device=device),
+        create_env_fn=lambda: GymEnv("Acrobot-v1", device=device),
         policy=actor_module,
         frames_per_batch=frames_per_batch,
         total_frames=total_timesteps,
         device=device,
         storing_device=device,
-        max_frames_per_traj=env.max_steps,
+        max_frames_per_traj=env.spec.max_episode_steps,
     )
 
     # 7. Training Loop
@@ -614,16 +607,18 @@ def train_gym_environment(config: Config):
 
         with torch.no_grad():
             adv_module(batch_data)
-
+        
         actor_losses, critic_losses, entropy_losses = [], [], []
+        actor_module.train()
+        value_module.train()
         for _ in range(update_epochs):
             batch_data = batch_data.reshape(-1) # Flatten for replay buffer
             # Create a dummy replay buffer for minibatches
             replay_buffer = TensorDictReplayBuffer(
                 storage=LazyTensorStorage(max_size=frames_per_batch, device=device),
-                batch_size=batch_size,
+                batch_size=batch_size, sampler=SamplerWithoutReplacement()
             )
-            replay_buffer.add(batch_data)
+            replay_buffer.extend(batch_data)
 
             for minibatch in replay_buffer:
                 loss_dict = loss_module(minibatch)
@@ -635,7 +630,7 @@ def train_gym_environment(config: Config):
 
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(loss_module.parameters(), max_grad_norm)
+                _grad = torch.nn.utils.clip_grad_norm_(loss_module.parameters(), max_grad_norm)
                 optimizer.step()
 
                 actor_losses.append(actor_loss.item())
@@ -645,7 +640,9 @@ def train_gym_environment(config: Config):
         avg_actor_loss = np.mean(actor_losses)
         avg_critic_loss = np.mean(critic_losses)
         avg_entropy_loss = np.mean(entropy_losses)
-        avg_reward = batch_data["next", "reward"].mean().item()
+        idxs = batch_data["next", "done"].nonzero()
+        # avg_reward = batch_data["next", "reward"][idxs].mean().item()
+        avg_reward = sum(1 for i in idxs)
 
         pbar.set_postfix({
             "R": f"{avg_reward:.2f}",
@@ -662,6 +659,7 @@ def train_gym_environment(config: Config):
                 "gym_train/reward": avg_reward,
                 "gym_charts/learning_rate": learning_rate, # Static for this dummy example
                 "gym_charts/collected_frames": collected_frames,
+                "gym_charts/grad": _grad.item(),
             }
             log_wandb(log_data, step=collected_frames)
 

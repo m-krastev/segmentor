@@ -36,10 +36,10 @@ class Config:
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
     patch_size_mm: int = 16
-    max_step_displacement_mm: float = 6
+    max_step_displacement_mm: float = 4
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 1024
-    cumulative_path_radius_mm: float = 6.0
+    cumulative_path_radius_mm: float = 6.0 # Tbh the bowel should literally be no more than 2 cm in diameter
     # wall_map_sigmas: Tuple[int, ...] = (1, 3)
     wall_map_sigmas: Tuple[int, ...] = (1,)
 
@@ -50,8 +50,9 @@ class Config:
     r_val2: float = 6.0
     r_zero_mov: float = 100.0
     r_final: float = 1000 # Seems to work okay with 1600
-    # Reward for passing through must-pass nodes?
+    # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
+    r_val3 = 3
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
@@ -64,7 +65,7 @@ class Config:
     learning_rate: float = 5e-5
     batch_size: int = 256  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
-    gamma: float = 0.999
+    gamma: float = 0.995
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.1
     # Entropy coefficient for exploration (higher values encourage exploration)
