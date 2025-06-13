@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Beta
+from typing import Dict
+
 
 class ConvBlock(nn.Module):
     """
@@ -24,100 +26,74 @@ class ActorNetwork(nn.Module):
     """
     Actor network for PPO that outputs Beta distribution parameters.
 
-    The network processes 3D patches using convolutional layers
-    and outputs alpha and beta parameters for Beta distributions.
+    The network processes 3D patches using convolutional layers,
+    a sequence of past positions using an LSTM, and then combines
+    these features to output alpha and beta parameters for Beta distributions.
     """
 
-    def __init__(self, input_channels=3, eps = 1.001):
-        """
-        Initialize the actor network.
-
-        Args:
-            input_channels: Number of input channels (default: 3)
-        """
+    def __init__(
+        self, input_channels=4, lstm_hidden_size=128, num_lstm_layers=1, eps=1.001
+    ):  # Patches input_channels=4
         super().__init__()
+        self.eps = eps
 
-        # self.net = nn.Sequential(
-        #     ConvBlock(input_channels, 64, kernel_size=3, padding=1),
-        #     # Strided convolution to downsample
-        #     nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False),
-        #     ConvBlock(64, 128, kernel_size=3, padding=1),
-        #     # Strided convolution to downsample
-        #     nn.Conv3d(128, 128, kernel_size=2, stride=2, padding=0, bias=False),
-        #     ConvBlock(128, 256, kernel_size=3, padding=1),
-        #     # Strided convolution to downsample
-        #     nn.Conv3d(256, 256, kernel_size=2, stride=2, padding=0, bias=False),
-        #     nn.Flatten(),
-        #     nn.LazyLinear(256),
-        #     nn.GroupNorm(8, 256),
-        #     nn.GELU(),
-        #     nn.Linear(256, 256),
-        #     nn.GroupNorm(8, 256),
-        #     nn.GELU(),
-        # )
-
-        # TODO: Add downscaled patch of the larger position 
+        # CNN for patches
         self.conv1 = ConvBlock(input_channels, 16, kernel_size=3, padding=1, num_groups=8)
         self.pool1 = nn.Conv3d(16, 16, kernel_size=2, stride=2, padding=0, bias=False)
         self.conv2 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=16)
         self.pool2 = nn.Conv3d(32, 32, kernel_size=2, stride=2, padding=0, bias=False)
         self.conv3 = ConvBlock(32, 64, kernel_size=3, padding=1, num_groups=32)
         self.pool3 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
-        self.head = nn.Sequential(
-            nn.Flatten(),
-            nn.LazyLinear(512),
+        self.cnn_flatten = nn.Flatten()
+
+        # LSTM for position sequence
+        self.num_lstm_layers = num_lstm_layers
+        self.lstm = nn.LSTM(
+            input_size=3,
+            hidden_size=256,  # LSTM hidden size
+            num_layers=self.num_lstm_layers,
+            batch_first=True,  # Input: (batch, seq_len, features)
         )
 
-        # Output layer for alpha/beta parameters (6 values = 3 dimensions × 2 params)
-        self.alpha = nn.Linear(512, 3)
-        self.beta = nn.Linear(512, 3)
-        self.alpha.bias.data.zero_()
-        self.beta.bias.data.zero_()
-        self.eps = eps
+        # Combined feature processing head
+        self.head_fc = nn.LazyLinear(256)
 
-    def forward(self, x):
-        """Forward pass through the network."""
-        # print(x.shape)
-        x = self.conv1(x) # Residual connection
-        # print(x.shape)
+        # Output layers for Beta distribution parameters
+        self.alpha_layer = nn.Linear(256, 3)  # Renamed from self.alpha to avoid conflict
+        self.beta_layer = nn.Linear(256, 3)  # Renamed from self.beta
+        self.alpha_layer.bias.data.zero_()
+        self.beta_layer.bias.data.zero_()
 
-        x = self.pool1(x)
-        # print(x.shape)
+    def forward(
+        self, patches: torch.Tensor, position_sequence: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Process patches with CNN
+        x_conv = self.conv1(patches)
+        x_conv = self.pool1(x_conv)
+        x_conv = self.conv2(x_conv)
+        x_conv = self.pool2(x_conv)
+        x_conv = self.conv3(x_conv)
+        x_conv = self.pool3(x_conv)
+        cnn_features = self.cnn_flatten(x_conv)
 
-        x = self.conv2(x) # Residual connection
-        # print(x.shape)
+        lstm_out, _ = self.lstm(position_sequence)
 
-        x = self.pool2(x)
-        # print(x.shape)
+        # We take the output of the last time step
+        lstm_features = lstm_out[:, -1, :]  # Shape (B, lstm_hidden_size)
 
-        x = self.conv3(x) # Residual connection
-        # print(x.shape)
+        # Concatenate CNN features and LSTM features
+        combined_features = torch.cat((cnn_features, lstm_features), dim=1)
 
-        x = self.pool3(x)
-        # print(x.shape)
-        x = self.head(x)
+        # Pass combined features through the fully connected head
+        x = self.head_fc(combined_features)
 
         # Output alpha/beta parameters
-        alpha = torch.clamp(F.softplus(self.alpha(x), threshold=5) + self.eps, max=100)
-        beta = torch.clamp(F.softplus(self.beta(x), threshold=5) + self.eps, max=100)
-        return alpha, beta
+        alpha_params = torch.clamp(F.softplus(self.alpha_layer(x), threshold=5) + self.eps, max=100)
+        beta_params = torch.clamp(F.softplus(self.beta_layer(x), threshold=5) + self.eps, max=100)
 
-    def get_action_dist(self, obs_actor: torch.Tensor) -> Beta:
-        """
-        Get Beta distribution from observation.
+        return alpha_params, beta_params
 
-        Args:
-            obs_actor: Observation tensor
-
-        Returns:
-            Beta distribution object
-        """
-        # alpha_beta = self.forward(obs_actor)
-        # alpha_beta_pairs = alpha_beta.view(-1, 3, 2)
-        # alphas = alpha_beta_pairs[..., 0]
-        # betas = alpha_beta_pairs[..., 1]
-        alphas, betas = self(obs_actor)
+    def get_action_dist(self, obs_actor: Dict[str, torch.Tensor]) -> Beta:
+        alphas, betas = self.forward(obs_actor)  # Call the modified forward method
         dist = Beta(alphas, betas)
-        return dist # dist \in [0,1] -> 2 * dist - 1 -> [-1,1] * d -> [-d, d]
-    
-        # dist \in [0,1]^3 -> slow down speed by gradient 
+        return dist
