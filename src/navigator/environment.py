@@ -5,10 +5,11 @@ integrated with TorchRL. Simplified version without try-except blocks.
 
 from rich import print
 from itertools import cycle
-from math import dist, isfinite
+from math import dist, isfinite, atan2, pi  # Removed cos, sin
 from pathlib import Path
 import random
 from typing import Dict, Iterator, List, Optional, Tuple
+from collections import deque  # Added deque
 
 import nibabel as nib
 import numpy as np
@@ -52,6 +53,7 @@ class TReason(IntEnum):
 
 # Define action spec constants
 ACTION_DIM = 3  # 3D movement delta
+POSITION_HISTORY_LENGTH = 128  # For LSTM input
 
 
 class SmallBowelEnv(EnvBase):
@@ -76,8 +78,10 @@ class SmallBowelEnv(EnvBase):
     spacing: Optional[Spacing]
     image_affine: Optional[np.ndarray]
     current_step_count: int
-    tracking_path_history: List[Coords]
+    tracking_path_history: List[Coords]  # For full episode path, unbounded
+    position_history: deque  # For LSTM observation, fixed length
     goal: Coords = (0, 0, 0)
+    # current_agent_heading_vector removed
 
     def __init__(
         self,
@@ -98,20 +102,34 @@ class SmallBowelEnv(EnvBase):
 
         # --- Store Config and Iterator ---
         self.config = config
-        self.dataset_iterator = dataset_iterator  # Store the iterator
-        self._current_subject_data = None  # Store data for the current subject
+        self.dataset_iterator = dataset_iterator
+        self._current_subject_data = None
         self.num_episodes_per_sample = num_episodes_per_sample
-        self.episodes_on_current_subject = num_episodes_per_sample  # Counter for episodes on current subject, set so that it refreshes at next step
+        self.episodes_on_current_subject = num_episodes_per_sample
 
         self.dtype = (
             torch.bfloat16 if config.use_bfloat16 and self.device.type == "cuda" else torch.float32
         )
+
+        # Initialize position history deque
+        self.position_history = deque(maxlen=POSITION_HISTORY_LENGTH)
+
         # --- Define Specs ---
-        # Set the specs *after* calling super().__init__
         self.observation_spec = Composite(
-            actor=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 4, *config.patch_size_vox]),
-                dtype=self.dtype,
+            actor=Composite(
+                patches=UnboundedContinuous(
+                    shape=torch.Size([*batch_size, 4, *config.patch_size_vox]),
+                    dtype=self.dtype,
+                ),
+                position_sequence=UnboundedContinuous(  # New spec for position history
+                    shape=torch.Size([
+                        *batch_size,
+                        POSITION_HISTORY_LENGTH,
+                        3,
+                    ]),  # B x T x 3 (Z,Y,X)
+                    dtype=self.dtype,  # Coordinates will be float
+                ),
+                spec_shape=batch_size,
             ),
             info=Composite(
                 final_coverage=BoundedContinuous(
@@ -149,17 +167,13 @@ class SmallBowelEnv(EnvBase):
 
         self.max_gdt_achieved = 0.0
         self.cum_reward = torch.tensor(0.0, device=self.device, dtype=self.dtype)
-
-        # --- TorchRL Internal State Flags (per-batch element) ---
         self._is_done = torch.zeros(*self.batch_size, 1, dtype=torch.bool, device=self.device)
 
-        self.ct_transform = ClipTransform(30 - 160, 30 + 160)  # -150, 250
+        self.ct_transform = ClipTransform(30 - 160, 30 + 160)
         self.ct_transform.compile()
-
         self.wall_transform = ClipTransform(0.0, 0.1)
         self.wall_transform.compile()
 
-        # Placeholder tensor
         self.zeros_patch = torch.zeros(self.config.patch_size_vox, device=self.device)
         self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=self.dtype)
         self.dilation = torch.nn.Sequential(*[
@@ -170,18 +184,9 @@ class SmallBowelEnv(EnvBase):
         )
         self.dilation.compile()
 
-    # --- Data Loading Method (Internal) ---
     def _load_next_subject(self) -> bool:
-        """
-        Loads the next subject's data from the iterator.
-        Raises StopIteration if iterator is exhausted.
-        Raises other exceptions if data loading/processing fails.
-        """
-        subject_data: dict = next(self.dataset_iterator)  # Let StopIteration propagate
+        subject_data: dict = next(self.dataset_iterator)
         self._current_subject_data = subject_data
-
-        # Call update_data - let it raise exceptions if issues occur
-        # Pass all relevant fields from the dataset output
         self.update_data(
             image=subject_data["image"],
             seg=subject_data["seg"],
@@ -190,47 +195,33 @@ class SmallBowelEnv(EnvBase):
             gdt_end=subject_data["gdt_end"],
             start_coord=subject_data["start_coord"],
             end_coord=subject_data["end_coord"],
-            gt_path=subject_data.get("gt_path"),  # Still optional
+            gt_path=subject_data.get("gt_path"),
             spacing=subject_data.get("spacing"),
             image_affine=subject_data.get("image_affine"),
             local_peaks=subject_data.get("local_peaks"),
         )
-
-        # Check if critical data was loaded successfully by update_data
         assert self.image is not None and self.seg is not None and self.wall_map is not None, (
             f"Critical data is None after loading subject {subject_data.get('id', 'N/A')}."
         )
-
         return True
 
-    # --- Internal Data Update Method ---
     def update_data(
         self,
         image: np.ndarray,
         seg: np.ndarray,
-        wall_map: np.ndarray,  # Receive wall_map tensor
-        gdt_start: np.ndarray,  # Receive GDT tensors
+        wall_map: np.ndarray,
+        gdt_start: np.ndarray,
         gdt_end: np.ndarray,
-        start_coord: Coords,  # Receive coords
+        start_coord: Coords,
         end_coord: Coords,
         gt_path: Optional[np.ndarray] = None,
         spacing: Optional[Spacing] = None,
         image_affine: Optional[np.ndarray] = None,
         local_peaks: Optional[np.ndarray] = None,
-        # Receive numpy versions if provided by dataset
     ):
-        """
-        Updates the environment's internal data stores using data from the dataset.
-        """
-        # Store tensors directly
         self.image = self.ct_transform(torch.from_numpy(image).to(self.device)).to(self.dtype)
-        # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
-        # save_nifti(np.transpose(self.image.numpy(force=True), (2,1,0)), f"image_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
         self.seg = torch.from_numpy(seg).to(device=self.device, dtype=torch.uint8)
         self.seg = self.dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze()
-        # self.seg[tuple(start_coord)] = 3
-        # self.seg[tuple(end_coord)] = 3
-        # save_nifti(np.transpose(self.seg.numpy(force=True), (2,1,0)), f"seg_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
         self.seg_volume = torch.sum(self.seg).item()
         self.wall_map = self.wall_transform(
             torch.from_numpy(wall_map).to(device=self.device, dtype=self.dtype)
@@ -238,24 +229,16 @@ class SmallBowelEnv(EnvBase):
         self.gdt_start = gdt_start
         self.gdt_end = gdt_end
         self.cumulative_path_mask = torch.zeros_like(self.seg)
-        self.local_peaks = local_peaks[30:-30] # Restrict to center positions TODO: Remove
+        self.local_peaks = local_peaks[30:-30]
         self.reward_map = np.zeros_like(self.gdt_start, dtype=np.uint8)
         self.allowed_area = (
             self.maxarea_dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze().numpy(force=True)
         )
-        # assert np.all(self.gdt_start[tuple(self.local_peaks.T)] > 0)
-        # assert np.all(self.gdt_end[tuple(self.local_peaks.T)] > 0)
-
-        # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
         self.image_affine = image_affine if image_affine is not None else np.eye(4)
         self.start_coord = tuple(start_coord)
         self.end_coord = tuple(end_coord)
-        # self.zeros_cache = torch.zeros_like(self.seg)
-
-        # Update ground truth path if provided
         self.gt_path_voxels = gt_path
-        # Process GT path data
         self.gt_path_vol = torch.zeros_like(self.seg)
         if self.gt_path_voxels is not None:
             valid_indices = (
@@ -267,60 +250,53 @@ class SmallBowelEnv(EnvBase):
                 & (self.gt_path_voxels[:, 2] < self.image.shape[2])
             )
             valid_gt_path = self.gt_path_voxels[valid_indices]
-            assert valid_gt_path.shape[0] > 0, "No valid GT path voxels found within image bounds."
+            assert valid_gt_path.shape[0] > 0, "No valid GT path voxels found."
             self.gt_path_vol[valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]] = 1.0
 
-    def _get_state_patches(self) -> Dict[str, torch.Tensor]:
-        """Get state patches centered at current position. Assumes tensors are valid."""
-        _ = len(self.tracking_path_history)
+    def _get_actor_observation(self) -> Dict[str, torch.Tensor]:
+        # Patches
+        hist_len = len(self.tracking_path_history)
         img_patch = get_patch(
-            self.image, self.tracking_path_history[-1 % _], self.config.patch_size_vox
+            self.image, self.tracking_path_history[-1 % hist_len], self.config.patch_size_vox
         )
-        # wall_patch = get_patch(self.wall_map, self.current_pos_vox, self.config.patch_size_vox)
         img_patch_1 = get_patch(
-            self.image, self.tracking_path_history[-2 % _], self.config.patch_size_vox
+            self.image, self.tracking_path_history[-2 % hist_len], self.config.patch_size_vox
         )
         img_patch_2 = get_patch(
-            self.image, self.tracking_path_history[-3 % _], self.config.patch_size_vox
+            self.image, self.tracking_path_history[-3 % hist_len], self.config.patch_size_vox
         )
         cum_path_patch = get_patch(
             self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
         )
-        #     gt_path_patch = get_patch(
-        #         self.gt_path_vol, self.current_pos_vox, self.config.patch_size_vox
-        #     )
-        # save_nifti(np.transpose(img_patch.numpy(force=True), (2,1,0)), "img_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
-        # save_nifti(np.transpose(wall_patch.numpy(force=True), (2,1,0)), "wall_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
-        # save_nifti(np.transpose(cum_path_patch.numpy(force=True), (2,1,0)), "cum_path_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
-        # exit()
-        # Stack patches (for critic you can add another dimension and just index into it)
-        # actor_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
-        actor_state = torch.stack([img_patch_2, img_patch_1, img_patch, cum_path_patch], axis=0)
-        return actor_state
+        patches_tensor = torch.stack([img_patch_2, img_patch_1, img_patch, cum_path_patch], axis=0)
+
+        # Position Sequence
+        # Convert deque of Coords (tuples) to a NumPy array, then to a Tensor
+        # Coords are (z,y,x)
+        pos_hist_np = np.array(
+            list(self.position_history), dtype=np.float32
+        )  # Shape (HISTORY_LENGTH, 3)
+        position_sequence_tensor = torch.tensor(pos_hist_np, dtype=self.dtype, device=self.device)
+
+        return {"patches": patches_tensor, "position_sequence": position_sequence_tensor}
 
     def _is_valid_pos(self, pos_vox: Coords) -> bool:
-        """Check if a position is within the volume bounds."""
         s = self.image.shape
         return (0 <= pos_vox[0] < s[0]) and (0 <= pos_vox[1] < s[1]) and (0 <= pos_vox[2] < s[2])
 
     def _get_final_coverage(self) -> float:
-        """Calculate coverage. Assumes tensors are valid."""
-        # mask = self.dilation(self.cumulative_path_mask.unsqueeze(0).unsqueeze(0)).squeeze()
         mask = self.cumulative_path_mask
         intersection = torch.sum(mask * self.seg)
         union = self.seg_volume + mask.sum()
-        return (2 * intersection / union) if union != 0 else 0
+        return (2 * intersection / union).item() if union != 0 else 0.0  # .item() for float
 
     def get_tracking_history(self) -> np.ndarray:
-        """Get the history of tracked positions."""
         return np.array(self.tracking_path_history)
 
     def get_tracking_mask(self) -> torch.Tensor:
-        """Get the cumulative path mask."""
         return self.cumulative_path_mask.clone()
 
     def save_path(self, save_dir: Optional[Path] = None):
-        # Environment works with ZYX, so we have to do transposes here
         cache_dir = save_dir or (Path("results") / self._current_subject_data["id"])
         cache_dir.mkdir(parents=True, exist_ok=True)
         nif = nib.nifti1.Nifti1Image(
@@ -328,151 +304,93 @@ class SmallBowelEnv(EnvBase):
             affine=self.image_affine,
         )
         nib.save(nif, cache_dir / "cumulative_path_mask.nii.gz")
-
-        # Save the tracking history
         tracking_history_path = cache_dir / "tracking_history.npy"
         np.savetxt(tracking_history_path, np.fliplr(self.tracking_path_history), fmt="%d")
-
-        # PyVista visualization
         plotter = pv.Plotter()
         plotter.add_volume(self.seg.numpy(force=True) * 10, cmap="viridis", opacity="linear")
         if self._current_subject_data.get("colon") is not None:
             plotter.add_volume(
-                self._current_subject_data["colon"] * 80,
-                cmap="viridis",
-                opacity="linear",
+                self._current_subject_data["colon"] * 80, cmap="viridis", opacity="linear"
             )
         if self._current_subject_data.get("duodenum") is not None:
             plotter.add_volume(
-                self._current_subject_data["duodenum"] * 120,
-                cmap="viridis",
-                opacity="linear",
+                self._current_subject_data["duodenum"] * 120, cmap="viridis", opacity="linear"
             )
         plotter.add_volume(self.reward_map, opacity="linear")
-        lines: pv.PolyData = pv.lines_from_points(self.tracking_path_history)
+        lines: pv.PolyData = pv.lines_from_points(
+            np.array(self.tracking_path_history)
+        )  # Ensure numpy array
         plotter.add_mesh(lines, line_width=10, cmap="viridis")
         plotter.add_points(np.array(self.tracking_path_history), color="blue", point_size=10)
         plotter.show_axes()
         plotter.export_html(cache_dir / "path.html")
 
     def _calculate_reward(self, action_vox: Coords, next_pos_vox: Coords) -> Tuple[float, Tuple]:
-        """Calculate the reward for the current step."""
-
         rt = torch.tensor(0.0, device=self.device, dtype=self.dtype)
-        # --- 1. Zero movement or goes out of the segmentation penalty ---
         if not any(action_vox):
-            rt -= self.config.r_zero_mov  # self.config.r_zero_mov
+            rt -= self.config.r_zero_mov
             return rt, ()
-
         if not self._is_valid_pos(next_pos_vox) or not self.allowed_area[next_pos_vox]:
             rt -= self.config.r_zero_mov
             return rt, ()
 
-        # Set of voxels S on the line segment
         S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
-
-        # --- 2. GDT-based reward ---
         next_gdt_val = self.gdt[next_pos_vox]
-        # # If there is some progress
         if next_gdt_val > self.max_gdt_achieved:
             delta = next_gdt_val - self.max_gdt_achieved
-            # Penalty if too large, reward if within margins
             rt += self.config.r_val2 * (
                 (1 + delta / self.config.gdt_max_increase_theta)
                 if delta < self.config.gdt_max_increase_theta
                 else -1
             )
-
-            # 3.3 Add shaping
             if delta < self.config.gdt_max_increase_theta:
                 dist_before = abs(self.goal_gdt - self.max_gdt_achieved)
                 dist_after = abs(self.goal_gdt - next_gdt_val)
-
-                # Compute potentials
                 phi_before = -dist_before
                 phi_after = -dist_after
                 shaping_bonus = self.config.gamma * phi_after - phi_before
                 rt += 1 + shaping_bonus / self.config.gdt_max_increase_theta
             else:
                 rt -= 1
-
-
-            # Additional coverage reward... rt+=
             self.max_gdt_achieved = next_gdt_val
 
         phi_t = self.current_step_count - 1
         phi_tp1 = self.current_step_count
         rt += self.config.gamma * phi_tp1 - phi_t
-        # 2.5 Peaks-based reward
-        # rt += self.reward_map[S].sum() * self.config.r_peaks
-        # print(f"{self.reward_map[S].sum()=}")
-        # Discard the reward for visited nodes
-        # self.reward_map[S] = 0
-        # print(f"Reward claimed!", flush=True)
 
-        # Reward for coverage (based on Dice within the segmentation on the path)
-        wall_map = self.wall_map[S].max()
-        rt -= self.config.r_val2 * wall_map  # 10
+        wall_val = self.wall_map[S].max()
+        rt -= self.config.r_val2 * wall_val
+        self.wall_gradient += wall_val
 
-        self.wall_stuff = wall_map
-        self.wall_gradient += wall_map
-        # Will modify self.gt_path_vol in place and we can use it for coverage
-        coverage = self.cumulative_path_mask[S]
-        # rt += ((coverage == 0).sum() / len(S[0])) * self.config.r_val2
-
-        # Simple problem, toy problem might be a good way to solve this
-
-        # --- 3. Wall-based penalty ---
-        # --- 4. Revisiting penalty ---
+        coverage = self.cumulative_path_mask[S][3:]
         rt -= self.config.r_val1 * coverage.any()
-        # print(f"{self.cumulative_path_mask[S].sum()=}")
-
         rt -= self.config.r_val1 * self.seg[next_pos_vox].logical_not()
         return rt, S
 
     def _reset(
         self, tensordict: Optional[TensorDictBase] = None, must_load_new_subject=False
     ) -> TensorDictBase:
-        """
-        Resets the environment. Loads next subject if needed based on episode count.
-        Will raise exceptions if loading or initialization fails.
-        Selects appropriate GDT based on start_choice.
-        """
-        # Check if the *previous* state indicated 'done'. If so, an episode just finished.
-        # Increment counter only if an episode actually finished.
         if self._is_done.all():
             self.episodes_on_current_subject += 1
-
-        # Decide whether to load a new subject
         if (
             self.episodes_on_current_subject >= self.num_episodes_per_sample
             or must_load_new_subject
         ):
-            # Reset counter *before* loading, as loading signifies starting fresh
             self.episodes_on_current_subject = 0
             self._load_next_subject()
-            self.goal = (0, 0, 0)
+            self.goal = (0, 0, 0)  # Should be set by start_choice logic
 
-        # --- Reset internal episode state ---
         self.current_step_count = 0
         self.current_distance_traveled = 0
         self.wall_gradient = 0
 
-        # Reset goal marker (some slight indication that the goal is there)
-        # self.wall_map[self.goal] = 0
-        # self.image[self.goal] = 0
-
-        # Determine start position and select appropriate GDT
-        rand = random.randint(0, 9)  # 40-40-20
+        rand = random.randint(0, 9)
         if rand < 4:
-            # Start at the beginning
             self.current_pos_vox = self.start_coord
             self.goal = self.end_coord
             self.gdt = self.gdt_start
         elif rand < 7:
-            # Start at a random local peak
             self.current_pos_vox = tuple(random.choice(self.local_peaks))
-            # Randomly go in either direction
             if self.episodes_on_current_subject % 2:
                 self.goal = self.end_coord
                 self.gdt = self.gdt_start
@@ -480,18 +398,11 @@ class SmallBowelEnv(EnvBase):
                 self.goal = self.start_coord
                 self.gdt = self.gdt_end
         else:
-            # Start at the end
             self.current_pos_vox = self.end_coord
             self.goal = self.start_coord
             self.gdt = self.gdt_end
-            
         self._start = self.current_pos_vox
 
-        # Reset goal marker (small indication to add prior information to the tracker to move towards)
-        # self.wall_map[self.goal] = -2
-        # self.image[self.goal] = 2
-
-        # Initialize path tracking
         self.cumulative_path_mask.zero_()
         draw_path_sphere_2(
             self.cumulative_path_mask,
@@ -500,25 +411,26 @@ class SmallBowelEnv(EnvBase):
             self.gt_path_vol,
         )
 
-        # Initialize various tracking variables
-        self.tracking_path_history = [self.current_pos_vox]
-        self.cum_reward = torch.tensor(0., dtype=self.dtype, device=self.device)
+        # Initialize position_history
+        for _ in range(POSITION_HISTORY_LENGTH - 1):
+            self.position_history.append((0, 0, 0))  # Pad
+        self.position_history.append(self.current_pos_vox)  # Add current position
+
+        self.tracking_path_history = [self.current_pos_vox]  # Full path tracking
+        self.cum_reward = torch.tensor(0.0, dtype=self.dtype, device=self.device)
         self.max_gdt_achieved = self.gdt[self.current_pos_vox]
         self.goal_gdt = self.gdt.max()
         self.reward_map[tuple(self.local_peaks.T)] = 1
-        err_text = f"{self.max_gdt_achieved} at {self.current_pos_vox}, {self.start_coord}, {self.end_coord}, {self.local_peaks}, ID: {self._current_subject_data['id']}, {self.gdt.shape}"
-        assert self.max_gdt_achieved >= 0 and np.isfinite(self.max_gdt_achieved), (
-            f"Expected GDT>=0, got {err_text}"
-        )
+        assert self.max_gdt_achieved >= 0 and np.isfinite(self.max_gdt_achieved), "GDT error."
 
-        # --- Get Initial State Patches ---
-        obs_dict = self._get_state_patches()
-
-        # --- Update Internal Done Flag and Package Output ---
+        actor_obs_data = self._get_actor_observation()
         self._is_done.fill_(False)
         reset_td = TensorDict(
             {
-                "actor": obs_dict.unsqueeze(0),  # Add batch dim
+                "actor": {
+                    "patches": actor_obs_data["patches"].unsqueeze(0),
+                    "position_sequence": actor_obs_data["position_sequence"].unsqueeze(0),
+                },
                 "done": self._is_done.clone(),
                 "terminated": self._is_done.clone(),
                 "truncated": self._is_done.clone(),
@@ -539,83 +451,47 @@ class SmallBowelEnv(EnvBase):
         return reset_td
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        """Performs a step. Assumes env is initialized. Raises exceptions on errors."""
         self.current_step_count += 1
-        # Extract Action
         action_normalized = tensordict.get("action").squeeze(0)
-
-        # Map Action
         action_mapped = (2 * action_normalized - 1) * self.config.max_step_vox
         action_vox_delta = action_mapped.cpu().round().int().tolist()
 
-        # Execute Step Logic
+        # Agent heading update logic removed as it's not part of observation anymore
+
         next_pos_vox = (
             self.current_pos_vox[0] + action_vox_delta[0],
             self.current_pos_vox[1] + action_vox_delta[1],
             self.current_pos_vox[2] + action_vox_delta[2],
         )
-
-        # Check validity and update cumulative path
         is_next_pos_valid_seg = self._is_valid_pos(next_pos_vox)
-
-        # if not is_next_pos_valid_seg or not self.seg_np[next_pos_vox]:
-        #     # Bounce in the opposite direction in the X axis
-        #     next_pos_vox = (
-        #         self.current_pos_vox[0] + action_vox_delta[0],
-        #         self.current_pos_vox[1] + action_vox_delta[1],
-        #         self.current_pos_vox[2] - action_vox_delta[2],
-        #     )
-
-        #     # If the next position is invalid, bounce back to the current position
-        #     is_next_pos_valid_seg = self._is_valid_pos(next_pos_vox)
-        #     if not is_next_pos_valid_seg or not self.seg_np[next_pos_vox]:
-        #         next_pos_vox = self.current_pos_vox
-        #         action_vox_delta = (0, 0, 0)
-        #         is_next_pos_valid_seg = True
-
-        # Calculate reward (needs to be before moving to the next pos)
         reward, S = self._calculate_reward(action_vox_delta, next_pos_vox)
-        # Check Termination Conditions
+
         terminated, truncated = False, False
         termination_reason = TReason.NOT_DONE
         if self.current_step_count >= self.config.max_episode_steps:
             truncated, termination_reason = True, TReason.MAX_STEPS
-        elif (
-            not is_next_pos_valid_seg or not self.allowed_area[next_pos_vox]
-        ):  # and self.seg_np[next_pos_vox]
-            # reward -= (-self.config.r_zero_mov * 2)
+        elif not is_next_pos_valid_seg or not self.allowed_area[next_pos_vox]:
             terminated, termination_reason = True, TReason.OOB
         elif dist(next_pos_vox, self.goal) < self.config.cumulative_path_radius_vox:
             terminated, termination_reason = True, TReason.GOAL_REACHED
         else:
             self.current_distance_traveled += dist(next_pos_vox, self.current_pos_vox)
-            self.tracking_path_history.append(next_pos_vox)
+            self.tracking_path_history.append(next_pos_vox)  # Full path
             self.current_pos_vox = next_pos_vox
-            draw_path_sphere_2(
-                self.cumulative_path_mask,
-                S,
-                self.dilation,
-                self.gt_path_vol,
-            )
-        truncated = terminated
+            # Update position_history for LSTM
+            self.position_history.append(self.current_pos_vox)
+
+            draw_path_sphere_2(self.cumulative_path_mask, S, self.dilation, self.gt_path_vol)
+
+        # truncated = terminated  # For now, treat all terminations as truncations for PPO
         done = terminated | truncated
 
-        # Final Reward Adjustment
-        final_coverage = 0
+        final_coverage = 0.0
         if done:
-            # TODO: Fix the shaping with coverage
             final_coverage = self._get_final_coverage()
-            # Tbh that should only be added as a fine-tuning stage or something,
-            # it must be messing with the value function
-            # reward += self.config.r_final * (
-            #     final_coverage
-            #     if termination_reason == "reached_goal"
-            #     else (final_coverage - 1)
-            # )
             if termination_reason == TReason.GOAL_REACHED:
                 reward += self.config.r_final
-                # else:
-                #     reward -= self.config.r_final * 0.5
+                # Coverage-based adjustment
                 if final_coverage < 0.05:
                     multiplier = 0.0
                 elif final_coverage < 0.2:
@@ -628,72 +504,73 @@ class SmallBowelEnv(EnvBase):
                     multiplier = 0.8
                 else:
                     multiplier = 1.0
-                reward -= self.config.r_final / 4 * (1 - multiplier)
-            rew = self.cum_reward + reward
+                reward += self.config.r_final * multiplier
+            else:
+                reward -= self.config.r_final * (1 - multiplier)
+
+            rew_val = (self.cum_reward + reward).item()  # .item() for float
             print(
-                "[DEBUG] Episode ended; "
-                f"steps={self.current_step_count:04}; "
-                f"cumulative_reward={'[bold green]' if rew > 0 else '[bold red]'}{rew:>10.1f}{'[/bold green]' if rew > 0 else '[/bold red]'}; "
-                f"reason={'[bold green]' if termination_reason is TReason.GOAL_REACHED else '[bold red]'}{termination_reason}{'[/bold green]' if termination_reason is TReason.GOAL_REACHED else '[/bold red]'}; "
-                f"final_coverage={final_coverage:.3f}; {id(self.start_coord)} {id(self.end_coord)} {id(self.goal)} {dist(self.current_pos_vox, self.goal):.0f}/{dist(self._start, self.goal):.0f}"
+                f"[DEBUG] Episode ended; steps={self.current_step_count:04}; "
+                f"cumulative_reward={'[bold green]' if rew_val > 0 else '[bold red]'}{rew_val:>10.1f}{'[/bold green]' if rew_val > 0 else '[/bold red]'}; "
+                f"reason={'[bold green]' if termination_reason is TReason.GOAL_REACHED else '[bold red]'}{termination_reason.name}{'[/bold green]' if termination_reason is TReason.GOAL_REACHED else '[/bold red]'}; "
+                f"final_coverage={final_coverage:.3f}; dist_to_goal={dist(self.current_pos_vox, self.goal):.0f}/{dist(self._start, self.goal):.0f}"
             )
 
-        # Get Next State Patches
-        next_obs_dict = self._get_state_patches()
-        # print(reward, S)
-
-        # Update Internal Done Flag
+        next_actor_obs_data = self._get_actor_observation()
         self._is_done[:] = done
         self.cum_reward += reward
-        _reward = reward.view_as(self._is_done)  # B, T, 1
-    
+        _reward_tensor = reward.view_as(self._is_done)
+
         output_td = TensorDict(
             {
-                "actor": next_obs_dict.unsqueeze(0),
-                "reward": _reward,
-                "done": torch.as_tensor(done, device=self.device).view_as(_reward),
-                "terminated": torch.as_tensor(terminated, device=self.device).view_as(_reward),
-                "truncated": torch.as_tensor(truncated, device=self.device).view_as(_reward),
+                "actor": {
+                    "patches": next_actor_obs_data["patches"].unsqueeze(0),
+                    "position_sequence": next_actor_obs_data["position_sequence"].unsqueeze(0),
+                },
+                "reward": _reward_tensor,
+                "done": torch.as_tensor(done, device=self.device).view_as(_reward_tensor),
+                "terminated": torch.as_tensor(terminated, device=self.device).view_as(
+                    _reward_tensor
+                ),
+                "truncated": torch.as_tensor(truncated, device=self.device).view_as(_reward_tensor),
                 "info": {
                     "final_coverage": torch.as_tensor(
                         final_coverage, device=self.device, dtype=self.dtype
-                    ).view_as(_reward)
+                    ).view_as(_reward_tensor)
                     if done
                     else self.placeholder_zeros.clone(),
                     "final_step_count": torch.as_tensor(
                         self.current_step_count, device=self.device, dtype=self.dtype
-                    ).view_as(_reward)
+                    ).view_as(_reward_tensor)
                     if done
-                    else torch.as_tensor(0, device=self.device, dtype=self.dtype).view_as(_reward),
+                    else torch.as_tensor(0, device=self.device, dtype=self.dtype).view_as(
+                        _reward_tensor
+                    ),
                     "final_length": torch.as_tensor(
                         self.current_distance_traveled if done else 0,
                         device=self.device,
                         dtype=self.dtype,
-                    ).view_as(_reward),
+                    ).view_as(_reward_tensor),
                     "final_wall_gradient": torch.as_tensor(
-                        self.wall_gradient if done else 0,
-                        device=self.device,
-                        dtype=self.dtype,
-                    ).view_as(_reward),
-                    "total_reward": self.cum_reward.view_as(_reward)
+                        self.wall_gradient if done else 0, device=self.device, dtype=self.dtype
+                    ).view_as(_reward_tensor),
+                    "total_reward": self.cum_reward.view_as(_reward_tensor)
                     if done
                     else self.placeholder_zeros.clone(),
                     "max_gdt_achieved": torch.as_tensor(
                         self.max_gdt_achieved, dtype=self.dtype, device=self.device
-                    ).view_as(_reward),
+                    ).view_as(_reward_tensor),
                 },
             },
             batch_size=self.batch_size,
             device=self.device,
         )
-
         return output_td
 
     def _set_seed(self, seed: Optional[int] = None):
-        """Sets the seed for the environment's random number generator(s)."""
         random.seed(seed)
         np.random.seed(seed)
-        self.rng = torch.manual_seed(seed)
+        # self.rng = torch.manual_seed(seed) # rng not used, but good practice if it were
 
 
 def get_first(x):
@@ -707,10 +584,8 @@ def make_sb_env(
     num_episodes_per_sample: int = 32,
     check_env: bool = False,
 ):
-    """Factory function for the integrated SmallBowelEnv."""
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     num_workers = getattr(config, "num_workers", 0)
     dataset_iterator = cycle(
         DataLoader(
@@ -723,16 +598,13 @@ def make_sb_env(
             persistent_workers=num_workers > 0,
         )
     )
-
     env = SmallBowelEnv(
         config=config,
         dataset_iterator=dataset_iterator,
         num_episodes_per_sample=num_episodes_per_sample,
         device=device,
-        batch_size=[1],  # Explicitly set batch size
+        batch_size=torch.Size([1]),  # Explicitly set batch size as list
     )
-
     if check_env:
         check_env_specs(env)
-
     return env
