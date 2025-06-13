@@ -85,7 +85,7 @@ def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False
     # Wrap CNN base to extract "actor" obs and output "dist_params"
     actor_cnn_module = TensorDictModule(
         module=actor_cnn_base,
-        in_keys=["actor"],  # Input key from observation spec
+        in_keys=["actor", "aux"],  # Input key from observation spec
         # out_keys=["dist_params"],  # Intermediate output key
         out_keys=["alpha", "beta"],  # Intermediate output key
     )

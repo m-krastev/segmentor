@@ -427,10 +427,8 @@ class SmallBowelEnv(EnvBase):
         self._is_done.fill_(False)
         reset_td = TensorDict(
             {
-                "actor": {
-                    "patches": actor_obs_data["patches"].unsqueeze(0),
-                    "position_sequence": actor_obs_data["position_sequence"].unsqueeze(0),
-                },
+                "actor": actor_obs_data["patches"].unsqueeze(0),
+                "aux": actor_obs_data["position_sequence"].unsqueeze(0),
                 "done": self._is_done.clone(),
                 "terminated": self._is_done.clone(),
                 "truncated": self._is_done.clone(),
@@ -523,10 +521,8 @@ class SmallBowelEnv(EnvBase):
 
         output_td = TensorDict(
             {
-                "actor": {
-                    "patches": next_actor_obs_data["patches"].unsqueeze(0),
-                    "position_sequence": next_actor_obs_data["position_sequence"].unsqueeze(0),
-                },
+                "actor": next_actor_obs_data["patches"].unsqueeze(0),
+                "aux": next_actor_obs_data["position_sequence"].unsqueeze(0),
                 "reward": _reward_tensor,
                 "done": torch.as_tensor(done, device=self.device).view_as(_reward_tensor),
                 "terminated": torch.as_tensor(terminated, device=self.device).view_as(
