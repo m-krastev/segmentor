@@ -103,9 +103,10 @@ class SmallBowelEnv(EnvBase):
         self.num_episodes_per_sample = num_episodes_per_sample
         self.episodes_on_current_subject = num_episodes_per_sample  # Counter for episodes on current subject, set so that it refreshes at next step
 
-        self.dtype = (
-            torch.bfloat16 if config.use_bfloat16 and self.device.type == "cuda" else torch.float32
-        )
+        # self.dtype = (
+        #     torch.bfloat16 if config.use_bfloat16 and self.device.type == "cuda" else torch.float32
+        # )
+        self.dtype = torch.float32
         # --- Define Specs ---
         # Set the specs *after* calling super().__init__
         self.observation_spec = Composite(
@@ -152,7 +153,7 @@ class SmallBowelEnv(EnvBase):
         # --- TorchRL Internal State Flags (per-batch element) ---
         self._is_done = torch.zeros(*self.batch_size, 1, dtype=torch.bool, device=self.device)
 
-        self.ct_transform = torch.compile(ClipTransform(30 - 150, 30 + 150))  # -150, 250
+        self.ct_transform = torch.compile(ClipTransform(-150, 250))  # -120, 180
         self.wall_transform = torch.compile(ClipTransform(0.0, 0.1))
 
         # Placeholder tensor
@@ -220,10 +221,10 @@ class SmallBowelEnv(EnvBase):
         Updates the environment's internal data stores using data from the dataset.
         """
         # Store tensors directly
-        self.image = self.ct_transform(torch.from_numpy(image).to(self.device)).to(self.dtype)
+        self.image = self.ct_transform(torch.from_numpy(image).to(self.device, self.dtype))
         # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
         # save_nifti(np.transpose(self.image.numpy(force=True), (2,1,0)), f"image_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
-        self.seg = torch.from_numpy(seg).to(device=self.device, dtype=torch.uint8)
+        self.seg = torch.from_numpy(seg).to(device=self.device)
         self.seg = self.dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze()
         # self.seg[tuple(start_coord)] = 3
         # self.seg[tuple(end_coord)] = 3
@@ -284,13 +285,13 @@ class SmallBowelEnv(EnvBase):
         # gt_path_patch = get_patch(
         #     self.gt_path_vol, self.current_pos_vox, self.config.patch_size_vox
         # )
-        # save_nifti(np.transpose(img_patch.numpy(force=True), (2,1,0)), "img_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
-        # save_nifti(np.transpose(wall_patch.numpy(force=True), (2,1,0)), "wall_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
+        # save_nifti(np.transpose(img_patch.float().numpy(force=True), (2,1,0)), "img_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
+        # save_nifti(np.transpose(img_patch_1.numpy(force=True), (2,1,0)), "wall_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
         # save_nifti(np.transpose(cum_path_patch.numpy(force=True), (2,1,0)), "cum_path_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
-        # exit()
         # Stack patches (for critic you can add another dimension and just index into it)
         # actor_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
         actor_state = torch.stack([img_patch_2, img_patch_1, img_patch, cum_path_patch], axis=0)
+        # print(actor_state.dtype, self.dtype, self.wall_map.dtype, self.image.dtype, self.cumulative_path_mask.dtype)
         return actor_state
 
     def _is_valid_pos(self, pos_vox: Coords) -> bool:
@@ -562,12 +563,11 @@ class SmallBowelEnv(EnvBase):
                 self.dilation,
                 self.gt_path_vol,
             )
-        terminated = truncated | terminated
         done = terminated | truncated
 
         # Final Reward Adjustment
         final_coverage = 0
-        if done:
+        if terminated:
             # TODO: Fix the shaping with coverage
             final_coverage = self._get_final_coverage()
             # Tbh that should only be added as a fine-tuning stage or something,
@@ -577,30 +577,31 @@ class SmallBowelEnv(EnvBase):
             #     if termination_reason == "reached_goal"
             #     else (final_coverage - 1)
             # )
+            if final_coverage < 0.03:
+                multiplier = 0.0
+            elif final_coverage < 0.2:
+                multiplier = 0.2
+            elif final_coverage < 0.4:
+                multiplier = 0.4
+            elif final_coverage < 0.5:
+                multiplier = 0.6
+            elif final_coverage < 0.7:
+                multiplier = 0.8
+            else:
+                multiplier = 1.0
             if termination_reason == TReason.GOAL_REACHED:
+                # reward += self.config.r_final # This worked before
                 reward += self.config.r_final
-                # else:
-                #     reward -= self.config.r_final * 0.5
-                if final_coverage < 0.05:
-                    multiplier = 0.0
-                elif final_coverage < 0.2:
-                    multiplier = 0.2
-                elif final_coverage < 0.4:
-                    multiplier = 0.4
-                elif final_coverage < 0.5:
-                    multiplier = 0.6
-                elif final_coverage < 0.7:
-                    multiplier = 0.8
-                else:
-                    multiplier = 1.0
-                reward -= self.config.r_final / 4 * (1 - multiplier)
+                reward += self.config.r_final * (multiplier)
+            else:
+                reward += self.config.r_final * (multiplier-1)
             rew = self.cum_reward + reward
             print(
                 "[DEBUG] Episode ended; "
                 f"steps={self.current_step_count:04}; "
                 f"cumulative_reward={'[bold green]' if rew > 0 else '[bold red]'}{rew:>10.1f}{'[/bold green]' if rew > 0 else '[/bold red]'}; "
                 f"reason={'[bold green]' if termination_reason is TReason.GOAL_REACHED else '[bold red]'}{termination_reason}{'[/bold green]' if termination_reason is TReason.GOAL_REACHED else '[/bold red]'}; "
-                f"final_coverage={final_coverage:.3f}; {id(self.start_coord)} {id(self.end_coord)} {id(self.goal)} {dist(self.current_pos_vox, self.goal):.0f}/{dist(self._start, self.goal):.0f}"
+                f"final_coverage={final_coverage:.3f}; {id(self.start_coord)} {id(self.end_coord)} {id(self.goal)} {dist(next_pos_vox, self.goal):.0f}/{dist(self._start, self.goal):.0f}"
             )
 
         # Get Next State Patches
@@ -611,7 +612,7 @@ class SmallBowelEnv(EnvBase):
         self._is_done[:] = done
         self.cum_reward += reward
         _reward = reward.view_as(self._is_done)  # B, T, 1
-
+        # exit()
         output_td = TensorDict(
             {
                 "actor": next_obs_dict.unsqueeze(0),

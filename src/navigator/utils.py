@@ -537,14 +537,21 @@ class BinaryDilation3D(nn.Module):
 
         if self.kernel_shape == "star":
             # Base 3x3x3 kernel for the spatial dimensions
-            kernel = torch.zeros(1, 1, 3, 3, 3, dtype=torch.float)
-            kernel[0, 0, 1, 1, 1] = 1.0  # Center
-            kernel[0, 0, 0, 1, 1] = 1.0  # Down (Z-axis)
-            kernel[0, 0, 2, 1, 1] = 1.0  # Up (Z-axis)
-            kernel[0, 0, 1, 0, 1] = 1.0  # Left (Y-axis)
-            kernel[0, 0, 1, 2, 1] = 1.0  # Right (Y-axis)
-            kernel[0, 0, 1, 1, 0] = 1.0  # Backward (X-axis)
-            kernel[0, 0, 1, 1, 2] = 1.0  # Forward (X-axis)
+            # kernel = torch.zeros(1, 1, 3, 3, 3)
+            # kernel[0, 0, 1, 1, 1] = 1.0  # Center
+            # kernel[0, 0, 0, 1, 1] = 1.0  # Down (Z-axis)
+            # kernel[0, 0, 2, 1, 1] = 1.0  # Up (Z-axis)
+            # kernel[0, 0, 1, 0, 1] = 1.0  # Left (Y-axis)
+            # kernel[0, 0, 1, 2, 1] = 1.0  # Right (Y-axis)
+            # kernel[0, 0, 1, 1, 0] = 1.0  # Backward (X-axis)
+            # kernel[0, 0, 1, 1, 2] = 1.0  # Forward (X-axis)
+            kernel = torch.tensor(
+                [
+                    [[0, 1, 0], [1, 1, 1], [0, 1, 0]],  # 3x3x3 kernel for dilation
+                    [[0, 1, 0], [1, 1., 1], [0, 1, 0]],
+                    [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
+                ],
+            ).unsqueeze(0).unsqueeze(0)
             self.padding = (1, 1, 1)  # Padding for a 3x3x3 kernel
 
         elif self.kernel_shape == "cube":
@@ -563,7 +570,7 @@ class BinaryDilation3D(nn.Module):
                 )
 
             # Base kernel for the spatial dimensions
-            kernel = torch.ones(1, 1, k_d, k_h, k_w, dtype=torch.float32)
+            kernel = torch.ones(1, 1, k_d, k_h, k_w)
 
         else:
             raise ValueError(
@@ -586,8 +593,9 @@ class BinaryDilation3D(nn.Module):
             torch.Tensor: The dilated binary tensor (float 0.0 or 1.0).
         """
         # Ensure input is float for convolution operation
-        if not torch.is_floating_point(binary_volume):
-            binary_volume = binary_volume.float()
+        dtype = self.dilation_kernel.dtype
+        og_dtype = binary_volume.dtype
+        binary_volume = binary_volume.to(dtype)
 
         # The dilation_kernel (shape 1, 1, kD, kH, kW) will be broadcast by F.conv3d
         dilated_volume_sum = F.conv3d(
@@ -596,7 +604,7 @@ class BinaryDilation3D(nn.Module):
 
         # Threshold the result: any sum > 0 means there was at least one '1' under the kernel
         # Convert the boolean result back to float (0.0 or 1.0)
-        dilated_volume = (dilated_volume_sum > 0).float()
+        dilated_volume = (dilated_volume_sum > 0).to(og_dtype)
 
         return dilated_volume
 

@@ -1,51 +1,49 @@
 # train.py (rewrite significantly)
+import os
+from contextlib import nullcontext as nc
+
+import numpy as np
 import torch
 import torch.optim as optim
-import numpy as np
-import wandb  # Assuming wandb is used
-import os
-from tqdm import tqdm
+from tensordict.nn import set_composite_lp_aggregate
 
 # Use IterableDataset concept
 from torch.utils.data import DataLoader
 
 # TorchRL components
 from torchrl.collectors import (
-    SyncDataCollector,
-    MultiSyncDataCollector,
     MultiaSyncDataCollector,
+    MultiSyncDataCollector,
+    SyncDataCollector,
 )
 from torchrl.data import (
-    TensorDictReplayBuffer,
     LazyTensorStorage,
     SamplerWithoutReplacement,
+    TensorDictReplayBuffer,
 )
+from torchrl.data.replay_buffers import ReplayBuffer
+from torchrl.envs import GymEnv
+from torchrl.envs.utils import ExplorationType, set_exploration_type
+from torchrl.modules import ProbabilisticActor, ValueOperator
 from torchrl.objectives import (
     ClipPPOLoss,
-    KLPENPPOLoss,
-    TD3Loss,
-    SoftUpdate,
     HardUpdate,
+    KLPENPPOLoss,
+    SoftUpdate,
+    TD3Loss,
 )
 from torchrl.objectives.value import GAE
-from torchrl.envs.utils import ExplorationType, set_exploration_type
-from tensordict.nn import set_composite_lp_aggregate
-from torchrl.envs import GymEnv
-from torchrl.modules import ProbabilisticActor, ValueOperator
-from torchrl.collectors import SyncDataCollector
-from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage
-from torchrl.objectives import ClipPPOLoss
-from torchrl.objectives.value import GAE
-from torchrl.envs.utils import ExplorationType, set_exploration_type
-from torchrl.data.replay_buffers import ReplayBuffer
+from tqdm import tqdm
+
+import wandb  # Assuming wandb is used
 
 # Your project components
 from .config import Config
 from .dataset import SmallBowelDataset  # Keep for creating the iterator
-from .models.dummy_net import make_dummy_actor_critic # Import the dummy network factory
 
 # Use the TorchRL environment wrapper and factory function
-from .environment import make_sb_env, SmallBowelEnv
+from .environment import SmallBowelEnv, make_sb_env
+from .models.dummy_net import make_dummy_actor_critic  # Import the dummy network factory
 
 torch.set_float32_matmul_precision("medium")
 torch._dynamo.config.capture_dynamic_output_shape_ops = True
@@ -95,7 +93,7 @@ def validation_loop_torchrl(
             must_load_new_subject = True
             for _ in range(10):
                 try:
-                    with torch.autocast(device.type, enabled=config.use_bfloat16):
+                    with torch.autocast(device.type, torch.bfloat16) if config.use_bfloat16 else nc():
                         # Reset the environment for the current subject
                         # This will load the new subject's data
                         tensordict = val_env._reset(
@@ -284,6 +282,7 @@ def train_torchrl(
         storing_device=device,
         max_frames_per_traj=config.max_episode_steps,  # Max steps per episode trajectory
         # num_threads=8
+        cudagraph_policy=True,
     )
 
     # --- Replay Buffer ---
@@ -313,22 +312,24 @@ def train_torchrl(
         current_frames = batch_data.numel()  # Number of steps collected in this batch
         pbar.update(current_frames)
         collected_frames += current_frames
-
+        if config.use_bfloat16:
+            batch_data["actor"].to(torch.bfloat16)
         # --- PPO Update Phase ---
         actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
         for _ in range(config.update_epochs):
             batch_data = batch_data.reshape(-1)
 
-            with (
-                torch.no_grad(),
-                torch.autocast(device.type, enabled=config.use_bfloat16),
-            ):
-                if not qnets:
+            if not qnets:
+                # Compute advantages
+                with (
+                    torch.no_grad(),
+                    torch.autocast(device.type, torch.bfloat16) if config.use_bfloat16 else nc(),
+                ):
                     adv_module(batch_data)
 
             for j in range(0, config.frames_per_batch, batch_size):
                 minibatch = batch_data[j : j + batch_size]
-                with torch.autocast(device.type, enabled=config.use_bfloat16):
+                with torch.autocast(device.type, torch.bfloat16) if config.use_bfloat16 else nc():
                     loss_dict = loss_module(minibatch)
 
                 if qnets:

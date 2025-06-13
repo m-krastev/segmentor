@@ -86,7 +86,6 @@ def main():
         dummy_input = TensorDict(
             {
                 "actor": torch.zeros(1, in_act, *config.patch_size_vox, device=config.device),
-                "critic": torch.zeros(1, in_crit, *config.patch_size_vox, device=config.device),
                 "action": torch.zeros(1, 3, device=config.device)
             },
         )
