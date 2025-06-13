@@ -111,7 +111,7 @@ class SmallBowelEnv(EnvBase):
         # Set the specs *after* calling super().__init__
         self.observation_spec = Composite(
             actor=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 4, *config.patch_size_vox]),
+                shape=torch.Size([*batch_size, 3, *config.patch_size_vox]),
                 dtype=self.dtype,
             ),
             info=Composite(
@@ -161,7 +161,7 @@ class SmallBowelEnv(EnvBase):
         self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=self.dtype)
         self.dilation = torch.compile(
             torch.nn.Sequential(*[
-                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 2 + 1)
+                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox)
             ])
         ).to(self.device)
         self.maxarea_dilation = torch.compile(
@@ -222,12 +222,8 @@ class SmallBowelEnv(EnvBase):
         """
         # Store tensors directly
         self.image = self.ct_transform(torch.from_numpy(image).to(self.device, self.dtype))
-        # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
-        # save_nifti(np.transpose(self.image.numpy(force=True), (2,1,0)), f"image_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
         self.seg = torch.from_numpy(seg).to(device=self.device)
-        self.seg = self.dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze()
-        # self.seg[tuple(start_coord)] = 3
-        # self.seg[tuple(end_coord)] = 3
+        # self.seg = self.dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze()
         # save_nifti(np.transpose(self.seg.numpy(force=True), (2,1,0)), f"seg_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
         self.seg_volume = torch.sum(self.seg).item()
         self.wall_map = self.wall_transform(
@@ -236,7 +232,7 @@ class SmallBowelEnv(EnvBase):
         self.gdt_start = gdt_start
         self.gdt_end = gdt_end
         self.cumulative_path_mask = torch.zeros_like(self.seg)
-        self.local_peaks = local_peaks[30:-30]  # Restrict to center positions TODO: Remove sometime
+        self.local_peaks = local_peaks[:-30]  # Restrict to center positions TODO: Remove sometime
         # self.image[tuple(local_peaks.T)] = 0.5
         self.reward_map = np.zeros_like(self.gdt_start, dtype=np.uint8)
         self.allowed_area = (
@@ -272,26 +268,17 @@ class SmallBowelEnv(EnvBase):
         img_patch = get_patch(
             self.image, self.tracking_path_history[-1 % _], self.config.patch_size_vox
         )
-        # wall_patch = get_patch(self.wall_map, self.current_pos_vox, self.config.patch_size_vox)
-        img_patch_1 = get_patch(
-            self.image, self.tracking_path_history[-2 % _], self.config.patch_size_vox
-        )
-        img_patch_2 = get_patch(
-            self.image, self.tracking_path_history[-3 % _], self.config.patch_size_vox
-        )
+        wall_patch = get_patch(self.wall_map, self.current_pos_vox, self.config.patch_size_vox)
         cum_path_patch = get_patch(
             self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
         )
         # gt_path_patch = get_patch(
         #     self.gt_path_vol, self.current_pos_vox, self.config.patch_size_vox
         # )
-        # save_nifti(np.transpose(img_patch.float().numpy(force=True), (2,1,0)), "img_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
-        # save_nifti(np.transpose(img_patch_1.numpy(force=True), (2,1,0)), "wall_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
         # save_nifti(np.transpose(cum_path_patch.numpy(force=True), (2,1,0)), "cum_path_patch.nii.gz", affine=self.image_affine, spacing=self.spacing[::-1])
         # Stack patches (for critic you can add another dimension and just index into it)
         # actor_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
-        actor_state = torch.stack([img_patch_2, img_patch_1, img_patch, cum_path_patch], axis=0)
-        # print(actor_state.dtype, self.dtype, self.wall_map.dtype, self.image.dtype, self.cumulative_path_mask.dtype)
+        actor_state = torch.stack([img_patch, wall_patch, cum_path_patch], axis=0)
         return actor_state
 
     def _is_valid_pos(self, pos_vox: Coords) -> bool:
@@ -374,31 +361,31 @@ class SmallBowelEnv(EnvBase):
             if delta < self.config.gdt_max_increase_theta:
                 # Base reward
                 rt += self.config.r_val2 * delta / self.config.gdt_max_increase_theta
-                # 3.3 Add shaping
-                dist_before = abs(self.goal_gdt - self.max_gdt_achieved)
-                dist_after = abs(self.goal_gdt - next_gdt_val)
+                # # 3.3 Add shaping
+                # dist_before = abs(self.goal_gdt - self.max_gdt_achieved)
+                # dist_after = abs(self.goal_gdt - next_gdt_val)
 
-                # Compute potentials
-                phi_before = -dist_before
-                phi_after = -dist_after
-                shaping_bonus = self.config.gamma * phi_after - phi_before
-                rt += 1 + shaping_bonus / self.config.gdt_max_increase_theta
+                # # Compute potentials
+                # phi_before = -dist_before
+                # phi_after = -dist_after
+                # shaping_bonus = self.config.gamma * phi_after - phi_before
+                # rt += 1 + shaping_bonus / self.config.gdt_max_increase_theta
             else:
                 rt -= self.config.r_val2
 
             # Additional coverage reward... rt+=
             self.max_gdt_achieved = next_gdt_val
 
-        phi_t = self.current_step_count - 1
-        phi_tp1 = self.current_step_count
-        rt += self.config.gamma * phi_tp1 - phi_t
+        # phi_t = self.current_step_count - 1
+        # phi_tp1 = self.current_step_count
+        # rt += self.config.gamma * phi_tp1 - phi_t
 
         # 2.5 Peaks-based reward
         # rt += self.reward_map[S].sum() * self.config.r_peaks
         # self.reward_map[S] = 0
 
         # --- 3. Wall-based penalty ---
-        wall_map = self.wall_map[S].max()
+        wall_map = self.wall_map[S].mean()
         rt -= self.config.r_val2 * wall_map
 
         self.wall_gradient += wall_map
@@ -407,10 +394,10 @@ class SmallBowelEnv(EnvBase):
         # S always includes the start pixels, (and due to the dilation the pixels surrounding the start will always be white, therefore invoking this reward consistently)
 
         # --- 4. Revisiting penalty ---
-        # coverage = self.cumulative_path_mask[S][3:]
-        # rt -= self.config.r_val3 * coverage.any()
+        coverage = self.cumulative_path_mask[S][3:]
+        rt -= self.config.r_val1 * coverage.any()
 
-        rt -= self.config.r_val3 * self.seg[next_pos_vox].logical_not()
+        rt -= self.config.r_val1 * self.seg[next_pos_vox].logical_not()
         return rt, S
 
     def _reset(
@@ -577,21 +564,22 @@ class SmallBowelEnv(EnvBase):
             #     if termination_reason == "reached_goal"
             #     else (final_coverage - 1)
             # )
-            if final_coverage < 0.03:
-                multiplier = 0.0
-            elif final_coverage < 0.2:
-                multiplier = 0.2
-            elif final_coverage < 0.4:
-                multiplier = 0.4
-            elif final_coverage < 0.5:
-                multiplier = 0.6
-            elif final_coverage < 0.7:
-                multiplier = 0.8
-            else:
-                multiplier = 1.0
+            # if final_coverage < 0.03:
+            #     multiplier = 0.0
+            # elif final_coverage < 0.2:
+            #     multiplier = 0.2
+            # elif final_coverage < 0.4:
+            #     multiplier = 0.4
+            # elif final_coverage < 0.5:
+            #     multiplier = 0.6
+            # elif final_coverage < 0.7:
+            #     multiplier = 0.8
+            # else:
+            #     multiplier = 1.0
+            multiplier = final_coverage
             if termination_reason == TReason.GOAL_REACHED:
                 # reward += self.config.r_final # This worked before
-                reward += self.config.r_final
+                # reward += self.config.r_final
                 reward += self.config.r_final * (multiplier)
             else:
                 reward += self.config.r_final * (multiplier-1)

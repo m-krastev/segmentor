@@ -35,11 +35,11 @@ class Config:
 
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
-    patch_size_mm: int = 16
-    max_step_displacement_mm: float = 4
+    patch_size_mm: int = 40
+    max_step_displacement_mm: float = 6
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 1024
-    cumulative_path_radius_mm: float = 6.0 # Tbh the bowel should literally be no more than 2 cm in diameter
+    cumulative_path_radius_mm: float = 4.0 # Tbh the bowel should literally be no more than 2 cm in diameter
     # wall_map_sigmas: Tuple[int, ...] = (1, 3)
     wall_map_sigmas: Tuple[int, ...] = (1,)
 
@@ -49,10 +49,9 @@ class Config:
     # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
     r_zero_mov: float = 100.0
-    r_final: float = 1000 # Seems to work okay with 1600
+    r_final: float = 100 # Seems to work okay with 1600
     # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
-    r_val3 = 3
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
@@ -61,15 +60,15 @@ class Config:
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 20_000_000
     # Size of the buffer to store transitions
-    frames_per_batch: int = 4096
-    learning_rate: float = 5e-5
+    frames_per_batch: int = 2048
+    learning_rate: float = 1e-5
     batch_size: int = 256  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
-    gamma: float = 0.995
+    gamma: float = 0.99
     gae_lambda: float = 0.95
-    clip_epsilon: float = 0.1
+    clip_epsilon: float = 0.2
     # Entropy coefficient for exploration (higher values encourage exploration)
-    ent_coef: float = 0.01
+    ent_coef: float = 0.001
     # Value function coefficient (higher values encourage accurate value estimates)
     vf_coef: float = 0.5
     num_workers: int = 1

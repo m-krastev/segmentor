@@ -78,7 +78,7 @@ def main():
     print(f"Val indices \t({len(dataset)-train_size:0>2}/{len(dataset)}): {val_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in val_indices]}")
 
     # --- Models ---
-    in_act, in_crit = 4, 4
+    in_act, in_crit = 3, 3
     policy_module, value_module = create_ppo_modules(config, config.device, qnets=config.td3, in_channels_actor=in_act, in_channels_critic=in_crit)
 
     # Init the lazy modules

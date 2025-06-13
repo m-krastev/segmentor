@@ -18,10 +18,9 @@ class ConvBlock(nn.Module):
             in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False
         )
         self.norm = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
-        self.activation = nn.GELU()
 
     def forward(self, x):
-        return self.activation(self.norm(self.conv(x)))
+        return F.relu(self.norm(self.conv(x)))
 
 class CriticNetwork(nn.Module):
     """
@@ -39,21 +38,23 @@ class CriticNetwork(nn.Module):
             input_channels: Number of input channels (default: 4)
         """
         super().__init__()
-
-        self.conv1 = ConvBlock(input_channels, 16, kernel_size=3, padding=1, num_groups=8)
-        self.pool1 = nn.Conv3d(16, 16, kernel_size=2, stride=2, padding=0, bias=False)
-        self.conv2 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=16)
-        self.pool2 = nn.Conv3d(32, 32, kernel_size=2, stride=2, padding=0, bias=False)
-        self.conv3 = ConvBlock(32, 64, kernel_size=3, padding=1, num_groups=32)
-        self.pool3 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.conv0 = ConvBlock(input_channels, 8, kernel_size=3, padding=1, num_groups=8)
+        self.conv1 = ConvBlock(8, 16, kernel_size=3, padding=1, num_groups=4)
+        self.pool1 = nn.MaxPool3d(2, 2)
+        self.conv2 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=8)
+        self.pool2 = nn.MaxPool3d(2, 2)
+        self.conv3 = ConvBlock(32, 64, kernel_size=3, padding=1, num_groups=16)
+        self.pool3 = nn.MaxPool3d(2, 2)
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.LazyLinear(512),
-            nn.Linear(512, 1),
+            nn.LazyLinear(64),
+            nn.GroupNorm(8, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
         )
 
     def forward(self, x):
-        x = self.conv1(x)
+        x = self.conv1(self.conv0(x))
         x = self.pool1(x)
         x = self.conv2(x)
         x = self.pool2(x)
