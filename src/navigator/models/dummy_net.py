@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from tensordict.nn import TensorDictModule
-from tensordict.nn.common import set_interaction_type
 from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec, DiscreteTensorSpec
 
 class DummyActor(nn.Module):

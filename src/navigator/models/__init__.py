@@ -85,7 +85,7 @@ def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False
     # Wrap CNN base to extract "actor" obs and output "dist_params"
     actor_cnn_module = TensorDictModule(
         module=actor_cnn_base,
-        in_keys=["actor", "aux"],  # Input key from observation spec
+        in_keys=["actor", "aux", "mask"],  # Input key from observation spec
         # out_keys=["dist_params"],  # Intermediate output key
         out_keys=["alpha", "beta"],  # Intermediate output key
     )
@@ -135,7 +135,7 @@ def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False
     # Wrap critic using ValueOperator
     value_module = ValueOperator(
         module=critic_base,
-        in_keys=["actor", "action"] if qnets else ["actor"],  # Input key from observation spec
+        in_keys=["actor", "aux", "mask", "action"] if qnets else ["actor", "aux", "mask"],  # Input key from observation spec
         out_keys=["state_action_value" if qnets else "state_value"],  # Standard output key for value estimates
     ).to(device)
 

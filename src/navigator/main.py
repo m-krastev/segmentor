@@ -86,6 +86,7 @@ def main():
             {
                 "actor": torch.zeros(1, 4, *config.patch_size_vox, device=config.device),
                 "aux": torch.zeros(1, 128, 3, device=config.device),
+                "mask": torch.zeros(1, 128, device=config.device),
                 "action": torch.zeros(1, 3, device=config.device)
             },
         )

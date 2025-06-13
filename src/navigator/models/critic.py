@@ -41,22 +41,16 @@ class CriticNetwork(nn.Module):
         self.pool3 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
         self.cnn_flatten = nn.Flatten()
 
-        # LSTM for position sequence
-        self.lstm_hidden_size = lstm_hidden_size
-        self.num_lstm_layers = num_lstm_layers
-        self.lstm = nn.LSTM(
-            input_size=3,
-            hidden_size=256,
-            num_layers=self.num_lstm_layers,
-            batch_first=True
-        )
-        
+        self.embed = nn.Linear(3, 128)
+        encoder_layer = nn.TransformerEncoderLayer(128, 8, 512, dropout=0.05, batch_first=True)
+        self.attention = nn.TransformerEncoder(encoder_layer, 2)
+
         # Combined feature processing
         # LazyLinear adapts to: flattened_cnn_features + lstm_hidden_size
         self.feature_extractor_fc = nn.LazyLinear(256)
         self.value_head = nn.Linear(256, 1)
 
-    def forward(self, patches: torch.Tensor, position_sequence: torch.Tensor) -> torch.Tensor:
+    def forward(self, patches: torch.Tensor, position_sequence: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         # Process patches with CNN
         x_conv = self.conv1(patches)
         x_conv = self.pool1(x_conv)
@@ -66,10 +60,9 @@ class CriticNetwork(nn.Module):
         x_conv = self.pool3(x_conv)
         cnn_features = self.cnn_flatten(x_conv)
 
-        # Process position sequence with LSTM
-        lstm_out, _ = self.lstm(position_sequence)
-        lstm_features = lstm_out[:, -1, :] # Shape (B, lstm_hidden_size)
-        
+        # We take the output of the last time step
+        lstm_features = self.attention(self.embed(position_sequence), src_key_padding_mask=mask).mean(dim=1)
+
         # Concatenate CNN features and LSTM features
         combined_features = torch.cat((cnn_features, lstm_features), dim=1)
         
