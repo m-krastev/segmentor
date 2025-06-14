@@ -49,6 +49,7 @@ class CriticNetwork(nn.Module):
         self.head = nn.Sequential(
             nn.Flatten(),
             nn.LazyLinear(512),
+            nn.GELU(),
             nn.Linear(512, 1),
         )
 

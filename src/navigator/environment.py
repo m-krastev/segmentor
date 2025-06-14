@@ -160,7 +160,7 @@ class SmallBowelEnv(EnvBase):
         self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=self.dtype)
         self.dilation = torch.compile(
             torch.nn.Sequential(*[
-                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox // 2 + 1)
+                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox)
             ])
         ).to(self.device)
         self.maxarea_dilation = torch.compile(
@@ -562,12 +562,11 @@ class SmallBowelEnv(EnvBase):
                 self.dilation,
                 self.gt_path_vol,
             )
-        terminated = truncated | terminated
         done = terminated | truncated
 
         # Final Reward Adjustment
         final_coverage = 0
-        if done:
+        if terminated:
             # TODO: Fix the shaping with coverage
             final_coverage = self._get_final_coverage()
             # Tbh that should only be added as a fine-tuning stage or something,
@@ -593,14 +592,14 @@ class SmallBowelEnv(EnvBase):
                     multiplier = 0.8
                 else:
                     multiplier = 1.0
-                reward -= self.config.r_final / 4 * (1 - multiplier)
+                reward -= self.config.r_final * (1 - multiplier)
             rew = self.cum_reward + reward
             print(
                 "[DEBUG] Episode ended; "
                 f"steps={self.current_step_count:04}; "
                 f"cumulative_reward={'[bold green]' if rew > 0 else '[bold red]'}{rew:>10.1f}{'[/bold green]' if rew > 0 else '[/bold red]'}; "
                 f"reason={'[bold green]' if termination_reason is TReason.GOAL_REACHED else '[bold red]'}{termination_reason}{'[/bold green]' if termination_reason is TReason.GOAL_REACHED else '[/bold red]'}; "
-                f"final_coverage={final_coverage:.3f}; {id(self.start_coord)} {id(self.end_coord)} {id(self.goal)} {dist(self.current_pos_vox, self.goal):.0f}/{dist(self._start, self.goal):.0f}"
+                f"final_coverage={final_coverage:.3f}; {id(self.start_coord)} {id(self.end_coord)} {id(self.goal)} {dist(next_pos_vox, self.goal):.0f}/{dist(self._start, self.goal):.0f}"
             )
 
         # Get Next State Patches

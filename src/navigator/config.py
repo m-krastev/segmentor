@@ -29,17 +29,17 @@ class Config:
 
     # --- Wandb Logging ---
     track_wandb: bool = True  # Flag to enable/disable wandb
-    wandb_project_name: str = "SmallBowelTorchRL"
+    wandb_project_name: str = "toydata"
     wandb_entity: Optional[str] = None  # Your wandb username or team name (optional)
     wandb_run_name: Optional[str] = None  # Optional run name, defaults to auto-generated
 
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
     patch_size_mm: int = 16
-    max_step_displacement_mm: float = 4
+    max_step_displacement_mm: float = 6
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 1024
-    cumulative_path_radius_mm: float = 6.0 # Tbh the bowel should literally be no more than 2 cm in diameter
+    cumulative_path_radius_mm: float = 3.0 # Tbh the bowel should literally be no more than 2 cm in diameter
     # wall_map_sigmas: Tuple[int, ...] = (1, 3)
     wall_map_sigmas: Tuple[int, ...] = (1,)
 
