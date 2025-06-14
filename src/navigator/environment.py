@@ -103,9 +103,7 @@ class SmallBowelEnv(EnvBase):
         self.num_episodes_per_sample = num_episodes_per_sample
         self.episodes_on_current_subject = num_episodes_per_sample  # Counter for episodes on current subject, set so that it refreshes at next step
 
-        self.dtype = (
-            torch.bfloat16 if config.use_bfloat16 and self.device.type == "cuda" else torch.float32
-        )
+        self.dtype = torch.float32
         # --- Define Specs ---
         # Set the specs *after* calling super().__init__
         self.observation_spec = Composite(
