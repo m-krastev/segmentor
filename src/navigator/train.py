@@ -281,6 +281,7 @@ def train_torchrl(
         storing_device=device,
         max_frames_per_traj=config.max_episode_steps,  # Max steps per episode trajectory
         # num_threads=8
+        # cudagraph_policy=True # <- This screws with the distribution, don't use.
     )
 
     # --- Replay Buffer ---

@@ -17,10 +17,130 @@ from skimage.draw import disk
 from skimage.filters import meijering
 from torch import nn
 
-# import FastGeodis as fg
+# try:
+#     # It is quite fast, but unfortunately does not seem to approximate a good GDT as the function from skfmm
+#     import FastGeodis as fg
+
+#     def compute_gdt(
+#         image: np.ndarray,
+#         start: Tuple[int, int, int],
+#         spacing: Tuple[float, ...] = None,
+#         device="cuda",
+#     ):
+#         if spacing is None:
+#             spacing = (1.0, 1.0, 1.0)
+#         image = torch.from_numpy(image).to(device)
+#         image = image.unsqueeze(0).unsqueeze(0).to(device)
+#         mask = torch.ones_like(image, dtype=torch.uint8)
+#         mask[0, 0, start[0], start[1], start[2]] = 0
+#         v, lambd = 1e10, 1
+#         geodesic_dist = fg.signed_generalised_geodesic3d(
+#             image.float(), mask.float(), spacing, v, lambd
+#         )
+#         return geodesic_dist.squeeze().cpu().numpy()
+
+# except Exception:
+#     pass
+
 
 type Coords = Tuple[int, ...]
 type Spacing = Tuple[float, ...]
+
+try:
+    from functools import partial
+    import jax
+    from jax import numpy as jnp
+
+    @partial(jax.jit, static_argnames=("max_npoints",))
+    def line_nd_jax(
+        start: jnp.ndarray, stop: jnp.ndarray, max_npoints: int
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        JAX-compatible function to get voxels along a 3D line segment using Bresenham's algorithm.
+
+        NOTE: This function is JIT-able using a fixed `max_npoints` to ensure the output shape is static.
+
+        # The minimum number of points along the segment is `int(ceil(max(abs(stop - start))))`
+
+        Args:
+            start: JAX array representing the start coordinates (e.g., shape (D,)).
+            stop: JAX array representing the stop coordinates (e.g., shape (D,)).
+            max_npoints: A static integer indicating the maximum possible number of points the line could have. This defines the fixed size of the output array.
+
+        Returns:
+            A tuple containing:
+            - padded_coords: A JAX array of shape (D, max_npoints) with the line coordinates.
+        """
+        return jnp.round(jnp.linspace(start, stop, num=max_npoints, endpoint=False).T).astype(int)
+
+    @partial(jax.jit, inline=True)
+    def draw_sphere_point(
+        array_3d: jnp.ndarray, center_point: jnp.ndarray, radius: int, fill_value=1
+    ):
+        """
+        Fills a 3D NumPy array with a specified value inside a sphere.
+
+        Args:
+            array_3d (np.ndarray): The 3D NumPy array (e.g., of zeros) to modify.
+                                    Its shape defines the coordinate space.
+            center_point (tuple or list or np.ndarray): The (x, y, z) coordinates
+                                                        of the sphere's center.
+            radius (float or int): The radius of the sphere.
+            fill_value (int or float, optional): The value to fill inside the sphere.
+                                                Defaults to 1.
+
+        Returns:
+            np.ndarray: The modified 3D array with the sphere filled.
+        """
+        # Generate 1D coordinate arrays for each axis using np.ogrid
+        # These will broadcast to the full 3D shape for the distance calculation
+        # We take the actual shape of the input array for coordinates
+        x, y, z = jnp.ogrid[0 : array_3d.shape[0], 0 : array_3d.shape[1], 0 : array_3d.shape[2]]
+
+        # Calculate the squared distance from the sphere's center for every point
+        distance_squared = (
+            (x - center_point[0]) ** 2 + (y - center_point[1]) ** 2 + (z - center_point[2]) ** 2
+        )
+        # Fill the array at the appropriate places using the boolean mask
+        return jnp.where(distance_squared <= radius**2, fill_value, array_3d)
+
+    @partial(jax.jit)
+    def _draw_path_sphere(array_3d: jnp.ndarray, pts: tuple, radius: int, fill_value=True):
+        """
+        Draws a sphere around each point in the path defined by `pts` in the 3D array.
+
+        Args:
+            array_3d: The 3D array to update.
+            pts: A tuple containing the coordinates of the path points (e.g., from `line_nd_jax`).
+            radius: The radius for the spheres to be drawn around each point.
+            fill_value: The value to fill inside the spheres.
+        """
+        # Draw spheres around each point in the path
+        new_array_3d = jax.lax.scan(
+            lambda a, p: (draw_sphere_point(a, p, radius, fill_value), p),
+            jnp.zeros_like(array_3d),
+            jnp.asarray(pts).T,
+        )[0]
+        # Update the original array with the new spheres
+        updated_array_3d = jnp.maximum(array_3d, new_array_3d)
+        return updated_array_3d, new_array_3d
+
+    def draw_path_sphere(
+        cumulative_path_mask: torch.Tensor,
+        voxels: tuple[Coords],
+        radius: int = 1,
+        zero_buffer: torch.Tensor = None,
+        fill_value=True,
+    ):
+        arr_jax = jnp.from_dlpack(cumulative_path_mask)
+        arr, _ = _draw_path_sphere(arr_jax, voxels, radius, fill_value)
+        if zero_buffer is not None:
+            zero_buffer.fill_(torch.from_dlpack(_))
+        return torch.from_dlpack(arr)
+
+except Exception:
+    pass
+
 
 try:
     import cupy
@@ -228,20 +348,6 @@ def compute_gdt(
     return gdt
 
 
-# def compute_gdt(
-#     image: np.ndarray, start: Tuple[int, int, int], spacing: Tuple[float, ...] = None, device="cuda"
-# ):
-#     if spacing is None:
-#         spacing = (1.0, 1.0, 1.0)
-#     image = torch.from_numpy(image).to(device)
-#     image = image.unsqueeze(0).unsqueeze(0).to(device)
-#     mask = torch.ones_like(image, dtype=torch.uint8)
-#     mask[0, 0, start[0], start[1], start[2]] = 0
-#     v, lambd = 1e10, 1
-#     geodesic_dist = fg.signed_generalised_geodesic3d(image.float(), mask.float(), spacing, v, lambd)
-#     return geodesic_dist.squeeze().cpu().numpy()
-
-
 def compute_wall_map(
     image: np.ndarray, sigmas: list[int] = (1, 3), black_ridges=True, **kwargs
 ) -> np.ndarray:
@@ -284,7 +390,10 @@ def draw_path_sphere(
                 if rr.size > 0 and cc.size > 0:
                     cumulative_path_mask[current_z, rr, cc] = 1.0
 
-def draw_sphere_point(array_3d: torch.Tensor, center_point: tuple[int, ...], radius: int, fill_value=1):
+
+def draw_sphere_point(
+    array_3d: torch.Tensor, center_point: tuple[int, ...], radius: int, fill_value=1
+):
     """
     Fills a 3D NumPy array with a specified value inside a sphere.
 
@@ -312,6 +421,7 @@ def draw_sphere_point(array_3d: torch.Tensor, center_point: tuple[int, ...], rad
     # Fill the array at the appropriate places using the boolean mask
     return torch.where(distance_squared <= radius**2, fill_value, array_3d)
 
+
 def draw_path_sphere(array_3d: torch.Tensor, pts: tuple, radius: int, fill_value=True):
     """
     Draws a sphere around each point in the path defined by `pts` in the 3D array.
@@ -333,28 +443,28 @@ def draw_path_sphere(array_3d: torch.Tensor, pts: tuple, radius: int, fill_value
 
 def draw_path_sphere_2(
     cumulative_path_mask: torch.Tensor,
-    voxels: tuple[tuple],
+    voxels: tuple[Coords],
     dilation_module: nn.Module,
     zero_buffer: torch.Tensor = None,
+    zero_out=True,
 ):
     """
     Draw and dilate a sphere in a mask at the specified location.
 
     Args:
-        cumulative_path_mask: Tensor to modify
+        cumulative_path_mask: Tensor to modify (Assuming DHW)
         voxels: List of voxel coordinates to draw (should be indexable)
         dilation_module: Dilation module to use for dilation
         zero_buffer: Optional buffer for dilation [will be zeroed and can be used]
     """
-    zero_buffer = (
-        zero_buffer.zero_() if zero_buffer is not None else torch.zeros_like(cumulative_path_mask)
-    )
+    if zero_buffer is None:
+        zero_buffer = torch.zeros_like(cumulative_path_mask)
+    if zero_buffer is not None and zero_out:
+        zero_buffer.zero_()
 
     zero_buffer[voxels] = 1.0
-    zero_buffer = zero_buffer.unsqueeze(0).unsqueeze(0)
-    zero_buffer = dilation_module(zero_buffer)
-    zero_buffer = zero_buffer.squeeze(0).squeeze(0)
-    cumulative_path_mask[:] = torch.maximum(cumulative_path_mask, zero_buffer)
+    zero_buffer = dilation_module(zero_buffer.unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
+    cumulative_path_mask = torch.maximum(cumulative_path_mask, zero_buffer)
     return cumulative_path_mask
 
 
@@ -489,6 +599,7 @@ class ClipTransform(torch.nn.Module):
     Clip the input tensor to a specified range.
     The output is then normalized to the range [0, 1].
     """
+
     def __init__(self, _min=-1, _max=1):
         super().__init__()
         self.min = _min
@@ -501,7 +612,8 @@ class ClipTransform(torch.nn.Module):
 class StandardizeTransform(torch.nn.Module):
     def forward(self, x):
         mean, std = torch.std_mean()
-        return (x-mean)/std
+        return (x - mean) / std
+
 
 class BinaryDilation3D(nn.Module):
     """
@@ -537,7 +649,7 @@ class BinaryDilation3D(nn.Module):
 
         if self.kernel_shape == "star":
             # Base 3x3x3 kernel for the spatial dimensions
-            kernel = torch.zeros(1, 1, 3, 3, 3, dtype=torch.float)
+            kernel = torch.zeros(1, 1, 3, 3, 3)
             kernel[0, 0, 1, 1, 1] = 1.0  # Center
             kernel[0, 0, 0, 1, 1] = 1.0  # Down (Z-axis)
             kernel[0, 0, 2, 1, 1] = 1.0  # Up (Z-axis)
@@ -563,7 +675,7 @@ class BinaryDilation3D(nn.Module):
                 )
 
             # Base kernel for the spatial dimensions
-            kernel = torch.ones(1, 1, k_d, k_h, k_w, dtype=torch.float32)
+            kernel = torch.ones(1, 1, k_d, k_h, k_w)
 
         else:
             raise ValueError(
@@ -586,8 +698,9 @@ class BinaryDilation3D(nn.Module):
             torch.Tensor: The dilated binary tensor (float 0.0 or 1.0).
         """
         # Ensure input is float for convolution operation
-        if not torch.is_floating_point(binary_volume):
-            binary_volume = binary_volume.float()
+        dtype = self.dilation_kernel.dtype
+        og_dtype = binary_volume.dtype
+        binary_volume = binary_volume.to(dtype)
 
         # The dilation_kernel (shape 1, 1, kD, kH, kW) will be broadcast by F.conv3d
         dilated_volume_sum = F.conv3d(
@@ -596,7 +709,7 @@ class BinaryDilation3D(nn.Module):
 
         # Threshold the result: any sum > 0 means there was at least one '1' under the kernel
         # Convert the boolean result back to float (0.0 or 1.0)
-        dilated_volume = (dilated_volume_sum > 0).float()
+        dilated_volume = (dilated_volume_sum > 0).to(og_dtype)
 
         return dilated_volume
 

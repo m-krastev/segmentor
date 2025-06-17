@@ -30,7 +30,7 @@ class Config:
 
     # --- Wandb Logging ---
     track_wandb: bool = True  # Flag to enable/disable wandb
-    wandb_project_name: str = "toydata"
+    wandb_project_name: str = "toydata" # toydata
     wandb_entity: Optional[str] = None  # Your wandb username or team name (optional)
     wandb_run_name: Optional[str] = None  # Optional run name, defaults to auto-generated
 
@@ -50,7 +50,7 @@ class Config:
     # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
     r_zero_mov: float = 100.0
-    r_final: float = 1000 # Seems to work okay with 1600
+    r_final: float = 100 # Seems to work okay with 1600
     # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
     r_val3 = 3

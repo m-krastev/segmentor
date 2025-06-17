@@ -98,72 +98,74 @@ class SmallBowelEnv(EnvBase):
 
         # --- Store Config and Iterator ---
         self.config = config
-        self.dataset_iterator = dataset_iterator  # Store the iterator
-        self._current_subject_data = None  # Store data for the current subject
-        self.num_episodes_per_sample = num_episodes_per_sample
-        self.episodes_on_current_subject = num_episodes_per_sample  # Counter for episodes on current subject, set so that it refreshes at next step
+        self.dataset_iterator = dataset_iterator
+        self._current_subject_data = None
+        self.num_episodes_per_sample = num_episodes_per_sample // batch_size.numel()
+        # Counter for episodes on current subject, set so that it refreshes at next step
+        self.episodes_on_current_subject = num_episodes_per_sample // batch_size.numel()
 
-        self.dtype = torch.float32
         # --- Define Specs ---
         # Set the specs *after* calling super().__init__
-        self.observation_spec = Composite(
-            actor=UnboundedContinuous(
-                shape=torch.Size([*batch_size, 4, *config.patch_size_vox]),
-                dtype=self.dtype,
-            ),
-            info=Composite(
-                final_coverage=BoundedContinuous(
-                    low=0, high=1, shape=torch.Size([*batch_size, 1]), dtype=self.dtype
-                ),
-                final_step_count=UnboundedContinuous(
-                    shape=torch.Size([*batch_size, 1]), dtype=self.dtype
-                ),
-                final_length=UnboundedContinuous(
-                    shape=torch.Size([*batch_size, 1]), dtype=self.dtype
-                ),
-                final_wall_gradient=UnboundedContinuous(
-                    shape=torch.Size([*batch_size, 1]), dtype=self.dtype
-                ),
-                total_reward=UnboundedContinuous(
-                    shape=torch.Size([*batch_size, 1]), dtype=self.dtype
-                ),
-                max_gdt_achieved=UnboundedContinuous(
-                    shape=torch.Size([*batch_size, 1]), dtype=self.dtype
-                ),
-            ),
-            shape=batch_size,
-        )
-        self.action_spec = BoundedContinuous(
-            low=0, high=1, shape=torch.Size([*batch_size, 3]), dtype=self.dtype
-        )
-        self.reward_spec = UnboundedContinuous(shape=torch.Size([*batch_size, 1]), dtype=self.dtype)
-        self.done_spec = Composite(
-            done=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool),
-            terminated=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool),
-            truncated=Binary(shape=torch.Size([*batch_size, 1]), dtype=torch.bool),
-            shape=batch_size,
-        )
-
-        self.max_gdt_achieved = 0.0
-        self.cum_reward = torch.tensor(0.0, device=self.device, dtype=self.dtype)
+        self.dtype = torch.float32
+        self._set_specs()
 
         # --- TorchRL Internal State Flags (per-batch element) ---
         self._is_done = torch.zeros(*self.batch_size, 1, dtype=torch.bool, device=self.device)
 
+        # Transforms
         self.ct_transform = torch.compile(ClipTransform(30 - 150, 30 + 150))  # -150, 250
         self.wall_transform = torch.compile(ClipTransform(0.0, 0.1))
+        self.dilation = torch.compile(
+            torch.nn.Sequential(*[BinaryDilation3D()] * config.cumulative_path_radius_vox)
+        )
+        self.dilation.to(self.device)
+        self.maxarea_dilation = torch.compile(torch.nn.Sequential(*[BinaryDilation3D()] * 10))
+        self.maxarea_dilation.to(self.device)
 
         # Placeholder tensor
         self.zeros_patch = torch.zeros(self.config.patch_size_vox, device=self.device)
         self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=self.dtype)
-        self.dilation = torch.compile(
-            torch.nn.Sequential(*[
-                BinaryDilation3D() for _ in range(config.cumulative_path_radius_vox)
-            ])
-        ).to(self.device)
-        self.maxarea_dilation = torch.compile(
-            torch.nn.Sequential(*[BinaryDilation3D() for _ in range(10)])
-        ).to(self.device)
+
+    def _set_specs(self):
+        self.observation_spec = Composite(
+            actor=UnboundedContinuous(
+                shape=torch.Size([*self.batch_size, 4, *self.config.patch_size_vox]),
+                dtype=self.dtype,
+            ),
+            info=Composite(
+                final_coverage=BoundedContinuous(
+                    low=0, high=1, shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
+                ),
+                final_step_count=UnboundedContinuous(
+                    shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
+                ),
+                final_length=UnboundedContinuous(
+                    shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
+                ),
+                final_wall_gradient=UnboundedContinuous(
+                    shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
+                ),
+                total_reward=UnboundedContinuous(
+                    shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
+                ),
+                max_gdt_achieved=UnboundedContinuous(
+                    shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
+                ),
+            ),
+            shape=self.batch_size,
+        )
+        self.action_spec = BoundedContinuous(
+            low=0, high=1, shape=torch.Size([*self.batch_size, 3]), dtype=self.dtype
+        )
+        self.reward_spec = UnboundedContinuous(
+            shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
+        )
+        self.done_spec = Composite(
+            done=Binary(shape=torch.Size([*self.batch_size, 1]), dtype=torch.bool),
+            terminated=Binary(shape=torch.Size([*self.batch_size, 1]), dtype=torch.bool),
+            truncated=Binary(shape=torch.Size([*self.batch_size, 1]), dtype=torch.bool),
+            shape=self.batch_size,
+        )
 
     # --- Data Loading Method (Internal) ---
     def _load_next_subject(self) -> bool:
@@ -386,6 +388,7 @@ class SmallBowelEnv(EnvBase):
             # Additional coverage reward... rt+=
             self.max_gdt_achieved = next_gdt_val
 
+        # Survival reward
         phi_t = self.current_step_count - 1
         phi_tp1 = self.current_step_count
         rt += self.config.gamma * phi_tp1 - phi_t
@@ -393,6 +396,8 @@ class SmallBowelEnv(EnvBase):
         # 2.5 Peaks-based reward
         # rt += self.reward_map[S].sum() * self.config.r_peaks
         # self.reward_map[S] = 0
+        # Reward for coverage (based on intersection within the segmentation on the path): ...
+        # rt += self.config.r_val3 * (self.seg[S] * (1-self.cumulative_path_mask[S])).float().mean()
 
         # --- 3. Wall-based penalty ---
         wall_map = self.wall_map[S].max()
@@ -400,13 +405,13 @@ class SmallBowelEnv(EnvBase):
 
         self.wall_gradient += wall_map
 
-        # Reward for coverage (based on Dice within the segmentation on the path)
-        # S always includes the start pixels, (and due to the dilation the pixels surrounding the start will always be white, therefore invoking this reward consistently)
 
+        # S always includes the start pixels, (and due to the dilation the pixels surrounding the start will always be white, therefore invoking this reward consistently)
         # --- 4. Revisiting penalty ---
-        # coverage = self.cumulative_path_mask[S][3:]
+        # coverage = self.cumulative_path_mask[S][self.config.cumulative_path_radius_vox+1:]
         # rt -= self.config.r_val3 * coverage.any()
 
+        # --- 5. Out of seg penalty
         rt -= self.config.r_val3 * self.seg[next_pos_vox].logical_not()
         return rt, S
 
@@ -554,7 +559,7 @@ class SmallBowelEnv(EnvBase):
             self.current_distance_traveled += dist(next_pos_vox, self.current_pos_vox)
             self.tracking_path_history.append(next_pos_vox)
             self.current_pos_vox = next_pos_vox
-            draw_path_sphere_2(
+            self.cumulative_path_mask = draw_path_sphere_2(
                 self.cumulative_path_mask,
                 S,
                 self.dilation,
@@ -574,23 +579,27 @@ class SmallBowelEnv(EnvBase):
             #     if termination_reason == "reached_goal"
             #     else (final_coverage - 1)
             # )
+            if final_coverage < 0.05:
+                multiplier = 0.0
+            elif final_coverage < 0.2:
+                multiplier = 0.2
+            elif final_coverage < 0.4:
+                multiplier = 0.4
+            elif final_coverage < 0.5:
+                multiplier = 0.6
+            elif final_coverage < 0.7:
+                multiplier = 0.8
+            else:
+                multiplier = 1.0
             if termination_reason == TReason.GOAL_REACHED:
-                reward += self.config.r_final
                 # else:
                 #     reward -= self.config.r_final * 0.5
-                if final_coverage < 0.05:
-                    multiplier = 0.0
-                elif final_coverage < 0.2:
-                    multiplier = 0.2
-                elif final_coverage < 0.4:
-                    multiplier = 0.4
-                elif final_coverage < 0.5:
-                    multiplier = 0.6
-                elif final_coverage < 0.7:
-                    multiplier = 0.8
-                else:
-                    multiplier = 1.0
-                reward -= self.config.r_final * (1 - multiplier)
+                reward += self.config.r_final * multiplier
+            else:
+                reward -= self.config.r_final * (1-multiplier)
+            # else:
+            #     reward += self.config.r_final * (multiplier-1)
+                # reward -= self.config.r_final * (1 - multiplier)
             rew = self.cum_reward + reward
             print(
                 "[DEBUG] Episode ended; "
@@ -691,7 +700,6 @@ def make_sb_env(
         dataset_iterator=dataset_iterator,
         num_episodes_per_sample=num_episodes_per_sample,
         device=device,
-        batch_size=[1],  # Explicitly set batch size
     )
 
     if check_env:
