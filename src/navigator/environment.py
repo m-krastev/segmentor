@@ -271,13 +271,13 @@ class SmallBowelEnv(EnvBase):
         img_patch = get_patch(
             self.image, self.tracking_path_history[-1 % _], self.config.patch_size_vox
         )
-        # wall_patch = get_patch(self.wall_map, self.current_pos_vox, self.config.patch_size_vox)
+        wall_patch = get_patch(self.wall_map, self.current_pos_vox, self.config.patch_size_vox)
         img_patch_1 = get_patch(
             self.image, self.tracking_path_history[-2 % _], self.config.patch_size_vox
         )
-        img_patch_2 = get_patch(
-            self.image, self.tracking_path_history[-3 % _], self.config.patch_size_vox
-        )
+        # img_patch_2 = get_patch(
+        #     self.image, self.tracking_path_history[-3 % _], self.config.patch_size_vox
+        # )
         cum_path_patch = get_patch(
             self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
         )
@@ -290,7 +290,7 @@ class SmallBowelEnv(EnvBase):
         # exit()
         # Stack patches (for critic you can add another dimension and just index into it)
         # actor_state = torch.stack([img_patch, wall_patch, cum_path_patch], dim=0)
-        actor_state = torch.stack([img_patch_2, img_patch_1, img_patch, cum_path_patch], axis=0)
+        actor_state = torch.stack([img_patch_1, img_patch, wall_patch, cum_path_patch], axis=0)
         return actor_state
 
     def _is_valid_pos(self, pos_vox: Coords) -> bool:
@@ -397,7 +397,7 @@ class SmallBowelEnv(EnvBase):
         # rt += self.reward_map[S].sum() * self.config.r_peaks
         # self.reward_map[S] = 0
         # Reward for coverage (based on intersection within the segmentation on the path): ...
-        # rt += self.config.r_val3 * (self.seg[S] * (1-self.cumulative_path_mask[S])).float().mean()
+        rt += self.config.r_val3 * (self.seg[S] * (1-self.cumulative_path_mask[S])).float().mean()
 
         # --- 3. Wall-based penalty ---
         wall_map = self.wall_map[S].max()
@@ -408,8 +408,8 @@ class SmallBowelEnv(EnvBase):
 
         # S always includes the start pixels, (and due to the dilation the pixels surrounding the start will always be white, therefore invoking this reward consistently)
         # --- 4. Revisiting penalty ---
-        # coverage = self.cumulative_path_mask[S][self.config.cumulative_path_radius_vox+1:]
-        # rt -= self.config.r_val3 * coverage.any()
+        coverage = self.cumulative_path_mask[S][self.config.cumulative_path_radius_vox+1:]
+        rt -= self.config.r_val3 * coverage.any()
 
         # --- 5. Out of seg penalty
         rt -= self.config.r_val3 * self.seg[next_pos_vox].logical_not()

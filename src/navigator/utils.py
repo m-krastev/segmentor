@@ -2,6 +2,7 @@
 Utility functions for the Navigator system.
 """
 
+import os
 import logging
 import math
 from math import copysign
@@ -50,7 +51,7 @@ try:
     from functools import partial
     import jax
     from jax import numpy as jnp
-
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
     @partial(jax.jit, static_argnames=("max_npoints",))
     def line_nd_jax(
         start: jnp.ndarray, stop: jnp.ndarray, max_npoints: int
@@ -214,7 +215,7 @@ try:
     #         labels = cupy.array(labels, dtype=cupy.int32)
     #     return _peak_local_max(image, labels=labels, **kwargs).get()
 
-    logging.info("CuCIM/CuPy installed. Using GPU for graphics heavy operations.")
+    logging.warning("CuCIM/CuPy installed. Using GPU for graphics heavy operations.")
 
 except ImportError:
     logging.warning("CuCIM/CuPy not installed. Please install it to enable GPU acceleration.")
