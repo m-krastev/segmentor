@@ -878,11 +878,6 @@ class MRIPathEnv(SmallBowelEnv):
             self.gt_path_vol,
         )
 
-        # Initialize position_history
-        for _ in range(POSITION_HISTORY_LENGTH - 1):
-            self.position_history.append((0, 0, 0))  # Pad
-        self.position_history.append(self.current_pos_vox)  # Add current position
-
         self.tracking_path_history = [self.current_pos_vox]  # Full path tracking
         self.cum_reward = torch.tensor(0.0, dtype=self.dtype, device=self.device)
         

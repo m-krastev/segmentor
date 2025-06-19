@@ -33,7 +33,9 @@ def plot_skeleton_3d(skeleton: Any, volume: npt.NDArray = None):
 
     skeleton_3d = pv.PolyData(
         skeleton.vertices,
-        lines=np.concatenate((np.full(skeleton.edges.shape[0], 2).reshape(-1, 1), skeleton.edges), axis=1),
+        lines=np.concatenate(
+            (np.full(skeleton.edges.shape[0], 2).reshape(-1, 1), skeleton.edges), axis=1
+        ),
     )
 
     if hasattr(skeleton, "radii"):
@@ -51,7 +53,7 @@ def plot_skeleton_3d(skeleton: Any, volume: npt.NDArray = None):
 
 def plotLine3d(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int) -> list[tuple[int, int, int]]:
     """Based on the Bresenham's line algorithm in 3D.
-    
+
     Source: http://members.chello.at/easyfilter/bresenham.html
 
     Parameters
@@ -97,7 +99,9 @@ def plotLine3d(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int) -> list[tup
     return points
 
 
-def path3d(reference: np.ndarray, path: list[tuple], dilate: int = 0, return_coords = True) -> np.ndarray | Union[np.ndarray, list]:
+def path3d(
+    reference: np.ndarray, path: list[tuple], dilate: int = 0, return_coords=True
+) -> np.ndarray | Union[np.ndarray, list]:
     """Draws a path on a 3D volume."""
     base = np.zeros_like(reference)
     base[tuple(np.asarray(path).T)] = 1

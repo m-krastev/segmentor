@@ -227,7 +227,7 @@ def dataset_sample_to_envparams(sample: Dict[str, Any], config: Config):
         local_peaks=jnp.asarray(sample["local_peaks"]),
         seg_volume=seg.sum(),
         image_shape=jnp.asarray(img.shape),
-        patch_size_vox=config.patch_size_vox
+        patch_size_vox=jnp.asarray(config.patch_size_vox)
     )
 
 
