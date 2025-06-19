@@ -66,6 +66,7 @@ class ActorNetwork(nn.Module):
         self.head = nn.Sequential(
             nn.Flatten(),
             nn.LazyLinear(512),
+            nn.GELU()
         )
 
         # Output layer for alpha/beta parameters (6 values = 3 dimensions × 2 params)

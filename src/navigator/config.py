@@ -25,21 +25,22 @@ class Config:
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training
     shuffle_dataset: bool = True  # Whether to shuffle dataset before splitting
-    use_bfloat16: bool = False
+    amp: bool = False
+    amp_dtype: str = "bf16"
 
     # --- Wandb Logging ---
     track_wandb: bool = True  # Flag to enable/disable wandb
-    wandb_project_name: str = "SmallBowelTorchRL"
+    wandb_project_name: str = "toydata" # toydata
     wandb_entity: Optional[str] = None  # Your wandb username or team name (optional)
     wandb_run_name: Optional[str] = None  # Optional run name, defaults to auto-generated
 
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
     patch_size_mm: int = 16
-    max_step_displacement_mm: float = 4
+    max_step_displacement_mm: float = 6
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 1024
-    cumulative_path_radius_mm: float = 6.0 # Tbh the bowel should literally be no more than 2 cm in diameter
+    cumulative_path_radius_mm: float = 4.0 # Tbh the bowel should literally be no more than 2 cm in diameter
     # wall_map_sigmas: Tuple[int, ...] = (1, 3)
     wall_map_sigmas: Tuple[int, ...] = (1,)
 
@@ -49,7 +50,7 @@ class Config:
     # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
     r_zero_mov: float = 100.0
-    r_final: float = 1000 # Seems to work okay with 1600
+    r_final: float = 100 # Seems to work okay with 1600
     # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
     r_val3 = 3
@@ -59,13 +60,13 @@ class Config:
     num_episodes_per_sample: int = 256  # 32768
     # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
-    total_timesteps: int = 20_000_000
+    total_timesteps: int = 10_000_000
     # Size of the buffer to store transitions
     frames_per_batch: int = 4096
     learning_rate: float = 5e-5
     batch_size: int = 256  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
-    gamma: float = 0.995
+    gamma: float = 0.996
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.1
     # Entropy coefficient for exploration (higher values encourage exploration)

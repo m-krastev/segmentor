@@ -1,51 +1,48 @@
 # train.py (rewrite significantly)
+import os
+
+import numpy as np
 import torch
 import torch.optim as optim
-import numpy as np
-import wandb  # Assuming wandb is used
-import os
-from tqdm import tqdm
+from tensordict.nn import set_composite_lp_aggregate
 
 # Use IterableDataset concept
 from torch.utils.data import DataLoader
 
 # TorchRL components
 from torchrl.collectors import (
-    SyncDataCollector,
-    MultiSyncDataCollector,
     MultiaSyncDataCollector,
+    MultiSyncDataCollector,
+    SyncDataCollector,
 )
 from torchrl.data import (
-    TensorDictReplayBuffer,
     LazyTensorStorage,
     SamplerWithoutReplacement,
+    TensorDictReplayBuffer,
 )
+from torchrl.data.replay_buffers import ReplayBuffer
+from torchrl.envs import GymEnv
+from torchrl.envs.utils import ExplorationType, set_exploration_type
+from torchrl.modules import ProbabilisticActor, ValueOperator
 from torchrl.objectives import (
     ClipPPOLoss,
-    KLPENPPOLoss,
-    TD3Loss,
-    SoftUpdate,
     HardUpdate,
+    KLPENPPOLoss,
+    SoftUpdate,
+    TD3Loss,
 )
 from torchrl.objectives.value import GAE
-from torchrl.envs.utils import ExplorationType, set_exploration_type
-from tensordict.nn import set_composite_lp_aggregate
-from torchrl.envs import GymEnv
-from torchrl.modules import ProbabilisticActor, ValueOperator
-from torchrl.collectors import SyncDataCollector
-from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage
-from torchrl.objectives import ClipPPOLoss
-from torchrl.objectives.value import GAE
-from torchrl.envs.utils import ExplorationType, set_exploration_type
-from torchrl.data.replay_buffers import ReplayBuffer
+from tqdm import tqdm
+
+import wandb  # Assuming wandb is used
 
 # Your project components
 from .config import Config
 from .dataset import SmallBowelDataset  # Keep for creating the iterator
-from .models.dummy_net import make_dummy_actor_critic # Import the dummy network factory
 
 # Use the TorchRL environment wrapper and factory function
-from .environment import make_sb_env, SmallBowelEnv
+from .environment import SmallBowelEnv, make_sb_env
+from .models.dummy_net import make_dummy_actor_critic  # Import the dummy network factory
 
 torch.set_float32_matmul_precision("medium")
 torch._dynamo.config.capture_dynamic_output_shape_ops = True
@@ -95,19 +92,18 @@ def validation_loop_torchrl(
             must_load_new_subject = True
             for _ in range(10):
                 try:
-                    with torch.autocast(device.type, enabled=config.use_bfloat16):
-                        # Reset the environment for the current subject
-                        # This will load the new subject's data
-                        tensordict = val_env._reset(
-                            must_load_new_subject=must_load_new_subject
-                        )
-                        rollout = val_env.rollout(
-                            config.max_episode_steps,
-                            actor_module,
-                            auto_reset=False,
-                            tensordict=tensordict,
-                        )
-                        must_load_new_subject=False
+                    # Reset the environment for the current subject
+                    # This will load the new subject's data
+                    tensordict = val_env._reset(
+                        must_load_new_subject=must_load_new_subject
+                    )
+                    rollout = val_env.rollout(
+                        config.max_episode_steps,
+                        actor_module,
+                        auto_reset=False,
+                        tensordict=tensordict,
+                    )
+                    must_load_new_subject=False
 
                     reward = rollout["next", "reward"].mean().item()
                     step_count = rollout["action"].shape[1]
@@ -201,7 +197,7 @@ def train_torchrl(
     )
 
     if qnets:
-        updater = HardUpdate(loss_module, value_network_update_interval=100)
+        updater = SoftUpdate(loss_module, tau=0.1)
         loss_module.make_value_estimator(loss_module.value_type, gamma=config.gamma)
 
     # --- Optimizer ---
@@ -210,8 +206,9 @@ def train_torchrl(
         loss_module.parameters(),
         lr=config.learning_rate,
     )
-    # Mixed precision scaler
-    scaler = torch.GradScaler(device) if config.use_bfloat16 else None
+
+    amp_dtype = torch.bfloat16 if config.amp_dtype == "bf16" else torch.float16
+    scaler = torch.GradScaler(enabled=config.amp and amp_dtype==torch.float16)
     # Cosine annealing scheduler (optional)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
@@ -284,6 +281,7 @@ def train_torchrl(
         storing_device=device,
         max_frames_per_traj=config.max_episode_steps,  # Max steps per episode trajectory
         # num_threads=8
+        # cudagraph_policy=True # <- This screws with the distribution, don't use.
     )
 
     # --- Replay Buffer ---
@@ -321,41 +319,32 @@ def train_torchrl(
 
             with (
                 torch.no_grad(),
-                torch.autocast(device.type, enabled=config.use_bfloat16),
+                torch.autocast(device.type, amp_dtype, enabled=config.amp),
             ):
                 if not qnets:
                     adv_module(batch_data)
 
             for j in range(0, config.frames_per_batch, batch_size):
                 minibatch = batch_data[j : j + batch_size]
-                with torch.autocast(device.type, enabled=config.use_bfloat16):
+                with torch.autocast(device.type, amp_dtype, enabled=config.amp):
                     loss_dict = loss_module(minibatch)
 
-                if qnets:
-                    actor_loss = loss_dict["loss_actor"]
-                    critic_loss = loss_dict["loss_qvalue"]
-                else:
-                    actor_loss = loss_dict["loss_objective"] + loss_dict["loss_entropy"]
-                    critic_loss = loss_dict["loss_critic"]
+                    if qnets:
+                        actor_loss = loss_dict["loss_actor"]
+                        critic_loss = loss_dict["loss_qvalue"]
+                    else:
+                        actor_loss = loss_dict["loss_objective"] + loss_dict["loss_entropy"]
+                        critic_loss = loss_dict["loss_critic"]
 
-                if scaler is not None:
-                    # Use mixed precision scaling
-                    scaler.scale(actor_loss).backward()
-                    scaler.scale(critic_loss).backward()
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        loss_module.parameters(), config.max_grad_norm
-                    )
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    # Standard backward pass
-                    actor_loss.backward()
-                    critic_loss.backward()
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        loss_module.parameters(), config.max_grad_norm
-                    )
-                    optimizer.step()
                 optimizer.zero_grad()
+                scaler.scale(actor_loss).backward()
+                scaler.scale(critic_loss).backward()
+                scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    loss_module.parameters(), config.max_grad_norm
+                )
+                scaler.step(optimizer)
+                scaler.update()
 
                 # Log losses for this minibatch update
                 actor_losses.append(actor_loss)

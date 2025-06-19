@@ -49,6 +49,7 @@ class CriticNetwork(nn.Module):
         self.head = nn.Sequential(
             nn.Flatten(),
             nn.LazyLinear(512),
+            nn.GELU(),
             nn.Linear(512, 1),
         )
 
@@ -90,15 +91,10 @@ class StateActionValueNetwork(nn.Module):
         self.head = nn.Sequential(
             nn.Flatten(),
             nn.LazyLinear(512),
-            nn.GroupNorm(32, 512),
-            nn.Linear(512, 2048),
-            nn.GroupNorm(32, 256),
-            nn.GELU(),
-            nn.Linear(2048, 256),
-            nn.GroupNorm(32, 256),
+            nn.Linear(512, 64),
             nn.GELU(),
         )
-        self.predict = nn.Linear(256 + action_dim, 1)
+        self.predict = nn.Linear(64 + action_dim, 1)
 
         
     def forward(self, x, action):

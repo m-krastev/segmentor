@@ -3,9 +3,9 @@ from pathlib import Path
 from typing import Optional
 
 import nibabel as nib
-from nibabel.processing import resample_from_to
 import numpy as np
 import numpy.typing as npt
+from nibabel.processing import resample_from_to
 
 
 def load_nifti(img_path: str | Path) -> npt.NDArray:
@@ -33,24 +33,27 @@ def save_nifti(
         affine (npt.NDArray, optional): The affine transformation matrix to use for the new image. Defaults to None.
         spacing (npt.NDArray, optional): The spacing to use for the new image. Defaults to None.
     """
-    if other is None and os.path.exists(filename):
+    if isinstance(other, (str, Path)):
+        other = nib.load(other)
+        affine = other.affine
+        header = other.header
+        new_image = nib.Nifti1Image(data, affine, header)
+    elif other is None and os.path.exists(filename):
         other = nib.load(filename)
         affine = other.affine
         header = other.header
         new_image = nib.Nifti1Image(data, affine, header)
-
     elif affine is not None and spacing is not None:
-            new_image = nib.Nifti1Image(data, affine, nib.Nifti1Header())
-            new_image.header.set_zooms(spacing)
+        new_image = nib.Nifti1Image(data, affine, nib.Nifti1Header())
+        new_image.header.set_zooms(spacing)
     elif hasattr(other, "affine") and hasattr(other, "header"):
-            affine = other.affine
-            header = other.header
-            new_image = nib.Nifti1Image(data, affine, header)
-
+        affine = other.affine
+        header = other.header
+        new_image = nib.Nifti1Image(data, affine, header)
     else:
-        raise ValueError()
-
-
+        raise ValueError(
+            "Other must be a str, Path, or None, in which case the affine matrix and the header or spacing must be provided"
+        )
     nib.save(new_image, filename)
 
 
@@ -85,6 +88,7 @@ def normalize_ct(
         _min = np.min(nii)
         nii = (nii - _min) / (np.max(nii) - _min)
     return nii
+
 
 def load_and_normalize_nifti(
     filename: str | Path,
