@@ -188,3 +188,6 @@ checkpoints
 *.pth
 ideas
 nnUNet*
+plots
+*.json
+*.html
