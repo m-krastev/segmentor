@@ -674,6 +674,56 @@ class SmallBowelEnv(EnvBase):
         np.random.seed(seed)
         self.rng = torch.manual_seed(seed)
 
+    def sample_perfect_action(self) -> torch.Tensor:
+        """
+        Finds the next best displacement based on the ground truth path.
+        Returns the action delta in a suitable format (normalized [0, 1] range).
+        """
+        if self.gt_path_voxels is None or len(self.gt_path_voxels) == 0:
+            # If no ground truth path, return a zero action
+            return torch.zeros(ACTION_DIM, dtype=self.dtype, device=self.device)
+
+        current_pos_np = np.array(self.current_pos_vox)
+
+        # Find the closest point in the ground truth path to the current position
+        distances = np.linalg.norm(self.gt_path_voxels - current_pos_np, axis=1)
+        closest_idx = np.argmin(distances)
+
+        # Determine the target point:
+        # If we are at or past the end of the path, the target is the last point.
+        # Otherwise, the target is the next point in the path.
+        if closest_idx >= len(self.gt_path_voxels) - 1:
+            target_point = self.gt_path_voxels[-1]
+        else:
+            target_point = self.gt_path_voxels[closest_idx + 1]
+
+        # Calculate the displacement vector
+        displacement_vox = target_point - current_pos_np
+
+        # Normalize the displacement to the range [-1, 1] based on max_step_vox
+        # Ensure max_step_vox is not zero to avoid division by zero
+        max_step_vox = self.config.max_step_vox
+        if max_step_vox == 0:
+            normalized_displacement = np.zeros_like(displacement_vox, dtype=np.float32)
+        else:
+            normalized_displacement = displacement_vox / max_step_vox
+
+        # Convert from [-1, 1] range to [0, 1] range for the action spec
+        # action_normalized = (normalized_displacement + 1) / 2
+        # The action_spec is BoundedContinuous(low=0, high=1), so the action should be in [0, 1].
+        # The _step method maps action_normalized from [0, 1] to [-max_step_vox, max_step_vox]
+        # using (2 * action_normalized - 1) * max_step_vox.
+        # So, to get a desired displacement `d`, we need:
+        # d = (2 * action_normalized - 1) * max_step_vox
+        # d / max_step_vox = 2 * action_normalized - 1
+        # (d / max_step_vox) + 1 = 2 * action_normalized
+        # action_normalized = ((d / max_step_vox) + 1) / 2
+        action_normalized = (normalized_displacement + 1) / 2.0
+
+        # Clamp values to ensure they are strictly within [0, 1] due to potential floating point inaccuracies
+        action_tensor = torch.from_numpy(action_normalized).to(self.device, dtype=self.dtype).clamp(0.0, 1.0)
+        return action_tensor
+
 
 def get_first(x):
     return x[0]
