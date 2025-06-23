@@ -168,14 +168,15 @@ try:
 
     def binary_dilation(image, iterations=None, **kwargs):
         # Check if image is already a CuPy array
+        _type = type(image)
         if not isinstance(image, cupy.ndarray):
-            image = cupy.array(image, dtype=cupy.float32)
+            image = cupy.asarray(image)
         if iterations is None:
             image = _binary_dilation(image, **kwargs)
         else:
             for _ in range(iterations):
                 image = _binary_dilation(image, **kwargs)
-        return image.get()
+        return torch.as_tensor(image) if _type == torch.Tensor else image.get()
 
     def meijering(image, **kwargs):
         # Check if image is already a CuPy array

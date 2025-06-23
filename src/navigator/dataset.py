@@ -160,6 +160,7 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         Dictionary with loaded data arrays (numpy format)
     """
     result = {"id": subject_data["id"]}
+    print(f"Loading subject {subject_data['id']}", flush=True)
     patient_dir = subject_data["patient_dir"]
     cache_dir = patient_dir / "cache"
     cache_dir.mkdir(exist_ok=True)  # Ensure cache directory exists
@@ -318,7 +319,7 @@ class MRIPathDataset(Dataset):
             if mri_file.exists() and small_bowel_seg_file.exists():
                 # Find all path_i.npy files
                 path_files = sorted(
-                    list(patient_dir.glob(f"{MRI_PATH_FILE_PATTERNS['path_prefix']}*.npy"))
+                    sorted(patient_dir.glob(f"{MRI_PATH_FILE_PATTERNS['path_prefix']}*.npy"))
                 )
 
                 if path_files:
@@ -395,7 +396,7 @@ def load_mri_path_data(subject_data: Dict[str, Any], config: Config) -> Dict[str
     result["spacing"] = mri_nii.header.get_zooms()
 
     small_bowel_seg_np = np.asanyarray(nib.load(subject_data["small_bowel_seg"]).dataobj)
-    result["small_bowel_seg"] = (small_bowel_seg_np > 0).astype(np.uint8)
+    result["small_bowel_seg"] = (small_bowel_seg_np).astype(np.uint8)
 
     # Load all path_i.npy files
     loaded_paths = []
@@ -450,6 +451,7 @@ def load_mri_path_data(subject_data: Dict[str, Any], config: Config) -> Dict[str
         result["wall_map"] = np.transpose(result["wall_map"], (2, 1, 0))
         result["gdt_start"] = np.transpose(result["gdt_start"], (2, 1, 0))
         result["gdt_end"] = np.transpose(result["gdt_end"], (2, 1, 0))
+        result["paths"] = [np.fliplr(p) for p in result["paths"]]
         # local_peaks is already (0,3), so no need to flip. If it were to contain data, it would need flipping.
         # result["local_peaks"] = np.fliplr(result["local_peaks"]) # This would error on (0,3) array
 

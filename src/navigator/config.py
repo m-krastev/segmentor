@@ -40,7 +40,7 @@ class Config:
     max_step_displacement_mm: float = 6
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 1024
-    cumulative_path_radius_mm: float = 4.0 # Tbh the bowel should literally be no more than 2 cm in diameter
+    cumulative_path_radius_mm: float = 3.0 # The bowel should literally be no more than 2 cm in diameter
     # wall_map_sigmas: Tuple[int, ...] = (1, 3)
     wall_map_sigmas: Tuple[int, ...] = (1,)
 
@@ -70,7 +70,7 @@ class Config:
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.1
     # Entropy coefficient for exploration (higher values encourage exploration)
-    ent_coef: float = 0.01
+    ent_coef: float = 0.003
     # Value function coefficient (higher values encourage accurate value estimates)
     vf_coef: float = 0.5
     num_workers: int = 1
@@ -95,6 +95,7 @@ class Config:
             """Convert millimeter distance to voxel units."""
             return int(dist_mm // voxel_dim_mm)
 
+        self.checkpoint_dir = self.checkpoint_dir + "/" + self.data_dir
         self.gdt_cell_length = self.voxel_size_mm
         self.max_step_vox = mm_to_vox(self.max_step_displacement_mm, self.voxel_size_mm)
         patch_vox_dim = mm_to_vox(self.patch_size_mm, self.voxel_size_mm)

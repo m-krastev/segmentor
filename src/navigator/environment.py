@@ -219,6 +219,7 @@ class SmallBowelEnv(EnvBase):
         """
         Updates the environment's internal data stores using data from the dataset.
         """
+        print(f"Changed subject to {self._current_subject_data['id']}")
         # Store tensors directly
         self.image = self.ct_transform(torch.from_numpy(image).to(self.device)).to(self.dtype)
         # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
@@ -235,9 +236,13 @@ class SmallBowelEnv(EnvBase):
         self.gdt_start = gdt_start
         self.gdt_end = gdt_end
         self.cumulative_path_mask = torch.zeros_like(self.seg)
-        self.local_peaks = local_peaks[30:-30]  # Restrict to center positions TODO: Remove sometime
+        if len(local_peaks) == 0:        
+            self.local_peaks = [tuple(start_coord), tuple(end_coord)]  # Restrict to center positions TODO: Remove sometime
+        else:
+            self.local_peaks = local_peaks
         # self.image[tuple(local_peaks.T)] = 0.5
         self.reward_map = np.zeros_like(self.gdt_start, dtype=np.uint8)
+        self.cumulative_path_mask_pen = np.zeros_like(self.reward_map)
         self.allowed_area = (
             self.maxarea_dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze().numpy(force=True)
         )
@@ -267,11 +272,11 @@ class SmallBowelEnv(EnvBase):
 
     def _get_state_patches(self) -> Dict[str, torch.Tensor]:
         """Get state patches centered at current position. Assumes tensors are valid."""
-        _ = len(self.tracking_path_history)
         img_patch = get_patch(
-            self.image, self.tracking_path_history[-1 % _], self.config.patch_size_vox
+            self.image, self.current_pos_vox, self.config.patch_size_vox
         )
         wall_patch = get_patch(self.wall_map, self.current_pos_vox, self.config.patch_size_vox)
+        _ = len(self.tracking_path_history)
         img_patch_1 = get_patch(
             self.image, self.tracking_path_history[-2 % _], self.config.patch_size_vox
         )
@@ -327,7 +332,7 @@ class SmallBowelEnv(EnvBase):
         np.savetxt(tracking_history_path, np.fliplr(self.tracking_path_history), fmt="%d")
 
         # PyVista visualization
-        plotter = pv.Plotter()
+        plotter = pv.Plotter(off_screen=True)
         plotter.add_volume(self.seg.numpy(force=True) * 10, cmap="viridis", opacity="linear")
         if self._current_subject_data.get("colon") is not None:
             plotter.add_volume(
@@ -397,7 +402,7 @@ class SmallBowelEnv(EnvBase):
         # rt += self.reward_map[S].sum() * self.config.r_peaks
         # self.reward_map[S] = 0
         # Reward for coverage (based on intersection within the segmentation on the path): ...
-        rt += self.config.r_val3 * (self.seg[S] * (1-self.cumulative_path_mask[S])).float().mean()
+        # rt += self.config.r_val3 * (self.seg[S] * (1-self.cumulative_path_mask[S])).float().mean()
 
         # --- 3. Wall-based penalty ---
         wall_map = self.wall_map[S].max()
@@ -406,13 +411,14 @@ class SmallBowelEnv(EnvBase):
         self.wall_gradient += wall_map
 
 
-        # S always includes the start pixels, (and due to the dilation the pixels surrounding the start will always be white, therefore invoking this reward consistently)
+        # S always includes the start pixels, (and due to the dilation the pixels surrounding the start (<idx-1> of previous line) will always be white, therefore invoking this reward consistently);
+        # On the other hand, with a very high cumulative path, the agent quickly learns to make small steps that will ignore this penalty altogether.
         # --- 4. Revisiting penalty ---
-        coverage = self.cumulative_path_mask[S][self.config.cumulative_path_radius_vox+1:]
+        coverage = self.cumulative_path_mask_pen[S]
         rt -= self.config.r_val3 * coverage.any()
 
         # --- 5. Out of seg penalty
-        rt -= self.config.r_val3 * self.seg[next_pos_vox].logical_not()
+        rt -= self.config.r_val1 * self.seg[next_pos_vox].logical_not()
         return rt, S
 
     def _reset(
@@ -436,6 +442,8 @@ class SmallBowelEnv(EnvBase):
             # Reset counter *before* loading, as loading signifies starting fresh
             self.episodes_on_current_subject = 0
             self._load_next_subject()
+        elif must_load_new_subject is False:
+            self.episodes_on_current_subject = 0
 
         # --- Reset internal episode state ---
         self.current_step_count = 0
@@ -469,7 +477,9 @@ class SmallBowelEnv(EnvBase):
 
         # Initialize path tracking
         self.cumulative_path_mask.zero_()
+        draw_path_sphere_2(self.cumulative_path_mask, self.current_pos_vox, self.dilation, self.gt_path_vol)
         self.cumulative_path_mask[self.current_pos_vox] = 1
+        self.cumulative_path_mask_pen[:] = 0
 
         # Initialize various tracking variables
         self.tracking_path_history = [self.current_pos_vox]
@@ -565,6 +575,7 @@ class SmallBowelEnv(EnvBase):
                 self.dilation,
                 self.gt_path_vol,
             )
+            self.cumulative_path_mask_pen[S] = 1
         done = terminated | truncated
 
         # Final Reward Adjustment
@@ -572,25 +583,20 @@ class SmallBowelEnv(EnvBase):
         if terminated:
             # TODO: Fix the shaping with coverage
             final_coverage = self._get_final_coverage()
-            # Tbh that should only be added as a fine-tuning stage or something,
-            # it must be messing with the value function
-            # reward += self.config.r_final * (
-            #     final_coverage
-            #     if termination_reason == "reached_goal"
-            #     else (final_coverage - 1)
-            # )
-            if final_coverage < 0.05:
-                multiplier = 0.0
-            elif final_coverage < 0.2:
-                multiplier = 0.2
-            elif final_coverage < 0.4:
-                multiplier = 0.4
-            elif final_coverage < 0.5:
-                multiplier = 0.6
-            elif final_coverage < 0.7:
-                multiplier = 0.8
-            else:
-                multiplier = 1.0
+            # Maybe implement this at a finetuning stage?
+            # if final_coverage < 0.05:
+            #     multiplier = 0.0
+            # elif final_coverage < 0.2:
+            #     multiplier = 0.2
+            # elif final_coverage < 0.4:
+            #     multiplier = 0.4
+            # elif final_coverage < 0.5:
+            #     multiplier = 0.6
+            # elif final_coverage < 0.7:
+            #     multiplier = 0.8
+            # else:
+            #     multiplier = 1.0
+            multiplier = 1.5 * final_coverage
             if termination_reason == TReason.GOAL_REACHED:
                 # else:
                 #     reward -= self.config.r_final * 0.5
@@ -600,14 +606,6 @@ class SmallBowelEnv(EnvBase):
             # else:
             #     reward += self.config.r_final * (multiplier-1)
                 # reward -= self.config.r_final * (1 - multiplier)
-            rew = self.cum_reward + reward
-            print(
-                "[DEBUG] Episode ended; "
-                f"steps={self.current_step_count:04}; "
-                f"cumulative_reward={'[bold green]' if rew > 0 else '[bold red]'}{rew:>10.1f}{'[/bold green]' if rew > 0 else '[/bold red]'}; "
-                f"reason={'[bold green]' if termination_reason is TReason.GOAL_REACHED else '[bold red]'}{termination_reason}{'[/bold green]' if termination_reason is TReason.GOAL_REACHED else '[/bold red]'}; "
-                f"final_coverage={final_coverage:.3f}; {id(self.start_coord)} {id(self.end_coord)} {id(self.goal)} {dist(next_pos_vox, self.goal):.0f}/{dist(self._start, self.goal):.0f}"
-            )
 
         # Get Next State Patches
         next_obs_dict = self._get_state_patches()
@@ -617,6 +615,16 @@ class SmallBowelEnv(EnvBase):
         self._is_done[:] = done
         self.cum_reward += reward
         _reward = reward.view_as(self._is_done)  # B, T, 1
+
+        if done:
+            rew = self.cum_reward.cpu().item()
+            print(
+                "[DEBUG] Episode ended; "
+                f"steps={self.current_step_count:04}; "
+                f"cumulative_reward={'[bold green]' if rew > 0 else '[bold red]'}{rew:>10.1f}{'[/bold green]' if rew > 0 else '[/bold red]'}; "
+                f"reason={'[bold green]' if termination_reason is TReason.GOAL_REACHED else '[bold red]'}{termination_reason}{'[/bold green]' if termination_reason is TReason.GOAL_REACHED else '[/bold red]'}; "
+                f"final_coverage={final_coverage:.3f}; {id(self.start_coord)} {id(self.end_coord)} {id(self.goal)} {dist(next_pos_vox, self.goal):.0f}/{dist(self._start, self.goal):.0f}"
+            )
 
         output_td = TensorDict(
             {
@@ -739,8 +747,8 @@ class MRIPathEnv(SmallBowelEnv):
         # MRIPathDataset provides 'mri', 'small_bowel_seg', 'paths', 'start_coord' (list), 'end_coord' (list)
         # gdt_start, gdt_end, local_peaks are zeros from the dataset.
         self.update_data(
-            image=subject_data["mri"], # Use mri as the main image
-            seg=subject_data["small_bowel_seg"], # Use small_bowel_seg as the main segmentation
+            image=subject_data["image"], # Use mri as the main image
+            seg=subject_data["seg"], # Use small_bowel_seg as the main segmentation
             wall_map=subject_data["wall_map"],
             gdt_start=subject_data["gdt_start"], # Zeros
             gdt_end=subject_data["gdt_end"], # Zeros
@@ -806,7 +814,7 @@ class MRIPathEnv(SmallBowelEnv):
         self.colon = None
 
     def _reset(
-        self, tensordict: Optional[TensorDictBase] = None, must_load_new_subject=False
+        self, tensordict: Optional[TensorDictBase] = None, must_load_new_subject=None
     ) -> TensorDictBase:
         if self._is_done.all():
             self.episodes_on_current_subject += 1
@@ -818,14 +826,15 @@ class MRIPathEnv(SmallBowelEnv):
             self._load_next_subject()
             # After loading new subject, _current_path_idx is reset to 0
             # and self.all_paths, self.all_start_coords, self.all_end_coords are updated.
+        elif self.must_load_new_subject is False:
+            self.episodes_on_current_subject = 0
 
         # Select the current path for this episode
         if not self.all_paths:
             raise ValueError("No paths available for the current subject.")
         
         # Cycle through paths for different episodes on the same subject
-        current_path_idx_in_subject = self.episodes_on_current_subject % len(self.all_paths)
-        self._current_path_idx = current_path_idx_in_subject
+        self._current_path_idx = self.episodes_on_current_subject % len(self.all_paths)
 
         current_path = self.all_paths[self._current_path_idx]
         current_start_coord = self.all_start_coords[self._current_path_idx]
@@ -843,8 +852,8 @@ class MRIPathEnv(SmallBowelEnv):
         self.current_distance_traveled = 0
         self.wall_gradient = 0
 
-        self.current_pos_vox = current_start_coord
-        self.goal = current_end_coord
+        self.current_pos_vox = tuple(current_start_coord)
+        self.goal = tuple(current_end_coord)
         
         # As per requirement, gdt is always zeros for this dataset
         self.gdt = np.zeros_like(self.image.numpy(force=True), dtype=np.float32)
@@ -873,7 +882,7 @@ class MRIPathEnv(SmallBowelEnv):
 
         draw_path_sphere_2(
             self.cumulative_path_mask,
-            self.current_pos_vox,
+            tuple(self.current_pos_vox),
             self.dilation,
             self.gt_path_vol,
         )
@@ -882,18 +891,12 @@ class MRIPathEnv(SmallBowelEnv):
         self.cum_reward = torch.tensor(0.0, dtype=self.dtype, device=self.device)
         
         # local_peaks is always zeros, so reward_map based on it is also zeros
-        self.reward_map = np.zeros_like(self.gdt, dtype=np.uint8) 
-        
-        # No GDT-based assertion needed as GDT is always zero
-        # assert self.max_gdt_achieved >= 0 and np.isfinite(self.max_gdt_achieved), ("GDT error.")
-
-        actor_obs_data = self._get_actor_observation()
+        self.reward_map = np.zeros_like(self.gdt, dtype=np.uint8)
+        actor_obs_data = self._get_state_patches()
         self._is_done.fill_(False)
         reset_td = TensorDict(
             {
-                "actor": actor_obs_data["patches"].unsqueeze(0),
-                "aux": actor_obs_data["position_sequence"].unsqueeze(0),
-                "mask": actor_obs_data["mask"].unsqueeze(0),
+                "actor": actor_obs_data.unsqueeze(0),
                 "done": self._is_done.clone(),
                 "terminated": self._is_done.clone(),
                 "truncated": self._is_done.clone(),
@@ -963,6 +966,14 @@ class MRIPathEnv(SmallBowelEnv):
         rt -= self.config.r_val1 * coverage.any()
         rt -= self.config.r_val1 * self.seg[next_pos_vox].logical_not()
         return rt, S
+    
+    def _get_final_coverage(self):
+        segment = torch.from_numpy(self._current_subject_data["seg"] == self._current_path_idx + 1).to(self.device)
+        intersection = torch.sum(self.cumulative_path_mask * segment)
+        union = segment.sum() + self.cumulative_path_mask.sum()
+        return (2 * intersection / union) if union != 0 else 0
+        
+    
 
     def save_path(self, save_dir: Optional[Path] = None):
         cache_dir = save_dir or (Path("results") / self._current_subject_data["id"])
@@ -982,31 +993,14 @@ class MRIPathEnv(SmallBowelEnv):
         )
         
         # Visualization
-        plotter = pv.Plotter()
+        plotter = pv.Plotter(off_screen=True)
         # Add MRI image (if desired, might be too dense)
-        # plotter.add_volume(self.image.numpy(force=True), cmap="gray", opacity="linear")
+        plotter.add_volume(self.image.numpy(force=True), cmap="gray", opacity="linear")
         
         # Add small bowel segmentation
         plotter.add_volume(
             self.seg.numpy(force=True) * 10, cmap="viridis", opacity="linear"
         )
-        
-        # No duodenum or colon in this dataset
-        # if self._current_subject_data.get("colon") is not None:
-        #     plotter.add_volume(
-        #         self._current_subject_data["colon"] * 80,
-        #         cmap="viridis",
-        #         opacity="linear",
-        #     )
-        # if self._current_subject_data.get("duodenum") is not None:
-        #     plotter.add_volume(
-        #         self._current_subject_data["duodenum"] * 120,
-        #         cmap="viridis",
-        #         opacity="linear",
-        #     )
-        
-        # Add reward map (which is zeros for this dataset, so might not be useful)
-        plotter.add_volume(self.reward_map, opacity="linear")
         
         # Add the traversed path
         lines: pv.PolyData = pv.lines_from_points(
@@ -1031,7 +1025,9 @@ class MRIPathEnv(SmallBowelEnv):
 
 
         plotter.show_axes()
+        plotter.view_xz()
         plotter.export_html(cache_dir / f"path_visualization_path_{self._current_path_idx}.html")
+        plotter.close()
 
 
 def make_mri_path_env(
@@ -1044,6 +1040,7 @@ def make_mri_path_env(
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_workers = getattr(config, "num_workers", 0)
+    num_workers = 0
     dataset_iterator = cycle(
         DataLoader(
             dataset,

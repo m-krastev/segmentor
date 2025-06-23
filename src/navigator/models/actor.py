@@ -99,8 +99,8 @@ class ActorNetwork(nn.Module):
         x = self.head(x)
 
         # Output alpha/beta parameters
-        alpha = torch.clamp(F.softplus(self.alpha(x), threshold=5) + self.eps, max=100)
-        beta = torch.clamp(F.softplus(self.beta(x), threshold=5) + self.eps, max=100)
+        alpha = torch.clamp(F.softplus(self.alpha(x)) + self.eps, max=100)
+        beta = torch.clamp(F.softplus(self.beta(x)) + self.eps, max=100)
         return alpha, beta
 
     def get_action_dist(self, obs_actor: torch.Tensor) -> Beta:
