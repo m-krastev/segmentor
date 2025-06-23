@@ -1,3 +1,4 @@
+import nibabel as nib
 import torch
 import numpy as np
 from pathlib import Path
@@ -34,28 +35,34 @@ def run_perfect_episode(
 
         while not done:
             # Get the perfect action from the environment
-            perfect_action = env.sample_perfect_action()
-            
+            # perfect_action = env.sample_perfect_action()
+            perfect_action = env.gt_path_voxels[step_count+1] - env.gt_path_voxels[step_count]
+            perfect_action = torch.from_numpy((perfect_action / config.max_step_vox + 1) / 2)
+            # print(perfect_action)
             # Create a tensordict for the step method
             action_td = tensordict.select("actor").set("action", perfect_action.unsqueeze(0))
             
             # Perform the step
             tensordict = env.step(action_td)
             
-            reward = tensordict["reward"].item()
-            done = tensordict["done"].item()
+            reward = tensordict["next", "reward"].item()
+            done = tensordict["next", "done"].item()
             total_reward += reward
             step_count += 1
 
             current_pos = env.current_pos_vox
             goal_pos = env.goal
             dist_to_goal = np.linalg.norm(np.array(current_pos) - np.array(goal_pos))
+            
+            next_pos = ((2 * perfect_action - 1)*config.max_step_vox)
+            next_pos = np.asarray(current_pos) + next_pos.cpu().round().int().numpy()
 
-            print(f"Step {step_count:03d}: Current Pos: {current_pos}, Dist to Goal: {dist_to_goal:.2f}, Reward: {reward:.2f}, Total Reward: {total_reward:.2f}")
+            print(f"Step {step_count:03d}: Current Pos: {current_pos}, Next Pos: {next_pos} Dist to Goal: {dist_to_goal:.2f}, Reward: {reward:.2f}, Total Reward: {total_reward:.2f}")
 
-        final_coverage = tensordict["info"]["final_coverage"].item()
-        final_step_count = tensordict["info"]["final_step_count"].item()
-        final_total_reward = tensordict["info"]["total_reward"].item()
+
+        final_coverage = tensordict["next", "info"]["final_coverage"].item()
+        final_step_count = tensordict["next", "info"]["final_step_count"].item()
+        final_total_reward = tensordict["next", "info"]["total_reward"].item()
 
         print(f"--- Episode {i+1} Finished ---")
         print(f"Final Total Reward: {final_total_reward:.2f}")
@@ -67,7 +74,7 @@ def run_perfect_episode(
         all_final_steps.append(final_step_count)
 
         if save_dir:
-            episode_save_dir = save_dir / f"episode_{i+1}"
+            episode_save_dir = save_dir / env._current_subject_data["id"] / f"episode_{i+1}"
             episode_save_dir.mkdir(parents=True, exist_ok=True)
             env.save_path(episode_save_dir)
             print(f"Path visualization saved to {episode_save_dir}")
@@ -96,7 +103,7 @@ if __name__ == "__main__":
     
     # Initialize dataset
     dataset = SmallBowelDataset(data_dir=config.data_dir, config=config)
-    env = make_sb_env(dataset, config=config)
+    env = make_sb_env(config=config, dataset=dataset)
 
     results_dir = Path("perfect_run_results")
     results_dir.mkdir(exist_ok=True)

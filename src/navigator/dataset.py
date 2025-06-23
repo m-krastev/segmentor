@@ -125,7 +125,6 @@ class SmallBowelDataset(Dataset):
             # Get the subject entry
             subject = self.subjects[idx]
             data = load_subject_data(subject, self.config)
-
             data = {
                 "id": data["id"],
                 "image": data["image"],
@@ -140,7 +139,9 @@ class SmallBowelDataset(Dataset):
                 "start_coord": data["start_coord"],
                 "end_coord": data["end_coord"],
                 "local_peaks": data["local_peaks"],
+                "gt_path": data.get("gt_path")
             }
+            
 
             return data
         else:
@@ -192,6 +193,8 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     if subject_data.get("path") is not None:
         try:
             result["gt_path"] = np.loadtxt(subject_data["path"], dtype=int)
+            if True:
+                result["gt_path"] = np.fliplr(result["gt_path"])
         except Exception as e:
             print(f"Warning: Could not load GT path {subject_data['path']}: {e}")
 

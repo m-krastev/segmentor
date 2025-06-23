@@ -178,7 +178,6 @@ class SmallBowelEnv(EnvBase):
         self._current_subject_data = subject_data
 
         # Call update_data - let it raise exceptions if issues occur
-        # Pass all relevant fields from the dataset output
         self.update_data(
             image=subject_data["image"],
             seg=subject_data["seg"],
@@ -187,7 +186,7 @@ class SmallBowelEnv(EnvBase):
             gdt_end=subject_data["gdt_end"],
             start_coord=subject_data["start_coord"],
             end_coord=subject_data["end_coord"],
-            gt_path=subject_data.get("gt_path"),  # Still optional
+            gt_path=subject_data.get("gt_path"),
             spacing=subject_data.get("spacing"),
             image_affine=subject_data.get("image_affine"),
             local_peaks=subject_data.get("local_peaks"),
@@ -236,8 +235,11 @@ class SmallBowelEnv(EnvBase):
         self.gdt_start = gdt_start
         self.gdt_end = gdt_end
         self.cumulative_path_mask = torch.zeros_like(self.seg)
-        if len(local_peaks) == 0:        
-            self.local_peaks = [tuple(start_coord), tuple(end_coord)]  # Restrict to center positions TODO: Remove sometime
+        if len(local_peaks) == 0:
+            self.local_peaks = [
+                tuple(start_coord),
+                tuple(end_coord),
+            ]
         else:
             self.local_peaks = local_peaks
         # self.image[tuple(local_peaks.T)] = 0.5
@@ -272,9 +274,7 @@ class SmallBowelEnv(EnvBase):
 
     def _get_state_patches(self) -> Dict[str, torch.Tensor]:
         """Get state patches centered at current position. Assumes tensors are valid."""
-        img_patch = get_patch(
-            self.image, self.current_pos_vox, self.config.patch_size_vox
-        )
+        img_patch = get_patch(self.image, self.current_pos_vox, self.config.patch_size_vox)
         wall_patch = get_patch(self.wall_map, self.current_pos_vox, self.config.patch_size_vox)
         _ = len(self.tracking_path_history)
         img_patch_1 = get_patch(
@@ -410,7 +410,6 @@ class SmallBowelEnv(EnvBase):
 
         self.wall_gradient += wall_map
 
-
         # S always includes the start pixels, (and due to the dilation the pixels surrounding the start (<idx-1> of previous line) will always be white, therefore invoking this reward consistently);
         # On the other hand, with a very high cumulative path, the agent quickly learns to make small steps that will ignore this penalty altogether.
         # --- 4. Revisiting penalty ---
@@ -422,7 +421,9 @@ class SmallBowelEnv(EnvBase):
         return rt, S
 
     def _reset(
-        self, tensordict: Optional[TensorDictBase] = None, must_load_new_subject=False
+        self,
+        tensordict: Optional[TensorDictBase] = None,
+        must_load_new_subject: Optional[bool] = None,
     ) -> TensorDictBase:
         """
         Resets the environment. Loads next subject if needed based on episode count.
@@ -451,7 +452,7 @@ class SmallBowelEnv(EnvBase):
         self.wall_gradient = 0
 
         # Determine start position and select appropriate GDT
-        rand = random.randint(0, 9)  # 40-40-20
+        rand = self.episodes_on_current_subject % 10  # 40-40-20
         if rand < 4:
             # Start at the beginning
             self.current_pos_vox = self.start_coord
@@ -477,7 +478,9 @@ class SmallBowelEnv(EnvBase):
 
         # Initialize path tracking
         self.cumulative_path_mask.zero_()
-        draw_path_sphere_2(self.cumulative_path_mask, self.current_pos_vox, self.dilation, self.gt_path_vol)
+        draw_path_sphere_2(
+            self.cumulative_path_mask, self.current_pos_vox, self.dilation, self.gt_path_vol
+        )
         self.cumulative_path_mask[self.current_pos_vox] = 1
         self.cumulative_path_mask_pen[:] = 0
 
@@ -569,13 +572,15 @@ class SmallBowelEnv(EnvBase):
             self.current_distance_traveled += dist(next_pos_vox, self.current_pos_vox)
             self.tracking_path_history.append(next_pos_vox)
             self.current_pos_vox = next_pos_vox
-            self.cumulative_path_mask = draw_path_sphere_2(
-                self.cumulative_path_mask,
-                S,
-                self.dilation,
-                self.gt_path_vol,
-            )
-            self.cumulative_path_mask_pen[S] = 1
+            if S:
+                # As path can be empty, the indexing () will cause everything to be set to 1.
+                self.cumulative_path_mask = draw_path_sphere_2(
+                    self.cumulative_path_mask,
+                    S,
+                    self.dilation,
+                    self.gt_path_vol,
+                )
+                self.cumulative_path_mask_pen[S] = 1
         done = terminated | truncated
 
         # Final Reward Adjustment
@@ -596,16 +601,16 @@ class SmallBowelEnv(EnvBase):
             #     multiplier = 0.8
             # else:
             #     multiplier = 1.0
-            multiplier = 1.5 * final_coverage
+            multiplier = 2 * final_coverage # Manual intervention
             if termination_reason == TReason.GOAL_REACHED:
                 # else:
                 #     reward -= self.config.r_final * 0.5
                 reward += self.config.r_final * multiplier
             else:
-                reward -= self.config.r_final * (1-multiplier)
+                reward -= self.config.r_final * (1 - multiplier)
             # else:
             #     reward += self.config.r_final * (multiplier-1)
-                # reward -= self.config.r_final * (1 - multiplier)
+            # reward -= self.config.r_final * (1 - multiplier)
 
         # Get Next State Patches
         next_obs_dict = self._get_state_patches()
@@ -679,9 +684,7 @@ class SmallBowelEnv(EnvBase):
         Finds the next best displacement based on the ground truth path.
         Returns the action delta in a suitable format (normalized [0, 1] range).
         """
-        if self.gt_path_voxels is None or len(self.gt_path_voxels) == 0:
-            # If no ground truth path, return a zero action
-            return torch.zeros(ACTION_DIM, dtype=self.dtype, device=self.device)
+        assert not (self.gt_path_voxels is None or len(self.gt_path_voxels) == 0)
 
         current_pos_np = np.array(self.current_pos_vox)
 
@@ -721,7 +724,9 @@ class SmallBowelEnv(EnvBase):
         action_normalized = (normalized_displacement + 1) / 2.0
 
         # Clamp values to ensure they are strictly within [0, 1] due to potential floating point inaccuracies
-        action_tensor = torch.from_numpy(action_normalized).to(self.device, dtype=self.dtype).clamp(0.0, 1.0)
+        action_tensor = (
+            torch.from_numpy(action_normalized).to(self.device, dtype=self.dtype).clamp(0.0, 1.0)
+        )
         return action_tensor
 
 
@@ -787,66 +792,66 @@ class MRIPathEnv(SmallBowelEnv):
             device=device,
             batch_size=batch_size,
         )
-        self._current_path_idx = 0 # To iterate through multiple paths in a subject
+        self._current_path_idx = 0  # To iterate through multiple paths in a subject
 
     def _load_next_subject(self) -> bool:
         subject_data: dict = next(self.dataset_iterator)
         self._current_subject_data = subject_data
-        self._current_path_idx = 0 # Reset path index for new subject
+        self._current_path_idx = 0  # Reset path index for new subject
 
         # MRIPathDataset provides 'mri', 'small_bowel_seg', 'paths', 'start_coord' (list), 'end_coord' (list)
         # gdt_start, gdt_end, local_peaks are zeros from the dataset.
         self.update_data(
-            image=subject_data["image"], # Use mri as the main image
-            seg=subject_data["seg"], # Use small_bowel_seg as the main segmentation
+            image=subject_data["image"],  # Use mri as the main image
+            seg=subject_data["seg"],  # Use small_bowel_seg as the main segmentation
             wall_map=subject_data["wall_map"],
-            gdt_start=subject_data["gdt_start"], # Zeros
-            gdt_end=subject_data["gdt_end"], # Zeros
-            start_coord=subject_data["start_coord"], # List of start coords
-            end_coord=subject_data["end_coord"], # List of end coords
-            gt_path=None, # No single gt_path for the whole subject
+            gdt_start=subject_data["gdt_start"],  # Zeros
+            gdt_end=subject_data["gdt_end"],  # Zeros
+            start_coord=subject_data["start_coord"],  # List of start coords
+            end_coord=subject_data["end_coord"],  # List of end coords
+            gt_path=None,  # No single gt_path for the whole subject
             spacing=subject_data.get("spacing"),
             image_affine=subject_data.get("image_affine"),
-            local_peaks=subject_data.get("local_peaks"), # Zeros
-            paths=subject_data.get("paths"), # All loaded paths
+            local_peaks=subject_data.get("local_peaks"),  # Zeros
+            paths=subject_data.get("paths"),  # All loaded paths
         )
-        assert (
-            self.image is not None
-            and self.seg is not None
-            and self.wall_map is not None
-        ), (
+        assert self.image is not None and self.seg is not None and self.wall_map is not None, (
             f"Critical data is None after loading subject {subject_data.get('id', 'N/A')}."
         )
         return True
 
     def update_data(
         self,
-        image: np.ndarray, # This is now MRI
-        seg: np.ndarray, # This is now small_bowel_seg
+        image: np.ndarray,  # This is now MRI
+        seg: np.ndarray,  # This is now small_bowel_seg
         wall_map: np.ndarray,
         gdt_start: np.ndarray,
         gdt_end: np.ndarray,
-        start_coord: List[Coords], # Now a list of start coords for each path
-        end_coord: List[Coords], # Now a list of end coords for each path
+        start_coord: List[Coords],  # Now a list of start coords for each path
+        end_coord: List[Coords],  # Now a list of end coords for each path
         gt_path: Optional[np.ndarray] = None,
         spacing: Optional[Spacing] = None,
         image_affine: Optional[np.ndarray] = None,
         local_peaks: Optional[np.ndarray] = None,
-        paths: Optional[List[np.ndarray]] = None, # New: list of all paths
+        paths: Optional[List[np.ndarray]] = None,  # New: list of all paths
     ):
         # Call parent's update_data for common processing
         super().update_data(
             image=image,
             seg=seg,
             wall_map=wall_map,
-            gdt_start=gdt_start, # These are zeros from MRIPathDataset
-            gdt_end=gdt_end, # These are zeros from MRIPathDataset
-            start_coord=start_coord[0] if start_coord else (0,0,0), # Use first path's start for initial setup
-            end_coord=end_coord[0] if end_coord else (0,0,0), # Use first path's end for initial setup
+            gdt_start=gdt_start,  # These are zeros from MRIPathDataset
+            gdt_end=gdt_end,  # These are zeros from MRIPathDataset
+            start_coord=start_coord[0]
+            if start_coord
+            else (0, 0, 0),  # Use first path's start for initial setup
+            end_coord=end_coord[0]
+            if end_coord
+            else (0, 0, 0),  # Use first path's end for initial setup
             gt_path=gt_path,
             spacing=spacing,
             image_affine=image_affine,
-            local_peaks=local_peaks, # These are zeros from MRIPathDataset
+            local_peaks=local_peaks,  # These are zeros from MRIPathDataset
         )
         # Store all paths and their start/end points
         self.all_paths = paths
@@ -856,15 +861,17 @@ class MRIPathEnv(SmallBowelEnv):
         # Override gdt and local_peaks to be zeros as per requirement
         self.gdt_start = np.zeros_like(self.image.numpy(force=True), dtype=np.float32)
         self.gdt_end = np.zeros_like(self.image.numpy(force=True), dtype=np.float32)
-        self.local_peaks = np.zeros((0, 3), dtype=int) # Kx3, K can be 0
-        self.reward_map = np.zeros_like(self.gdt_start, dtype=np.uint8) # Reset reward map
+        self.local_peaks = np.zeros((0, 3), dtype=int)  # Kx3, K can be 0
+        self.reward_map = np.zeros_like(self.gdt_start, dtype=np.uint8)  # Reset reward map
 
         # No duodenum or colon in this dataset
         self.duodenum = None
         self.colon = None
 
     def _reset(
-        self, tensordict: Optional[TensorDictBase] = None, must_load_new_subject=None
+        self,
+        tensordict: Optional[TensorDictBase] = None,
+        must_load_new_subject: Optional[bool] = None,
     ) -> TensorDictBase:
         if self._is_done.all():
             self.episodes_on_current_subject += 1
@@ -882,7 +889,7 @@ class MRIPathEnv(SmallBowelEnv):
         # Select the current path for this episode
         if not self.all_paths:
             raise ValueError("No paths available for the current subject.")
-        
+
         # Cycle through paths for different episodes on the same subject
         self._current_path_idx = self.episodes_on_current_subject % len(self.all_paths)
 
@@ -892,11 +899,12 @@ class MRIPathEnv(SmallBowelEnv):
 
         if current_path is None or current_start_coord is None or current_end_coord is None:
             # Handle cases where a path might be empty or failed to load
-            print(f"Warning: Skipping path {self._current_path_idx} for subject {self._current_subject_data['id']} due to invalid data.")
+            print(
+                f"Warning: Skipping path {self._current_path_idx} for subject {self._current_subject_data['id']} due to invalid data."
+            )
             # Try to load next subject or path if current one is invalid
             # For simplicity, let's just reset again, which will eventually load a new subject
             return self._reset(tensordict, must_load_new_subject=True)
-
 
         self.current_step_count = 0
         self.current_distance_traveled = 0
@@ -904,11 +912,11 @@ class MRIPathEnv(SmallBowelEnv):
 
         self.current_pos_vox = tuple(current_start_coord)
         self.goal = tuple(current_end_coord)
-        
+
         # As per requirement, gdt is always zeros for this dataset
         self.gdt = np.zeros_like(self.image.numpy(force=True), dtype=np.float32)
-        self.max_gdt_achieved = 0.0 # Always 0 since GDT is zero
-        self.goal_gdt = 0.0 # Always 0 since GDT is zero
+        self.max_gdt_achieved = 0.0  # Always 0 since GDT is zero
+        self.goal_gdt = 0.0  # Always 0 since GDT is zero
 
         self._start = self.current_pos_vox
 
@@ -926,9 +934,9 @@ class MRIPathEnv(SmallBowelEnv):
             )
             valid_gt_path = current_path[valid_indices]
             if valid_gt_path.shape[0] > 0:
-                self.gt_path_vol[
-                    valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]
-                ] = 1.0
+                self.gt_path_vol[valid_gt_path[:, 0], valid_gt_path[:, 1], valid_gt_path[:, 2]] = (
+                    1.0
+                )
 
         draw_path_sphere_2(
             self.cumulative_path_mask,
@@ -939,7 +947,7 @@ class MRIPathEnv(SmallBowelEnv):
 
         self.tracking_path_history = [self.current_pos_vox]  # Full path tracking
         self.cum_reward = torch.tensor(0.0, dtype=self.dtype, device=self.device)
-        
+
         # local_peaks is always zeros, so reward_map based on it is also zeros
         self.reward_map = np.zeros_like(self.gdt, dtype=np.uint8)
         actor_obs_data = self._get_state_patches()
@@ -951,13 +959,9 @@ class MRIPathEnv(SmallBowelEnv):
                 "terminated": self._is_done.clone(),
                 "truncated": self._is_done.clone(),
                 "info": {
-                    "final_step_count": torch.zeros_like(
-                        self._is_done, dtype=self.dtype
-                    ),
+                    "final_step_count": torch.zeros_like(self._is_done, dtype=self.dtype),
                     "final_length": torch.zeros_like(self._is_done, dtype=self.dtype),
-                    "final_wall_gradient": torch.zeros_like(
-                        self._is_done, dtype=self.dtype
-                    ),
+                    "final_wall_gradient": torch.zeros_like(self._is_done, dtype=self.dtype),
                     "final_coverage": self.placeholder_zeros.clone(),
                     "total_reward": self.placeholder_zeros.clone(),
                     "max_gdt_achieved": torch.as_tensor(
@@ -970,9 +974,7 @@ class MRIPathEnv(SmallBowelEnv):
         )
         return reset_td
 
-    def _calculate_reward(
-        self, action_vox: Coords, next_pos_vox: Coords
-    ) -> Tuple[float, Tuple]:
+    def _calculate_reward(self, action_vox: Coords, next_pos_vox: Coords) -> Tuple[float, Tuple]:
         rt = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         if not any(action_vox):
             rt -= self.config.r_zero_mov
@@ -982,7 +984,7 @@ class MRIPathEnv(SmallBowelEnv):
             return rt, ()
 
         S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
-        
+
         # GDT-based reward removed as gdt is always zero
         # next_gdt_val = self.gdt[next_pos_vox]
         # if next_gdt_val > self.max_gdt_achieved:
@@ -1016,63 +1018,62 @@ class MRIPathEnv(SmallBowelEnv):
         rt -= self.config.r_val1 * coverage.any()
         rt -= self.config.r_val1 * self.seg[next_pos_vox].logical_not()
         return rt, S
-    
+
     def _get_final_coverage(self):
-        segment = torch.from_numpy(self._current_subject_data["seg"] == self._current_path_idx + 1).to(self.device)
+        segment = torch.from_numpy(
+            self._current_subject_data["seg"] == self._current_path_idx + 1
+        ).to(self.device)
         intersection = torch.sum(self.cumulative_path_mask * segment)
         union = segment.sum() + self.cumulative_path_mask.sum()
         return (2 * intersection / union) if union != 0 else 0
-        
-    
 
     def save_path(self, save_dir: Optional[Path] = None):
         cache_dir = save_dir or (Path("results") / self._current_subject_data["id"])
         cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Save cumulative path mask
         nif = nib.nifti1.Nifti1Image(
             np.transpose(self.cumulative_path_mask.numpy(force=True), (2, 1, 0)),
             affine=self.image_affine,
         )
         nib.save(nif, cache_dir / f"cumulative_path_mask_path_{self._current_path_idx}.nii.gz")
-        
+
         # Save tracking history
         tracking_history_path = cache_dir / f"tracking_history_path_{self._current_path_idx}.npy"
-        np.savetxt(
-            tracking_history_path, np.fliplr(self.tracking_path_history), fmt="%d"
-        )
-        
+        np.savetxt(tracking_history_path, np.fliplr(self.tracking_path_history), fmt="%d")
+
         # Visualization
         plotter = pv.Plotter(off_screen=True)
         # Add MRI image (if desired, might be too dense)
         plotter.add_volume(self.image.numpy(force=True), cmap="gray", opacity="linear")
-        
+
         # Add small bowel segmentation
-        plotter.add_volume(
-            self.seg.numpy(force=True) * 10, cmap="viridis", opacity="linear"
-        )
-        
+        plotter.add_volume(self.seg.numpy(force=True) * 10, cmap="viridis", opacity="linear")
+
         # Add the traversed path
         lines: pv.PolyData = pv.lines_from_points(
             np.array(self.tracking_path_history)
         )  # Ensure numpy array
         plotter.add_mesh(lines, line_width=10, cmap="viridis")
-        plotter.add_points(
-            np.array(self.tracking_path_history), color="blue", point_size=10
-        )
+        plotter.add_points(np.array(self.tracking_path_history), color="blue", point_size=10)
 
         # Add the ground truth path for the current episode
         if self.gt_path_vol is not None and torch.sum(self.gt_path_vol) > 0:
             gt_coords = torch.argwhere(self.gt_path_vol > 0).cpu().numpy()
             plotter.add_points(gt_coords, color="red", point_size=5, render_points_as_spheres=True)
-            plotter.add_text(f"GT Path {self._current_path_idx}", position="upper_left", color="red")
+            plotter.add_text(
+                f"GT Path {self._current_path_idx}", position="upper_left", color="red"
+            )
 
         # Add start and end points for the current path
-        plotter.add_points(np.array([self._start]), color="green", point_size=15, render_points_as_spheres=True)
-        plotter.add_points(np.array([self.goal]), color="purple", point_size=15, render_points_as_spheres=True)
+        plotter.add_points(
+            np.array([self._start]), color="green", point_size=15, render_points_as_spheres=True
+        )
+        plotter.add_points(
+            np.array([self.goal]), color="purple", point_size=15, render_points_as_spheres=True
+        )
         plotter.add_text("Start (Green)", position="lower_left", color="green")
         plotter.add_text("Goal (Purple)", position="lower_right", color="purple")
-
 
         plotter.show_axes()
         plotter.view_xz()
