@@ -103,6 +103,7 @@ class SmallBowelEnv(EnvBase):
         self.num_episodes_per_sample = num_episodes_per_sample // batch_size.numel()
         # Counter for episodes on current subject, set so that it refreshes at next step
         self.episodes_on_current_subject = num_episodes_per_sample // batch_size.numel()
+        self.steps_on_current_subject = config.num_steps_per_sample
 
         # --- Define Specs ---
         # Set the specs *after* calling super().__init__
@@ -213,7 +214,6 @@ class SmallBowelEnv(EnvBase):
         spacing: Optional[Spacing] = None,
         image_affine: Optional[np.ndarray] = None,
         local_peaks: Optional[np.ndarray] = None,
-        # Receive numpy versions if provided by dataset
     ):
         """
         Updates the environment's internal data stores using data from the dataset.
@@ -224,7 +224,7 @@ class SmallBowelEnv(EnvBase):
         # save_nifti(np.transpose(image, (2,1,0)), f"image_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
         # save_nifti(np.transpose(self.image.numpy(force=True), (2,1,0)), f"image_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing[::-1])
         self.seg = torch.from_numpy(seg).to(device=self.device, dtype=torch.uint8)
-        self.seg = self.dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze()
+        # self.seg = self.dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze()
         # self.seg[tuple(start_coord)] = 3
         # self.seg[tuple(end_coord)] = 3
         # save_nifti(np.transpose(self.seg.numpy(force=True), (2,1,0)), f"seg_transformed_{self._current_subject_data['id']}.nii.gz", affine=image_affine, spacing=spacing)
@@ -232,13 +232,17 @@ class SmallBowelEnv(EnvBase):
         self.wall_map = self.wall_transform(
             torch.from_numpy(wall_map).to(device=self.device, dtype=self.dtype)
         )
+        self.start_coord = tuple(start_coord)
+        self.end_coord = tuple(end_coord)
         self.gdt_start = gdt_start
         self.gdt_end = gdt_end
+        # Store tuples (pos, is_goal_start)
+        self.ckpts = [(self.start_coord, True)]
         self.cumulative_path_mask = torch.zeros_like(self.seg)
         if len(local_peaks) == 0:
             self.local_peaks = [
-                tuple(start_coord),
-                tuple(end_coord),
+                self.start_coord,
+                self.end_coord,
             ]
         else:
             self.local_peaks = local_peaks
@@ -252,8 +256,6 @@ class SmallBowelEnv(EnvBase):
         # Store other metadata
         self.spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
         self.image_affine = image_affine if image_affine is not None else np.eye(4)
-        self.start_coord = tuple(start_coord)
-        self.end_coord = tuple(end_coord)
 
         # Update ground truth path if provided
         self.gt_path_voxels = gt_path
@@ -333,24 +335,25 @@ class SmallBowelEnv(EnvBase):
 
         # PyVista visualization
         plotter = pv.Plotter(off_screen=True)
-        plotter.add_volume(self.seg.numpy(force=True) * 10, cmap="viridis", opacity="linear")
+        plotter.add_volume(self.seg.bool().numpy(force=True) * 10, cmap=["blue"], opacity="linear")
         if self._current_subject_data.get("colon") is not None:
             plotter.add_volume(
-                self._current_subject_data["colon"] * 80,
-                cmap="viridis",
+                self._current_subject_data["colon"] * 10,
+                cmap=["green"],
                 opacity="linear",
             )
         if self._current_subject_data.get("duodenum") is not None:
             plotter.add_volume(
-                self._current_subject_data["duodenum"] * 120,
-                cmap="viridis",
+                self._current_subject_data["duodenum"] * 10,
+                cmap=["yellow"],
                 opacity="linear",
             )
-        plotter.add_volume(self.reward_map, opacity="linear")
+        plotter.add_points(self.reward_map, opacity="linear")
         lines: pv.PolyData = pv.lines_from_points(self.tracking_path_history)
         plotter.add_mesh(lines, line_width=10, cmap="viridis")
         plotter.add_points(np.array(self.tracking_path_history), color="blue", point_size=10)
         plotter.show_axes()
+        plotter.view_xz()
         plotter.export_html(cache_dir / "path.html")
 
     def _calculate_reward(self, action_vox: Coords, next_pos_vox: Coords) -> Tuple[float, Tuple]:
@@ -370,6 +373,7 @@ class SmallBowelEnv(EnvBase):
         S = line_nd(self.current_pos_vox, next_pos_vox)
 
         # --- 2. GDT-based reward ---
+        # The only real reward. Any behaviour, other than moving forward to the goal inside the bowel segmentation or extending an episode will result into penalties. 
         next_gdt_val = self.gdt[next_pos_vox]
         # # If there is some progress
         if next_gdt_val > self.max_gdt_achieved:
@@ -377,21 +381,23 @@ class SmallBowelEnv(EnvBase):
             # Penalty if too large, reward if within margins
             if delta < self.config.gdt_max_increase_theta:
                 # Base reward
-                rt += self.config.r_val2 * delta / self.config.gdt_max_increase_theta
+                rt += self.config.r_val1 * delta / self.config.gdt_max_increase_theta
                 # 3.3 Add shaping
-                dist_before = abs(self.goal_gdt - self.max_gdt_achieved)
-                dist_after = abs(self.goal_gdt - next_gdt_val)
+                # dist_before = abs(self.goal_gdt - self.max_gdt_achieved)
+                # dist_after = abs(self.goal_gdt - next_gdt_val)
 
-                # Compute potentials
-                phi_before = -dist_before
-                phi_after = -dist_after
-                shaping_bonus = self.config.gamma * phi_after - phi_before
-                rt += 1 + shaping_bonus / self.config.gdt_max_increase_theta
+                # # Compute potentials
+                # phi_before = -dist_before
+                # phi_after = -dist_after
+                # shaping_bonus = self.config.gamma * phi_after - phi_before
+                # rt += 1 + shaping_bonus / self.config.gdt_max_increase_theta
             else:
-                rt -= self.config.r_val2
+                rt -= self.config.r_val1
 
             # Additional coverage reward... rt+=
             self.max_gdt_achieved = next_gdt_val
+            # Save state (location + direction) to restart from
+            self.ckpts.append((next_pos_vox, self.goal is self.end_coord))
 
         # Survival reward
         phi_t = self.current_step_count - 1
@@ -434,17 +440,20 @@ class SmallBowelEnv(EnvBase):
         # Increment counter only if an episode actually finished.
         if self._is_done.all():
             self.episodes_on_current_subject += 1
+            self.steps_on_current_subject += self.current_step_count
 
         # Decide whether to load a new subject
         if (
-            self.episodes_on_current_subject >= self.num_episodes_per_sample
+            self.steps_on_current_subject >= self.config.num_steps_per_sample
             or must_load_new_subject
         ):
             # Reset counter *before* loading, as loading signifies starting fresh
             self.episodes_on_current_subject = 0
+            self.steps_on_current_subject = 0
             self._load_next_subject()
         elif must_load_new_subject is False:
             self.episodes_on_current_subject = 0
+            self.steps_on_current_subject = 0
 
         # --- Reset internal episode state ---
         self.current_step_count = 0
@@ -453,16 +462,15 @@ class SmallBowelEnv(EnvBase):
 
         # Determine start position and select appropriate GDT
         rand = self.episodes_on_current_subject % 10  # 40-40-20
-        if rand < 4:
+        if rand < 3:
             # Start at the beginning
             self.current_pos_vox = self.start_coord
             self.goal = self.end_coord
             self.gdt = self.gdt_start
-        elif rand < 7:
-            # Start at a random local peak
-            self.current_pos_vox = tuple(random.choice(self.local_peaks))
-            # Randomly go in either direction
-            if self.episodes_on_current_subject % 2:
+        elif rand < 8:
+            # Start at a random previously visited voxel inside the bowel
+            self.current_pos_vox, is_goal_end = random.choice(self.ckpts)
+            if is_goal_end:
                 self.goal = self.end_coord
                 self.gdt = self.gdt_start
             else:
@@ -602,15 +610,13 @@ class SmallBowelEnv(EnvBase):
             # else:
             #     multiplier = 1.0
             multiplier = 2 * final_coverage # Manual intervention
-            if termination_reason == TReason.GOAL_REACHED:
-                # else:
-                #     reward -= self.config.r_final * 0.5
-                reward += self.config.r_final * multiplier
-            else:
-                reward -= self.config.r_final * (1 - multiplier)
+            # if termination_reason == TReason.GOAL_REACHED:
+            #     # else:
+            #     #     reward -= self.config.r_final * 0.5
+            #     reward += self.config.r_final * multiplier
             # else:
-            #     reward += self.config.r_final * (multiplier-1)
-            # reward -= self.config.r_final * (1 - multiplier)
+            #     reward -= self.config.r_final * (1 - multiplier)
+            reward += self.config.r_final * multiplier
 
         # Get Next State Patches
         next_obs_dict = self._get_state_patches()
@@ -876,7 +882,7 @@ class MRIPathEnv(SmallBowelEnv):
         if self._is_done.all():
             self.episodes_on_current_subject += 1
         if (
-            self.episodes_on_current_subject >= self.num_episodes_per_sample
+            self.episodes_on_current_subject >= self.config.num_steps_per_sample
             or must_load_new_subject
         ):
             self.episodes_on_current_subject = 0
