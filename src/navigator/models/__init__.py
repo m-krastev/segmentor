@@ -74,20 +74,20 @@ class IndependentBeta(Independent):
         return super().log_prob(((value - self.min) / self.scale).clamp(self.eps, 1.0 - self.eps))
 
 # --- TorchRL Modules ---
-def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False, in_channels_actor = 3, in_channels_critic = 3):
+def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False, in_channels_actor = 4, in_channels_critic = 4, agent_orientation_size=4, goal_direction_quat_size=4):
     """Creates the PPO actor and critic modules compatible with TorchRL."""
 
     # Actor Network Base
     actor_cnn_base = ActorNetwork(
         input_channels=in_channels_actor,
+        agent_orientation_size=agent_orientation_size,
     ).to(device)
 
     # Wrap CNN base to extract "actor" obs and output "dist_params"
     actor_cnn_module = TensorDictModule(
         module=actor_cnn_base,
-        in_keys=["actor"],  # Input key from observation spec
-        # out_keys=["dist_params"],  # Intermediate output key
-        out_keys=["alpha", "beta"],  # Intermediate output key
+        in_keys=["actor.patches", "actor.agent_orientation"],
+        out_keys=["alpha", "beta"],
     )
 
     action_spec = Bounded(
@@ -130,12 +130,14 @@ def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False
         # Critic Network Base
         critic_base = CriticNetwork(
             input_channels=in_channels_critic,
+            agent_orientation_size=agent_orientation_size,
+            goal_direction_quat_size=goal_direction_quat_size,
         ).to(device)
 
     # Wrap critic using ValueOperator
     value_module = ValueOperator(
         module=critic_base,
-        in_keys=["actor", "action"] if qnets else ["actor"],  # Input key from observation spec
+        in_keys=["actor.patches", "actor.agent_orientation", "actor.goal_direction_quat"] if qnets else ["actor.patches", "actor.agent_orientation", "actor.goal_direction_quat"],
         out_keys=["state_action_value" if qnets else "state_value"],  # Standard output key for value estimates
     ).to(device)
 

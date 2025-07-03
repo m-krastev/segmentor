@@ -28,97 +28,78 @@ class ActorNetwork(nn.Module):
     and outputs alpha and beta parameters for Beta distributions.
     """
 
-    def __init__(self, input_channels=3, eps = 1.001):
+    def __init__(self, input_channels=4, agent_orientation_size=4, eps=1.001):
         """
         Initialize the actor network.
 
         Args:
-            input_channels: Number of input channels (default: 3)
+            input_channels: Number of input channels for patches (default: 4)
+            agent_orientation_size: Size of the agent orientation vector (default: 4)
         """
         super().__init__()
 
-        # self.net = nn.Sequential(
-        #     ConvBlock(input_channels, 64, kernel_size=3, padding=1),
-        #     # Strided convolution to downsample
-        #     nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False),
-        #     ConvBlock(64, 128, kernel_size=3, padding=1),
-        #     # Strided convolution to downsample
-        #     nn.Conv3d(128, 128, kernel_size=2, stride=2, padding=0, bias=False),
-        #     ConvBlock(128, 256, kernel_size=3, padding=1),
-        #     # Strided convolution to downsample
-        #     nn.Conv3d(256, 256, kernel_size=2, stride=2, padding=0, bias=False),
-        #     nn.Flatten(),
-        #     nn.LazyLinear(256),
-        #     nn.GroupNorm(8, 256),
-        #     nn.GELU(),
-        #     nn.Linear(256, 256),
-        #     nn.GroupNorm(8, 256),
-        #     nn.GELU(),
-        # )
-
-        # TODO: Add downscaled patch of the larger position 
+        # Convolutional backbone for processing patches
         self.conv1 = ConvBlock(input_channels, 16, kernel_size=3, padding=1, num_groups=8)
         self.pool1 = nn.Conv3d(16, 16, kernel_size=2, stride=2, padding=0, bias=False)
         self.conv2 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=16)
         self.pool2 = nn.Conv3d(32, 32, kernel_size=2, stride=2, padding=0, bias=False)
         self.conv3 = ConvBlock(32, 64, kernel_size=3, padding=1, num_groups=32)
         self.pool3 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
-        self.head = nn.Sequential(
+        
+        # Head for processing the flattened features from conv backbone
+        self.conv_head = nn.Sequential(
             nn.Flatten(),
+            nn.LazyLinear(256),  # Reduced size to make space for agent_pose
+            nn.GELU()
+        )
+
+        # Combined head for both patch features and agent pose
+        self.combined_head = nn.Sequential(
             nn.LazyLinear(512),
             nn.GELU()
         )
 
-        # Output layer for alpha/beta parameters (6 values = 3 dimensions × 2 params)
-        self.alpha = nn.Linear(512, 3)
-        self.beta = nn.Linear(512, 3)
-        self.alpha.bias.data.zero_()
-        self.beta.bias.data.zero_()
+        # Output layers for alpha/beta parameters
+        self.alpha_layer = nn.Linear(512, 3)
+        self.beta_layer = nn.Linear(512, 3)
+        self.alpha_layer.bias.data.zero_()
+        self.beta_layer.bias.data.zero_()
         self.eps = eps
 
-    def forward(self, x):
+    def forward(self, patches: torch.Tensor, agent_orientation: torch.Tensor, **kwargs):
         """Forward pass through the network."""
-        # print(x.shape)
-        x = self.conv1(x) # Residual connection
-        # print(x.shape)
+        # Process patches through convolutional backbone
+        p = self.conv1(patches)
+        p = self.pool1(p)
+        p = self.conv2(p)
+        p = self.pool2(p)
+        p = self.conv3(p)
+        p = self.pool3(p)
+        patch_features = self.conv_head(p)
 
-        x = self.pool1(x)
-        # print(x.shape)
-
-        x = self.conv2(x) # Residual connection
-        # print(x.shape)
-
-        x = self.pool2(x)
-        # print(x.shape)
-
-        x = self.conv3(x) # Residual connection
-        # print(x.shape)
-
-        x = self.pool3(x)
-        # print(x.shape)
-        x = self.head(x)
+        # Concatenate patch features with agent orientation
+        combined_features = torch.cat([patch_features, agent_orientation], dim=-1)
+        
+        # Process combined features through the final head
+        x = self.combined_head(combined_features)
 
         # Output alpha/beta parameters
-        alpha = torch.clamp(F.softplus(self.alpha(x)) + self.eps, max=100)
-        beta = torch.clamp(F.softplus(self.beta(x)) + self.eps, max=100)
+        alpha = torch.clamp(F.softplus(self.alpha_layer(x)) + self.eps, max=100)
+        beta = torch.clamp(F.softplus(self.beta_layer(x)) + self.eps, max=100)
         return alpha, beta
 
-    def get_action_dist(self, obs_actor: torch.Tensor) -> Beta:
+    def get_action_dist(self, obs_actor: dict) -> Beta:
         """
         Get Beta distribution from observation.
 
         Args:
-            obs_actor: Observation tensor
+            obs_actor: A dictionary containing 'patches' and 'agent_orientation'.
 
         Returns:
             Beta distribution object
         """
-        # alpha_beta = self.forward(obs_actor)
-        # alpha_beta_pairs = alpha_beta.view(-1, 3, 2)
-        # alphas = alpha_beta_pairs[..., 0]
-        # betas = alpha_beta_pairs[..., 1]
-        alphas, betas = self(obs_actor)
+        alphas, betas = self.forward(obs_actor["patches"], obs_actor["agent_orientation"])
         dist = Beta(alphas, betas)
         return dist # dist \in [0,1] -> 2 * dist - 1 -> [-1,1] * d -> [-d, d]
     
-        # dist \in [0,1]^3 -> slow down speed by gradient 
+        # dist \in [0,1]^3 -> slow down speed by gradient

@@ -85,10 +85,19 @@ def main():
     with torch.no_grad():
         dummy_input = TensorDict(
             {
-                "actor": torch.zeros(1, in_act, *config.patch_size_vox, device=config.device),
-                "critic": torch.zeros(1, in_crit, *config.patch_size_vox, device=config.device),
+                "actor": TensorDict( # This is the main observation for both actor and critic
+                    {
+                        "patches": torch.zeros(1, in_act, *config.patch_size_vox, device=config.device),
+                        "agent_orientation": torch.zeros(1, 4, device=config.device),
+                        "goal_direction_quat": torch.zeros(1, 4, device=config.device),
+                    },
+                    batch_size=[1],
+                    device=config.device
+                ),
                 "action": torch.zeros(1, 3, device=config.device)
             },
+            batch_size=[1],
+            device=config.device
         )
         policy_module(dummy_input)
         value_module(dummy_input)

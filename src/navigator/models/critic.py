@@ -27,42 +27,60 @@ class CriticNetwork(nn.Module):
     """
     Critic network for PPO that estimates state values.
 
-    The network processes 3D patches using convolutional layers
-    and outputs value estimates.
+    The network processes 3D patches and agent pose information
+    and outputs a single value estimate.
     """
 
-    def __init__(self, input_channels=4):
+    def __init__(self, input_channels=4, agent_orientation_size=4, goal_direction_quat_size=4):
         """
         Initialize the critic network.
 
         Args:
-            input_channels: Number of input channels (default: 4)
+            input_channels: Number of input channels for patches (default: 4)
+            agent_orientation_size: Size of the agent orientation vector (default: 4)
+            goal_direction_quat_size: Size of the goal direction quaternion (default: 4)
         """
         super().__init__()
 
+        # Convolutional backbone for processing patches
         self.conv1 = ConvBlock(input_channels, 16, kernel_size=3, padding=1, num_groups=8)
         self.pool1 = nn.Conv3d(16, 16, kernel_size=2, stride=2, padding=0, bias=False)
         self.conv2 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=16)
         self.pool2 = nn.Conv3d(32, 32, kernel_size=2, stride=2, padding=0, bias=False)
         self.conv3 = ConvBlock(32, 64, kernel_size=3, padding=1, num_groups=32)
         self.pool3 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
-        self.head = nn.Sequential(
+
+        # Head for processing the flattened features from conv backbone
+        self.conv_head = nn.Sequential(
             nn.Flatten(),
-            nn.LazyLinear(512),
-            nn.GELU(),
-            nn.Linear(512, 1),
+            nn.LazyLinear(256),  # Reduced size for patch features
+            nn.GELU()
         )
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.pool1(x)
-        x = self.conv2(x)
-        x = self.pool2(x)
-        x = self.conv3(x)
-        x = self.pool3(x)
+        # Combined head for both patch features and agent pose
+        self.combined_head = nn.Sequential(
+            nn.LazyLinear(512),
+            nn.GELU(),
+            nn.Linear(512, 1)  # Output a single value
+        )
 
-        out = self.head(x)
-        return out
+    def forward(self, patches: torch.Tensor, agent_orientation: torch.Tensor, goal_direction_quat: torch.Tensor, **kwargs):
+        """Forward pass through the network."""
+        # Process patches
+        p = self.conv1(patches)
+        p = self.pool1(p)
+        p = self.conv2(p)
+        p = self.pool2(p)
+        p = self.conv3(p)
+        p = self.pool3(p)
+        patch_features = self.conv_head(p)
+
+        # Concatenate with agent orientation and goal direction quaternion
+        combined_features = torch.cat([patch_features, agent_orientation, goal_direction_quat], dim=-1)
+
+        # Final value estimation
+        value = self.combined_head(combined_features)
+        return value
 
 
 class StateActionValueNetwork(nn.Module):
