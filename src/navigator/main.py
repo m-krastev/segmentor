@@ -113,7 +113,7 @@ def main():
         validation_loop_torchrl(policy_module, config, val_set, config.device)
     elif config.train_gym_env:
         print("Training dummy Gym environment.")
-        from .train import train_gym_environment # Import here to avoid circular dependency if not needed
+        from .train_gym import train_gym_environment
         train_gym_environment(config)
     else:
         if config.load_from_checkpoint:

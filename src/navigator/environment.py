@@ -333,24 +333,25 @@ class SmallBowelEnv(EnvBase):
 
         # PyVista visualization
         plotter = pv.Plotter(off_screen=True)
-        plotter.add_volume(self.seg.numpy(force=True) * 10, cmap="viridis", opacity="linear")
+        plotter.add_volume(self.seg.bool().numpy(force=True) * 10, cmap=["blue"], opacity="linear")
         if self._current_subject_data.get("colon") is not None:
             plotter.add_volume(
-                self._current_subject_data["colon"] * 80,
-                cmap="viridis",
+                self._current_subject_data["colon"] * 10,
+                cmap=["green"],
                 opacity="linear",
             )
         if self._current_subject_data.get("duodenum") is not None:
             plotter.add_volume(
-                self._current_subject_data["duodenum"] * 120,
-                cmap="viridis",
+                self._current_subject_data["duodenum"] * 10,
+                cmap=["yellow"],
                 opacity="linear",
             )
-        plotter.add_volume(self.reward_map, opacity="linear")
+        plotter.add_points(self.local_peaks, opacity="linear")
         lines: pv.PolyData = pv.lines_from_points(self.tracking_path_history)
         plotter.add_mesh(lines, line_width=10, cmap="viridis")
         plotter.add_points(np.array(self.tracking_path_history), color="blue", point_size=10)
         plotter.show_axes()
+        plotter.view_xz()
         plotter.export_html(cache_dir / "path.html")
 
     def _calculate_reward(self, action_vox: Coords, next_pos_vox: Coords) -> Tuple[float, Tuple]:

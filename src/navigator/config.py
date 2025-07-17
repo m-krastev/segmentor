@@ -53,11 +53,12 @@ class Config:
     r_final: float = 100 # Seems to work okay with 1600
     # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
-    r_val3 = 3
+    r_val3: float = 3.0
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
     num_episodes_per_sample: int = 256  # 32768
+    num_steps_per_sample: int = 8192
     # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 10_000_000
@@ -77,7 +78,7 @@ class Config:
 
     max_grad_norm: float = 0.5
     eval_interval: int = 3000  # Interval for evaluation
-    save_freq: int = 1000  # Frequency to save model checkpoints
+    save_freq: int = 500  # Frequency to save model checkpoints
     metric_to_optimize: str = "validation/avg_coverage"
 
     # --- Training/Device ---
