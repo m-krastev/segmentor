@@ -263,8 +263,8 @@ class SmallBowelEnv(EnvBase):
         # self.image[tuple(local_peaks.T)] = 0.5
         self.reward_map = np.zeros_like(self.gdt_start, dtype=np.uint8)
         self.cumulative_path_mask_pen = np.zeros_like(self.reward_map)
-        self.allowed_area = (
-            self.maxarea_dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze().numpy(force=True)
+        self.forbidden_area = (
+            1 - self.maxarea_dilation(self.seg.unsqueeze(0).unsqueeze(0)).squeeze().numpy(force=True)
         )
 
         # Store other metadata
@@ -305,9 +305,9 @@ class SmallBowelEnv(EnvBase):
         # --- 2. Get Agent Pose (Quaternions) ---
         # Goal direction quaternion
         goal_direction_vec = self.goal - self.current_pos_vox
-        goal_direction_quat = quaternion.from_rotation_vector(
+        goal_direction_quat = torch.from_numpy(quaternion.as_float_array(quaternion.from_rotation_vector(
             goal_direction_vec / np.linalg.norm(goal_direction_vec)
-        )
+        )).astype(np.float32)).to(self.device)
 
         return {
             "patches": patches,
@@ -378,11 +378,13 @@ class SmallBowelEnv(EnvBase):
 
         rt = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         # --- 1. Zero movement or goes out of the segmentation penalty ---
+        import pdb
+        # pdb.set_trace()
         if not any(action_vox):
             rt -= self.config.r_val2  # self.config.r_val1
             return rt, ()
 
-        if not self._is_valid_pos(next_pos_vox) or not self.allowed_area[tuple(next_pos_vox)]:
+        if not self._is_valid_pos(next_pos_vox) or self.forbidden_area[tuple(next_pos_vox)]:
             rt -= self.config.r_val2
             return rt, ()
 
@@ -568,9 +570,9 @@ class SmallBowelEnv(EnvBase):
 
         # --- Update Agent Orientation ---
         if action_vox_delta.any():
-            self.agent_orientation = quaternion.from_rotation_vector(
+            self.agent_orientation = torch.from_numpy(quaternion.as_float_array(quaternion.from_rotation_vector(
                 action_vox_delta / np.linalg.norm(action_vox_delta)
-            )
+            )).astype(np.float32)).to(self.device)
 
         # Execute Step Logic
         next_pos_vox = self.current_pos_vox + action_vox_delta
@@ -596,7 +598,7 @@ class SmallBowelEnv(EnvBase):
         termination_reason = TReason.NOT_DONE
         if self.current_step_count >= self.config.max_episode_steps:
             truncated, termination_reason = True, TReason.MAX_STEPS
-        elif not is_next_pos_valid_seg or not self.allowed_area[next_pos_vox]:
+        elif not is_next_pos_valid_seg or self.forbidden_area[tuple(next_pos_vox)]:
             terminated, termination_reason = True, TReason.OOB
         elif dist(next_pos_vox, self.goal) < self.config.cumulative_path_radius_vox:
             terminated, termination_reason = True, TReason.GOAL_REACHED
@@ -1021,7 +1023,7 @@ class MRIPathEnv(SmallBowelEnv):
         if not any(action_vox):
             rt -= self.config.r_zero_mov
             return rt, ()
-        if not self._is_valid_pos(next_pos_vox) or not self.allowed_area[next_pos_vox]:
+        if not self._is_valid_pos(next_pos_vox) or self.forbidden_area[*next_pos_vox]:
             rt -= self.config.r_zero_mov
             return rt, ()
 
