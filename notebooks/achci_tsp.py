@@ -1,14 +1,16 @@
+from pathlib import Path
 import networkx as nx
 import numpy as np
 
-# from scipy.spatial import ConvexHull # Not needed
 import itertools
 import time
 import json
 import pyvista as pv
 import argparse
-import nibabel as nib  # Keep if used by visualize function
+import nibabel as nib
 from math import dist
+from skimage.draw import line_nd
+from scipy.ndimage import binary_dilation
 
 # --- Constants ---
 SAMPLE_FILEPATH = "rag2_pruned.json"  # Default filepath
@@ -85,15 +87,15 @@ def load_graph_from_node_link(filepath, directed=False):
 # --- ACHCI Algorithm with KNN Start & Euclidean Distance Constraint ---
 
 
-def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=10.0):
+def achci_path_centroid(graph, start, end, k_nn=3, max_euclidean_dist=10.0):
     """
     Finds path: KNN start (frozen) + ACHCI insert + Euclidean distance constraint.
     Uses UNDIRECTED graph, node 'centroid', edge 'cost'.
 
     Args:
         graph (nx.Graph): Undirected NetworkX graph.
-        start_node: Starting node ID.
-        end_node: Ending node ID.
+        start: Starting node ID.
+        end: Ending node ID.
         k_nn (int): Nodes in the initial FROZEN KNN segment.
         max_euclidean_dist (float): Maximum allowed Euclidean distance between connected nodes.
 
@@ -105,11 +107,11 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
     # --- Input Validation ---
     if not isinstance(graph, nx.Graph) or isinstance(graph, nx.DiGraph):
         print("Warning: Graph not nx.Graph.")
-    if start_node not in graph:
-        print(f"Error: Start node '{start_node}' not found.")
+    if start not in graph:
+        print(f"Error: Start node '{start}' not found.")
         return None, float("inf"), 0
-    if end_node not in graph:
-        print(f"Error: End node '{end_node}' not found.")
+    if end not in graph:
+        print(f"Error: End node '{end}' not found.")
         return None, float("inf"), 0
     if not isinstance(k_nn, int) or k_nn < 1:
         print(f"Warning: Invalid k_nn ({k_nn}). Setting k_nn=1.")
@@ -125,7 +127,7 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
         print("Error: Graph empty.")
         return [], 0, 0
     if n == 1:
-        return [start_node], 0, 0 if start_node == end_node else (None, float("inf"), 0)
+        return [start], 0, 0 if start == end else (None, float("inf"), 0)
     k_nn = min(k_nn, n)  # Clamp k_nn
 
     # --- 0. Setup ---
@@ -150,13 +152,11 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
         return None, float("inf"), 0
 
     # --- 1. Initialization (Conditional KNN vs. Single Closest with Distance Check) ---
-    print(
-        f"Initializing path from '{start_node}' to '{end_node}'. Max Euclidean dist: {max_euclidean_dist}"
-    )
-    current_path = [start_node]
-    visited_nodes = {start_node}
+    print(f"Initializing path from '{start}' to '{end}'. Max Euclidean dist: {max_euclidean_dist}")
+    current_path = [start]
+    visited_nodes = {start}
     start_time_knn_achci = time.time()
-    intermediate_nodes = set(nodes) - {start_node, end_node}
+    intermediate_nodes = set(nodes) - {start, end}
     unvisited_intermediate = set(intermediate_nodes)
 
     if k_nn == 1:
@@ -164,12 +164,12 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
         if unvisited_intermediate:
             first_node_to_insert = None
             min_cost_from_start = float("inf")
-            start_node_idx = node_to_idx[start_node]
-            start_coord = X[start_node_idx]  # Get start coord
+            start_idx = node_to_idx[start]
+            start_coord = X[start_idx]  # Get start coord
 
             for k_node in unvisited_intermediate:
                 k_idx = node_to_idx[k_node]
-                cost_val = C[start_node_idx, k_idx]
+                cost_val = C[start_idx, k_idx]
 
                 # Check cost AND distance constraint
                 k_coord = X[k_idx]
@@ -187,16 +187,16 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
                 visited_nodes.add(first_node_to_insert)
             elif unvisited_intermediate:
                 print(
-                    f"Error: Cannot connect start node '{start_node}' to any intermediate node satisfying constraints."
+                    f"Error: Cannot connect start node '{start}' to any intermediate node satisfying constraints."
                 )
-                if start_node == end_node:
-                    return [start_node], 0, time.time() - start_time_knn_achci
+                if start == end:
+                    return [start], 0, time.time() - start_time_knn_achci
                 else:
                     return None, float("inf"), time.time() - start_time_knn_achci
 
     elif k_nn > 1:
         print(
-            f"Initializing FROZEN path segment with {k_nn}-NN starting from '{start_node}' (with dist check)."
+            f"Initializing FROZEN path segment with {k_nn}-NN starting from '{start}' (with dist check)."
         )
         nodes_to_consider_for_knn = set(nodes) - visited_nodes
         for _ in range(k_nn - 1):
@@ -233,8 +233,8 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
     actual_knn_len = len(current_path)
     print(f"Initial path segment (length {actual_knn_len}): {current_path}")
     unvisited_nodes = set(nodes) - visited_nodes
-    if end_node in unvisited_nodes:
-        unvisited_nodes.remove(end_node)
+    if end in unvisited_nodes:
+        unvisited_nodes.remove(end)
 
     # --- 2. Main Cheapest Insertion Loop (Frozen Logic + Distance Check) ---
     print(f"Starting ACHCI insertion for {len(unvisited_nodes)} remaining nodes...")
@@ -267,7 +267,7 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
                     vj_node, vj_idx = current_path[i + 1], node_to_idx[current_path[i + 1]]
                     vj_coord = X[vj_idx]  # Get coord of successor
                 else:
-                    vj_node, vj_idx = end_node, node_to_idx[end_node]
+                    vj_node, vj_idx = end, node_to_idx[end]
                     vj_coord = X[vj_idx]  # Get coord of end node
 
                 if vi_idx == vj_idx:
@@ -312,23 +312,23 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
         print("Warning: Reached maximum iterations.")
 
     # --- 3. Finalize Path and Calculate Cost (with Distance Check) ---
-    if current_path[-1] != end_node:
+    if current_path[-1] != end:
         last_node_in_path = current_path[-1]
         last_node_idx = node_to_idx[last_node_in_path]
-        end_node_idx = node_to_idx[end_node]
+        end_idx = node_to_idx[end]
 
         # Check cost AND distance constraint for final connection
-        cost_to_end = C[last_node_idx, end_node_idx]
-        dist_to_end = euclidean_distance(X[last_node_idx], X[end_node_idx])
+        cost_to_end = C[last_node_idx, end_idx]
+        dist_to_end = euclidean_distance(X[last_node_idx], X[end_idx])
 
         if np.isinf(cost_to_end) or dist_to_end > max_euclidean_dist:
             print(
-                f"Error: Cannot connect last node '{last_node_in_path}' to end node '{end_node}' satisfying constraints (Cost:{cost_to_end}, Dist:{dist_to_end:.2f}). Path incomplete."
+                f"Error: Cannot connect last node '{last_node_in_path}' to end node '{end}' satisfying constraints (Cost:{cost_to_end}, Dist:{dist_to_end:.2f}). Path incomplete."
             )
             return current_path, float("inf"), time.time() - start_time_knn_achci  # Return partial
         else:
-            current_path.append(end_node)
-            visited_nodes.add(end_node)
+            current_path.append(end)
+            visited_nodes.add(end)
 
     final_path = current_path
     computation_time = time.time() - start_time_knn_achci
@@ -345,7 +345,7 @@ def achci_path_centroid(graph, start_node, end_node, k_nn=3, max_euclidean_dist=
         if missing_nodes:
             print(f"   Missing nodes: {missing_nodes}")
         print(f"   Path Found: {final_path}")
-    elif len(final_path) != expected_node_count and not (start_node == end_node and n > 1):
+    elif len(final_path) != expected_node_count and not (start == end and n > 1):
         print(
             f"Warning: Path length ({len(final_path)}) != node count ({expected_node_count}). Check logic."
         )
@@ -469,12 +469,19 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "filepath",
+        "--graph",
         default=SAMPLE_FILEPATH,
+        type=Path,
         help=f"Path to node-link JSON (default: {SAMPLE_FILEPATH})",
     )
-    parser.add_argument("start_node", help="ID of the starting node.", type=int)
-    parser.add_argument("end_node", help="ID of the ending node.", type=int)
+    parser.add_argument(
+        "--reference_volume", default=None, help="Path to reference_volume volume (NIfTI format)."
+    )
+    parser.add_argument(
+        "--save_dir", type=Path, help="Directory to save the TSPLIB file and solution."
+    )
+    parser.add_argument("--start", help="ID of the starting node.", type=int)
+    parser.add_argument("--end", help="ID of the ending node.", type=int)
     parser.add_argument(
         "-k", "--knn", type=int, default=3, help="Nodes in initial FROZEN KNN segment (default: 3)."
     )
@@ -485,25 +492,43 @@ if __name__ == "__main__":
         default=100.0,
         help="Max allowed Euclidean distance for path segments (default: 10.0).",
     )
-    parser.add_argument(
-        "-v", "--volume_path", default=None, help="Path to ground truth volume (NIfTI format)."
-    )
     args = parser.parse_args()
 
-    print(f"\nLoading UNDIRECTED graph from: {args.filepath}")
-    G_loaded = load_graph_from_node_link(args.filepath, directed=False)
+    save_dir = args.save_dir or args.graph.parent / "achci_tsp"
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nLoading UNDIRECTED graph from: {args.graph}")
+    G_loaded = load_graph_from_node_link(args.graph, directed=False)
 
     if G_loaded:
         print(
-            f"\nRunning Algorithm (Frozen K={args.knn} NN + ACHCI + MaxDist={args.max_dist}) from '{args.start_node}' to '{args.end_node}'..."
+            f"\nRunning Algorithm (Frozen K={args.knn} NN + ACHCI + MaxDist={args.max_dist}) from '{args.start}' to '{args.end}'..."
         )
         achci_path, achci_cost, computation_t = achci_path_centroid(
             G_loaded,
-            args.start_node,
-            args.end_node,
+            args.start,
+            args.end,
             k_nn=args.knn,
             max_euclidean_dist=args.max_dist,
         )
+        
+        np.savetxt(save_dir / "tour.txt", achci_path, fmt="%d")
+        
+        tour = [G_loaded.nodes[node]["centroid"] for node in achci_path]
+        tour = np.vstack(tour)
+        np.savetxt(save_dir / "tracking_history.npy", tour, fmt="%d")
+        
+        ref = nib.load(args.reference_volume)
+        ref_data = ref.get_fdata()
+        save_vol = np.zeros(ref_data.shape, dtype=np.uint8)
+        all_lines = []
+        for start, end in zip(tour[:-1], tour[1:]):
+            all_lines.append(line_nd(start, end))
+            
+        all_lines = np.concatenate(all_lines, axis=1).T
+        save_vol[tuple(all_lines.T)] = 1
+        save_vol = binary_dilation(save_vol, iterations=3).astype(np.uint8)
+        nib.save(nib.Nifti1Image(save_vol, ref.affine), save_dir / "cumulative_path_mask.nii.gz")
 
         if achci_path is not None:
             print("\n--- Path Results ---")
@@ -516,12 +541,12 @@ if __name__ == "__main__":
                 print(f"\nWARNING: Path incomplete. Missing: {expected_nodes - found_nodes}")
             else:
                 print("\nPath includes all nodes.")
-            visualize_path_pyvista(
-                achci_path,
-                G_loaded,
-                volume_path=args.volume_path,
-                title=f"Path (K={args.knn}, MaxDist={args.max_dist}): {args.start_node} to {args.end_node}",
-            )
+            # visualize_path_pyvista(
+            #     achci_path,
+            #     G_loaded,
+            #     volume_path=args.reference_volume,
+            #     title=f"Path (K={args.knn}, MaxDist={args.max_dist}): {args.start} to {args.end}",
+            # )
         else:
             print("\nAlgorithm failed to produce a valid path satisfying constraints.")
     else:

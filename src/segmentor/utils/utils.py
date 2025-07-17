@@ -1,7 +1,11 @@
 from dataclasses import _DataclassT
+from io import StringIO
 from typing import Any, Dict
+
+import networkx as nx
 import numpy as np
 import vtk
+
 
 def create_base(model_class: _DataclassT, data: Dict[str, Any]) -> _DataclassT:
     valid_keys = set(_DataclassT.__dataclass_fields__.keys())
@@ -9,7 +13,7 @@ def create_base(model_class: _DataclassT, data: Dict[str, Any]) -> _DataclassT:
     return model_class(**filtered_data)
 
 
-def nii_2_mesh(filename_nii, filename_stl, label: int=1, num_iterations:int =30):
+def nii_2_mesh(filename_nii, filename_stl, label: int = 1, num_iterations: int = 30):
     """
     Read a NIFTI file containing a binary segmentation mask, convert the specified label to a mesh, and save it as an STL file.
 
@@ -33,7 +37,9 @@ def nii_2_mesh(filename_nii, filename_stl, label: int=1, num_iterations:int =30)
     # apply marching cube surface generation
     surf = vtk.vtkDiscreteMarchingCubes()
     surf.SetInputConnection(reader.GetOutputPort())
-    surf.SetValue(0, label)  # use surf.GenerateValues function if more than one contour is available in the file
+    surf.SetValue(
+        0, label
+    )  # use surf.GenerateValues function if more than one contour is available in the file
     surf.Update()
 
     # smoothing the mesh
@@ -207,10 +213,10 @@ def create_volumetric_image(
     return volume
 
 
-
 # ########################################################
 # EVALUATION METRICS
 # ########################################################
+
 
 def line_length(points: list[tuple]):
     """
@@ -223,6 +229,7 @@ def line_length(points: list[tuple]):
         float: The length of the line.
     """
     return np.sum(np.linalg.norm(np.diff(points, axis=0), axis=-1))
+
 
 def dice_overlap(segmentation: np.ndarray, ground_truth: np.ndarray) -> float:
     """
@@ -238,6 +245,7 @@ def dice_overlap(segmentation: np.ndarray, ground_truth: np.ndarray) -> float:
     intersection = np.sum(segmentation * ground_truth)
     return 2 * intersection / (np.sum(segmentation) + np.sum(ground_truth))
 
+
 def hausdorff_distance(segmentation: np.ndarray, ground_truth: np.ndarray) -> float:
     """
     Calculate the Hausdorff distance between two binary masks.
@@ -251,8 +259,16 @@ def hausdorff_distance(segmentation: np.ndarray, ground_truth: np.ndarray) -> fl
 
     HACK: This algo is trash and takes 10 million years, don't use it.
     """
-    seg_to_gt = np.max(np.array([np.min(np.linalg.norm(segmentation - gt, axis=-1)) for gt in np.argwhere(ground_truth)]))
-    gt_to_seg = np.max(np.array([np.min(np.linalg.norm(gt - segmentation, axis=-1)) for gt in np.argwhere(ground_truth)]))
+    seg_to_gt = np.max(
+        np.array([
+            np.min(np.linalg.norm(segmentation - gt, axis=-1)) for gt in np.argwhere(ground_truth)
+        ])
+    )
+    gt_to_seg = np.max(
+        np.array([
+            np.min(np.linalg.norm(gt - segmentation, axis=-1)) for gt in np.argwhere(ground_truth)
+        ])
+    )
     return max(seg_to_gt, gt_to_seg)
 
 
@@ -269,9 +285,64 @@ def average_gradient(path: list[tuple[int, int, int]], image: np.ndarray) -> flo
     """
     return np.mean(image[coordinate_to_index(np.asarray(path))])
 
+
 def coordinate_to_index(coord):
     """
     Convert a list of coordinates to a list of indices, e.g.
      [[1, 2], [3, 4], [5, 6]] -> [[1, 3, 5], [2, 4, 6]]
     """
     return tuple(coord.astype(int).T)
+
+
+def graph_to_tsplib(graph, weight="cost", rounding_factor=1e4, comment="No comment"):
+    tsplib_str = "NAME : {}\nTYPE : TSP\nCOMMENT : {}\nDIMENSION: {}\nEDGE_WEIGHT_TYPE :  EXPLICIT\nEDGE_WEIGHT_FORMAT :  FULL_MATRIX\nEDGE_WEIGHT_SECTION\n".format(
+        graph.name if graph.name else "Untitled",
+        comment,
+        len(graph.nodes),
+    )
+    buffer = StringIO()
+    matrix = (
+        (nx.adjacency_matrix(graph, weight=weight).toarray() * rounding_factor).round().astype(int)
+    )
+    np.savetxt(
+        buffer,
+        matrix,
+        fmt="%d",
+    )
+    tsplib_str += buffer.getvalue()
+    tsplib_str += "EOF"
+    return tsplib_str
+
+
+def calculate_metrics(
+    path_coords: np.ndarray,
+    ground_truth: np.ndarray,
+    edges: np.ndarray,
+    voxel_size: float = 1.0,
+) -> dict:
+    """Calculate metrics for the given path coordinates against the ground truth.
+
+    Args:
+        path_coords: Path coordinates as a numpy array of shape (N, 3).
+        ground_truth: Ground truth segmentation as a numpy array.
+        voxel_size: Voxel size in mm as a float.
+
+    Returns:
+        Dictionary containing calculated metrics.
+    """
+    from skimage.draw import line_nd
+
+    # Calculate the actual path given coordinate points
+    pts = []
+    for i in range(len(path_coords) - 1):
+        pts.extend(line_nd(path_coords[i], path_coords[i + 1]))
+    pts = np.array(pts).T
+    length = np.sum(np.linalg.norm(np.diff(path_coords, axis=0), axis=1)) * voxel_size
+    integrated_gradient = np.sum(edges[tuple(pts.T)])
+    coverage = np.sum(ground_truth[tuple(pts.T)]) / len(pts)
+
+    return {
+        "curve_length": length,
+        "integrated_gradient": integrated_gradient,
+        "coverage": coverage,
+    }

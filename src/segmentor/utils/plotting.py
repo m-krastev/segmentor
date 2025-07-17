@@ -3,6 +3,7 @@ import numpy as np
 import numpy.typing as npt
 from typing import Any, Union
 from scipy.ndimage import binary_dilation
+from skimage.draw import line_nd
 
 
 def wrap_numpy_object(obj: npt.NDArray):
@@ -51,7 +52,7 @@ def plot_skeleton_3d(skeleton: Any, volume: npt.NDArray = None):
     plotter.show()
 
 
-def plotLine3d(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int) -> list[tuple[int, int, int]]:
+def plotLine3d(start: tuple[int, ...], stop: tuple[int, ...]) -> list[tuple[int, ...]]:
     """Based on the Bresenham's line algorithm in 3D.
 
     Source: http://members.chello.at/easyfilter/bresenham.html
@@ -68,6 +69,8 @@ def plotLine3d(x0: int, y0: int, z0: int, x1: int, y1: int, z1: int) -> list[tup
     list of tuple of int
         The coordinates of the line
     """
+    x0, y0, z0 = start
+    x1, y1, z1 = stop
     points = []
     dx = abs(x1 - x0)
     sx = 1 if x0 < x1 else -1
@@ -110,7 +113,8 @@ def path3d(
         coord_list = []
 
     for start, end in zip(path[:-1], path[1:]):
-        coords = plotLine3d(*start, *end)
+        # coords = plotLine3d(start, end)
+        coords = line_nd(start, end)
         base[tuple(np.asarray(coords).T)] = 1
 
         if return_coords:
