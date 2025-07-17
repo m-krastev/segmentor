@@ -40,20 +40,20 @@ class Config:
     max_step_displacement_mm: float = 6
     use_immediate_gdt_reward: bool = False
     max_episode_steps: int = 2048
-    cumulative_path_radius_mm: float = 3.0 # The bowel should literally be no more than 2 cm in diameter
+    cumulative_path_radius_mm: float = 6.0 # The bowel should literally be no more than 2 cm in diameter
     # wall_map_sigmas: Tuple[int, ...] = (1, 3)
     wall_map_sigmas: Tuple[int, ...] = (1,)
 
     # --- Reward Hyperparameters ---
     # Typically a penalty related to the game mechanics, e.g. zero movement, crossing walls, out of segmentation, etc.
-    r_val1: float = 2.0
+    r_val1: float = 4.0
     # More active reward, e.g. moving towards the target, used along with the GDT
     r_val2: float = 6.0
     r_zero_mov: float = 100.0
     r_final: float = 100 # Seems to work okay with 1600
     # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
-    r_val3: float = 4.0
+    r_val3: float = 3.0
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
@@ -69,7 +69,7 @@ class Config:
     update_epochs: int = 5  # Number of PPO update epochs
     gamma: float = 0.999
     gae_lambda: float = 0.95
-    clip_epsilon: float = 0.1
+    clip_epsilon: float = 0.2
     # Entropy coefficient for exploration (higher values encourage exploration)
     ent_coef: float = 0.003
     # Value function coefficient (higher values encourage accurate value estimates)
@@ -77,7 +77,7 @@ class Config:
     num_workers: int = 1
 
     max_grad_norm: float = 0.5
-    eval_interval: int = 10000  # Interval for evaluation
+    eval_interval: int = 3000  # Interval for evaluation
     save_freq: int = 500  # Frequency to save model checkpoints
     metric_to_optimize: str = "validation/avg_coverage"
 
