@@ -883,7 +883,7 @@ class MRIPathEnv(SmallBowelEnv):
             self._load_next_subject()
             # After loading new subject, _current_path_idx is reset to 0
             # and self.all_paths, self.all_start_coords, self.all_end_coords are updated.
-        elif self.must_load_new_subject is False:
+        elif must_load_new_subject is False:
             self.episodes_on_current_subject = 0
 
         # Select the current path for this episode
@@ -1044,17 +1044,15 @@ class MRIPathEnv(SmallBowelEnv):
 
         # Visualization
         plotter = pv.Plotter(off_screen=True)
-        # Add MRI image (if desired, might be too dense)
-        plotter.add_volume(self.image.numpy(force=True), cmap="gray", opacity="linear")
 
         # Add small bowel segmentation
-        plotter.add_volume(self.seg.numpy(force=True) * 10, cmap="viridis", opacity="linear")
+        plotter.add_volume(self.seg.bool().numpy(force=True) * 10, cmap=["blue"], opacity="linear")
 
         # Add the traversed path
         lines: pv.PolyData = pv.lines_from_points(
             np.array(self.tracking_path_history)
         )  # Ensure numpy array
-        plotter.add_mesh(lines, line_width=10, cmap="viridis")
+        plotter.add_mesh(lines, line_width=10, cmap=["yellow"])
         plotter.add_points(np.array(self.tracking_path_history), color="blue", point_size=10)
 
         # Add the ground truth path for the current episode
