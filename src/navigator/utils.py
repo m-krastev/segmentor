@@ -75,7 +75,7 @@ try:
         return jnp.round(jnp.linspace(start, stop, num=max_npoints, endpoint=False).T).astype(int)
 
     @partial(jax.jit, inline=True)
-    def draw_sphere_point(
+    def _draw_sphere_point(
         array_3d: jnp.ndarray, center_point: jnp.ndarray, radius: int, fill_value=1
     ):
         """
@@ -118,7 +118,7 @@ try:
         """
         # Draw spheres around each point in the path
         new_array_3d = jax.lax.scan(
-            lambda a, p: (draw_sphere_point(a, p, radius, fill_value), p),
+            lambda a, p: (_draw_sphere_point(a, p, radius, fill_value), p),
             jnp.zeros_like(array_3d),
             jnp.asarray(pts).T,
         )[0]
@@ -126,7 +126,7 @@ try:
         updated_array_3d = jnp.maximum(array_3d, new_array_3d)
         return updated_array_3d, new_array_3d
 
-    def draw_path_sphere(
+    def draw_path_sphere_jax(
         cumulative_path_mask: torch.Tensor,
         voxels: tuple[Coords],
         radius: int = 1,
