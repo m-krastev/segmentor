@@ -38,6 +38,7 @@ import wandb
 # Your project components
 from .config import Config
 from .dataset import SmallBowelDataset  # Keep for creating the iterator
+from .exploration import RND # Import RND
 
 # Use the TorchRL environment wrapper and factory function
 from .environment import SmallBowelEnv, make_sb_env
@@ -172,6 +173,29 @@ def train_torchrl(
     device = device or torch.device(config.device)
     batch_size = getattr(config, "batch_size", 32)
 
+    # Initialize RND module if enabled
+    rnd_module = None
+    if config.use_intrinsic_reward:
+        # The environment will be created by the collector, so we pass a dummy env for RND init
+        # The actual envs will be passed during the collector's init
+        dummy_env = make_sb_env(config, train_set, device, num_episodes_per_sample=1, check_env=False)
+        rnd_module = RND(
+            envs=dummy_env,
+            device=device,
+            beta=config.intrinsic_reward_beta,
+            kappa=config.intrinsic_reward_kappa,
+            gamma=config.intrinsic_reward_gamma,
+            rwd_norm_type=config.intrinsic_reward_rwd_norm_type,
+            obs_norm_type=config.intrinsic_reward_obs_norm_type,
+            latent_dim=config.rnd_latent_dim,
+            lr=config.rnd_lr,
+            batch_size=config.rnd_batch_size,
+            update_proportion=config.rnd_update_proportion,
+            encoder_model=config.rnd_encoder_model,
+            weight_init=config.rnd_weight_init,
+        )
+        dummy_env.close() # Close the dummy env
+
     print(
         f"Total trainable parameters: {sum(p.numel() for p in policy_module.parameters()) + sum(p.numel() for p in value_module.parameters())}"
     )
@@ -303,17 +327,40 @@ def train_torchrl(
         pbar.update(current_frames)
         collected_frames += current_frames
 
+        # Compute intrinsic rewards and add to batch_data if enabled
+        intrinsic_rewards_mean = torch.tensor(0.0, device=device)
+        if config.use_intrinsic_reward and rnd_module is not None:
+            # RND module expects (N_steps, N_envs, ...) for observations
+            # batch_data is (N_steps * N_envs, ...) after reshape(-1)
+            # We need to reshape it back to (N_steps, N_envs, ...) for RND
+            n_steps = config.frames_per_batch // collector.env.num_envs
+            n_envs = collector.env.num_envs
+            
+            # Create a temporary tensordict with the correct shape for RND
+            # This assumes 'observations' and 'next_observations' are present
+            # and have the correct structure for RND's compute method.
+            # The collector should already provide these.
+            rnd_input_td = batch_data.select("observations", "next_observations").reshape(n_steps, n_envs)
+            
+            intrinsic_rewards = rnd_module.compute(rnd_input_td, sync=True)
+            
+            # Add intrinsic rewards to the "next", "reward" key
+            # Ensure shapes match: intrinsic_rewards is (n_steps, n_envs), batch_data["next", "reward"] is (n_steps, n_envs, 1)
+            # We need to reshape intrinsic_rewards to (n_steps * n_envs, 1) to match batch_data's flattened structure
+            batch_data["next", "reward"] = batch_data["next", "reward"] + intrinsic_rewards.view(-1, 1)
+            intrinsic_rewards_mean = intrinsic_rewards.mean().item()
+
         # --- PPO Update Phase ---
         actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
         for _ in range(config.update_epochs):
-            batch_data = batch_data.reshape(-1)
+            batch_data = batch_data.reshape(-1) # Flatten for minibatch sampling
 
             with (
                 torch.no_grad(),
                 torch.autocast(device.type, amp_dtype, enabled=config.amp),
             ):
                 if not qnets:
-                    adv_module(batch_data)
+                    adv_module(batch_data) # GAE calculation happens here
 
             for j in range(0, config.frames_per_batch, batch_size):
                 minibatch = batch_data[j : j + batch_size]
@@ -401,6 +448,8 @@ def train_torchrl(
             "charts/action_1_mode": action[:, 1].cpu().mode()[0],
             "charts/action_2_mode": action[:, 2].cpu().mode()[0],
         }
+        if config.use_intrinsic_reward:
+            log_data["train/intrinsic_reward"] = intrinsic_rewards_mean
 
         pbar.set_postfix({
             "R": f"{avg_reward:.1f}",

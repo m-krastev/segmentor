@@ -1103,3 +1103,32 @@ def resample_to_spacing_and_crop(
     aff[1, 3] = aff[1, 3] - (min_y * target_spacing[1])
     aff[2, 3] = aff[2, 3] - (min_z * target_spacing[2])
     return new_img, aff, colon, duodenum, small_bowel
+
+
+def process_observation_space(observation_space):
+    """
+    Processes the observation space to extract the shape.
+    Assumes the 'actor' key in a Composite observation space holds the main observation.
+    """
+    if isinstance(observation_space, dict) and "actor" in observation_space:
+        # For Composite observation spaces like in SmallBowelEnv
+        return tuple(observation_space["actor"].shape[-4:]) # (C, D, H, W)
+    elif hasattr(observation_space, "shape"):
+        return tuple(observation_space.shape)
+    else:
+        raise ValueError(f"Unsupported observation space type: {type(observation_space)}")
+
+
+def process_action_space(action_space):
+    """
+    Processes the action space to extract shape, dimension, policy action dimension, and type.
+    Assumes a BoundedContinuous action space.
+    """
+    if hasattr(action_space, "shape"):
+        action_shape = tuple(action_space.shape)
+        action_dim = action_shape[-1] if action_shape else 1
+        policy_action_dim = action_dim # For continuous actions, policy action dim is the same
+        action_type = "continuous"
+        return action_shape, action_dim, policy_action_dim, action_type
+    else:
+        raise ValueError(f"Unsupported action space type: {type(action_space)}")

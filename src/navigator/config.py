@@ -55,6 +55,20 @@ class Config:
     r_peaks: float = 4.0
     r_val3: float = 3.0
 
+    # --- Intrinsic Reward Hyperparameters (RND) ---
+    use_intrinsic_reward: bool = False
+    intrinsic_reward_beta: float = 1.0
+    intrinsic_reward_kappa: float = 0.0
+    intrinsic_reward_gamma: Optional[float] = None
+    intrinsic_reward_rwd_norm_type: str = "rms"
+    intrinsic_reward_obs_norm_type: str = "rms"
+    rnd_latent_dim: int = 128
+    rnd_lr: float = 0.001
+    rnd_batch_size: int = 256
+    rnd_update_proportion: float = 1.0
+    rnd_encoder_model: str = "mnih"
+    rnd_weight_init: str = "orthogonal"
+
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
     num_episodes_per_sample: int = 256  # 32768
@@ -129,15 +143,42 @@ def parse_args() -> Config:
         ]:
             continue
 
-        if field_name == "wall_map_sigmas":
-            # Special case for wall_map_sigmas to accept a list of integers
-            parser.add_argument(
-                f"--{field_name.replace('_', '-')}",
-                type=int,
-                nargs="+",
-                default=default_config.wall_map_sigmas,
-                help=f"{field_name} (default: {default_config.wall_map_sigmas})",
-            )
+        if field_name == "wall_map_sigmas" or field_name.startswith("intrinsic_reward_") or field_name.startswith("rnd_"):
+            # Special case for wall_map_sigmas and intrinsic reward parameters
+            if field_name == "wall_map_sigmas":
+                arg_type = int
+                nargs = "+"
+            elif field_name.endswith("_gamma"):
+                arg_type = float
+                nargs = "?" # Optional float
+            elif field_name.endswith("_norm_type") or field_name.endswith("_model") or field_name.endswith("_init"):
+                arg_type = str
+                nargs = None
+            elif field_name.endswith("_dim") or field_name.endswith("_batch_size"):
+                arg_type = int
+                nargs = None
+            elif field_name.endswith("_lr") or field_name.endswith("_proportion") or field_name.endswith("_beta") or field_name.endswith("_kappa"):
+                arg_type = float
+                nargs = None
+            else: # use_intrinsic_reward
+                arg_type = bool
+                nargs = None
+
+            if arg_type is bool:
+                parser.add_argument(
+                    f"--{field_name.replace('_', '-')}",
+                    action=argparse.BooleanOptionalAction,
+                    default=default_config.__dict__[field_name],
+                    help=f"{field_name} (default: {default_config.__dict__[field_name]})",
+                )
+            else:
+                parser.add_argument(
+                    f"--{field_name.replace('_', '-')}",
+                    type=arg_type,
+                    nargs=nargs,
+                    default=default_config.__dict__[field_name],
+                    help=f"{field_name} (default: {default_config.__dict__[field_name]})",
+                )
             continue
 
         # Handle default values and types
