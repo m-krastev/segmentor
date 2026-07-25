@@ -11,7 +11,13 @@ from typing import Dict, List, Any
 from segmentor.utils.medutils import load_and_normalize_nifti
 
 # Import necessary calculation functions
-from .utils import find_start_end, compute_wall_map, compute_gdt, distance_transform_edt, binary_dilation
+from .utils import (
+    find_start_end,
+    compute_wall_map,
+    compute_gdt,
+    distance_transform_edt,
+    binary_dilation,
+)
 
 from .config import Config
 from skimage.feature import peak_local_max
@@ -36,7 +42,7 @@ CACHE_FILES = {
     "wall_map": "wall_map.nii",
     "gdt_start": "gdt_start.nii",
     "gdt_end": "gdt_end.nii",
-    "local_peaks": "local_peaks.npy"
+    "local_peaks": "local_peaks.npy",
 }
 
 
@@ -95,7 +101,9 @@ class SmallBowelDataset(Dataset):
                     seg_file = patient_dir / FILE_PATTERNS[organ]
                     seg_file = seg_file if seg_file.exists() else seg_file.with_suffix(".nii.gz")
                     if not seg_file.exists():
-                        print(f"Warning: {organ.capitalize()} file missing for subject {subject_id}. Skipping.")
+                        print(
+                            f"Warning: {organ.capitalize()} file missing for subject {subject_id}. Skipping."
+                        )
                         # continue
                         seg_file = None
                     subject[organ] = seg_file
@@ -103,7 +111,7 @@ class SmallBowelDataset(Dataset):
                 # Check for ground truth path file (optional)
                 path_file = patient_dir / FILE_PATTERNS["path"]
                 subject["path"] = path_file if path_file.exists() else None
-                
+
                 subjects.append(subject)
         return subjects
 
@@ -139,9 +147,8 @@ class SmallBowelDataset(Dataset):
                 "start_coord": data["start_coord"],
                 "end_coord": data["end_coord"],
                 "local_peaks": data["local_peaks"],
-                "gt_path": data.get("gt_path")
+                "gt_path": data.get("gt_path"),
             }
-            
 
             return data
         else:
@@ -200,18 +207,55 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
 
     # --- Load/Calculate Start/End Coordinates ---
     start_end_cache_path = cache_dir / CACHE_FILES["start_end"]
+    start_coord, end_coord = None, None
+    cache_valid = False
+
     if start_end_cache_path.exists():
-        start_coord_np, end_coord_np = np.loadtxt(start_end_cache_path, dtype=int)
-        start_coord = tuple(start_coord_np)
-        end_coord = tuple(end_coord_np)
-    else:
-        assert result["duodenum"] is not None, "Duodenum segmentation is required to find start/end coordinates."
-        assert result["colon"] is not None, "Colon segmentation is required to find start/end coordinates."
-        # Get them in XYZ order
-        start_coord, end_coord = find_start_end(
-            duodenum_volume=result["duodenum"], colon_volume=result["colon"], small_bowel_volume=result["seg"]
-        )
+        try:
+            start_coord_np, end_coord_np = np.loadtxt(start_end_cache_path, dtype=int)
+            start_coord = tuple(start_coord_np)
+            end_coord = tuple(end_coord_np)
+            # Validate coordinates are within mask
+            if result["seg"][start_coord] > 0 and result["seg"][end_coord] > 0:
+                cache_valid = True
+            else:
+                print(
+                    f"Warning: Cached coordinates for {result['id']} are outside mask. Recalculating."
+                )
+        except Exception as e:
+            print(f"Warning: Could not load or validate cache for {result['id']}: {e}")
+
+    if not cache_valid:
+        if result["duodenum"] is not None and result["colon"] is not None:
+            # Get them in XYZ order
+            start_coord, end_coord = find_start_end(
+                duodenum_volume=result["duodenum"],
+                colon_volume=result["colon"],
+                small_bowel_volume=result["seg"],
+            )
+        elif result.get("gt_path") is not None:
+            # Fallback for phantoms: use GT path.
+            # result["gt_path"] was already fliplr'd (to ZYX), so we flip it back to get XYZ native order
+            native_gt_path = np.fliplr(result["gt_path"])
+            start_coord = tuple(native_gt_path[0].astype(int))
+            end_coord = tuple(native_gt_path[-1].astype(int))
+            print(f"Using GT path as start/end fallback for {result['id']}")
+        else:
+            raise ValueError(
+                f"Neither anatomical segmentations nor GT path available to find start/end for {result['id']}."
+            )
+
+        # Save validated/recalculated coordinates
         np.savetxt(start_end_cache_path, (start_coord, end_coord), fmt="%d")
+
+        # Invalidate dependent caches (GDTs)
+        for gdt_file in [CACHE_FILES["gdt_start"], CACHE_FILES["gdt_end"]]:
+            p = cache_dir / gdt_file
+            if p.exists():
+                p.unlink()
+            if p.with_suffix(".nii.gz").exists():
+                p.with_suffix(".nii.gz").unlink()
+
     result["start_coord"] = start_coord
     result["end_coord"] = end_coord
 
@@ -254,7 +298,9 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     # Disconnected segmentation components lead to wildly inconsistent result, in particular when using the GDT which turns any unreachable point into -inf.
     result["gdt_end"] = gdt_end_np
     if np.isfinite(gdt_end_np).sum() < 1000:
-        result["gdt_end"] = np.where(np.isfinite(gdt_start_np), gdt_start_np.max() - gdt_start_np.copy(), -np.inf)
+        result["gdt_end"] = np.where(
+            np.isfinite(gdt_start_np), gdt_start_np.max() - gdt_start_np.copy(), -np.inf
+        )
         result["end_coord"] = np.unravel_index(gdt_start_np.argmax(), gdt_start_np.shape)
 
     local_peaks_cache_path = cache_dir / CACHE_FILES["local_peaks"]
@@ -269,19 +315,22 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         np.savetxt(local_peaks_cache_path, local_peaks_np, fmt="%d")
     result["local_peaks"] = local_peaks_np
 
-
     if True:
         # Transpose everything
         result["image"] = np.transpose(result["image"], (2, 1, 0))
         result["seg"] = np.transpose(result["seg"], (2, 1, 0))
-        result["duodenum"] = np.transpose(result["duodenum"], (2, 1, 0)) if result["duodenum"] is not None else None
-        result["colon"] = np.transpose(result["colon"], (2, 1, 0)) if result["colon"] is not None else None
+        result["duodenum"] = (
+            np.transpose(result["duodenum"], (2, 1, 0)) if result["duodenum"] is not None else None
+        )
+        result["colon"] = (
+            np.transpose(result["colon"], (2, 1, 0)) if result["colon"] is not None else None
+        )
         result["spacing"] = result["spacing"][::-1]
         result["start_coord"] = result["start_coord"][::-1]
         result["end_coord"] = result["end_coord"][::-1]
-        result["wall_map"] = np.transpose(result["wall_map"], (2, 1, 0)) 
-        result["gdt_start"] = np.transpose(result["gdt_start"], (2, 1, 0)) 
-        result["gdt_end"] = np.transpose(result["gdt_end"], (2, 1, 0)) 
+        result["wall_map"] = np.transpose(result["wall_map"], (2, 1, 0))
+        result["gdt_start"] = np.transpose(result["gdt_start"], (2, 1, 0))
+        result["gdt_end"] = np.transpose(result["gdt_end"], (2, 1, 0))
         result["local_peaks"] = np.fliplr(result["local_peaks"])
 
     return result
@@ -422,8 +471,8 @@ def load_mri_path_data(subject_data: Dict[str, Any], config: Config) -> Dict[str
             start_coords.append(None)
             end_coords.append(None)
     result["paths"] = loaded_paths
-    result["start_coord"] = start_coords # List of start coords for each path
-    result["end_coord"] = end_coords # List of end coords for each path
+    result["start_coord"] = start_coords  # List of start coords for each path
+    result["end_coord"] = end_coords  # List of end coords for each path
 
     # --- Calculate Wall Map (still relevant for MRI) ---
     wall_map_cache_path = cache_dir / CACHE_FILES["wall_map"]
@@ -441,16 +490,20 @@ def load_mri_path_data(subject_data: Dict[str, Any], config: Config) -> Dict[str
     image_shape = result["mri"].shape
     result["gdt_start"] = np.zeros(image_shape, dtype=np.float32)
     result["gdt_end"] = np.zeros(image_shape, dtype=np.float32)
-    result["local_peaks"] = np.zeros((0, 3), dtype=int) # Kx3, K can be 0
+    result["local_peaks"] = np.zeros((0, 3), dtype=int)  # Kx3, K can be 0
 
     # Transpose everything if needed (assuming the same logic as SmallBowelDataset)
-    if True: # This condition is always true in the original, so keeping it.
+    if True:  # This condition is always true in the original, so keeping it.
         result["mri"] = np.transpose(result["mri"], (2, 1, 0))
         result["small_bowel_seg"] = np.transpose(result["small_bowel_seg"], (2, 1, 0))
         result["spacing"] = result["spacing"][::-1]
         # Start and end coords are lists of tuples, need to transpose each tuple
-        result["start_coord"] = [tuple(c[::-1]) if c is not None else None for c in result["start_coord"]]
-        result["end_coord"] = [tuple(c[::-1]) if c is not None else None for c in result["end_coord"]]
+        result["start_coord"] = [
+            tuple(c[::-1]) if c is not None else None for c in result["start_coord"]
+        ]
+        result["end_coord"] = [
+            tuple(c[::-1]) if c is not None else None for c in result["end_coord"]
+        ]
         result["wall_map"] = np.transpose(result["wall_map"], (2, 1, 0))
         result["gdt_start"] = np.transpose(result["gdt_start"], (2, 1, 0))
         result["gdt_end"] = np.transpose(result["gdt_end"], (2, 1, 0))

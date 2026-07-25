@@ -7,18 +7,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Beta
 
+
 class ConvBlock(nn.Module):
     """
     A simple convolutional block with Conv3D, GroupNorm, and GELU activation.
     """
+
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, num_groups=8):
         super().__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
+        self.conv = nn.Conv3d(
+            in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False
+        )
         self.norm = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
         self.activation = nn.GELU()
 
     def forward(self, x):
         return self.activation(self.norm(self.conv(x)))
+
 
 class ActorNetwork(nn.Module):
     """
@@ -28,7 +33,7 @@ class ActorNetwork(nn.Module):
     and outputs alpha and beta parameters for Beta distributions.
     """
 
-    def __init__(self, input_channels=3, eps = 1.001):
+    def __init__(self, input_channels=3, eps=1.001):
         """
         Initialize the actor network.
 
@@ -56,51 +61,48 @@ class ActorNetwork(nn.Module):
         #     nn.GELU(),
         # )
 
-        # TODO: Add downscaled patch of the larger position 
-        self.conv1 = ConvBlock(input_channels, 16, kernel_size=3, padding=1, num_groups=8)
-        self.pool1 = nn.Conv3d(16, 16, kernel_size=2, stride=2, padding=0, bias=False)
-        self.conv2 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=16)
-        self.pool2 = nn.Conv3d(32, 32, kernel_size=2, stride=2, padding=0, bias=False)
-        self.conv3 = ConvBlock(32, 64, kernel_size=3, padding=1, num_groups=32)
-        self.pool3 = nn.Conv3d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
-        self.head = nn.Sequential(
-            nn.Flatten(),
-            nn.LazyLinear(512),
-            nn.GELU()
-        )
+        # Reduced base filters for memory efficiency
+        self.conv1 = ConvBlock(input_channels, 8, kernel_size=3, padding=1, num_groups=8)
+        self.pool1 = nn.AvgPool3d(kernel_size=2, stride=2)
+        self.conv2 = ConvBlock(8, 16, kernel_size=3, padding=1, num_groups=8)
+        self.pool2 = nn.AvgPool3d(kernel_size=2, stride=2)
+        self.conv3 = ConvBlock(16, 32, kernel_size=3, padding=1, num_groups=8)
 
-        # Output layer for alpha/beta parameters (6 values = 3 dimensions × 2 params)
-        self.alpha = nn.Linear(512, 3)
-        self.beta = nn.Linear(512, 3)
+        # Use GAP to make parameter count independent of patch size
+        self.gap = nn.AdaptiveAvgPool3d(1)
+
+        self.head = nn.Sequential(nn.Flatten(), nn.Linear(32, 128), nn.GELU())
+
+        # Output dimensions: 3D actions (mean/std parameters)
+        self.alpha = nn.Linear(128, 3)
+        self.beta = nn.Linear(128, 3)
         self.alpha.bias.data.zero_()
         self.beta.bias.data.zero_()
         self.eps = eps
 
     def forward(self, x):
         """Forward pass through the network."""
-        # print(x.shape)
-        x = self.conv1(x) # Residual connection
-        # print(x.shape)
+        batch_shape = x.shape[:-4]
+        if x.dim() > 5:
+            x = x.flatten(0, -5)
 
+        x = self.conv1(x)
         x = self.pool1(x)
-        # print(x.shape)
-
-        x = self.conv2(x) # Residual connection
-        # print(x.shape)
-
+        x = self.conv2(x)
         x = self.pool2(x)
-        # print(x.shape)
+        x = self.conv3(x)
 
-        x = self.conv3(x) # Residual connection
-        # print(x.shape)
-
-        x = self.pool3(x)
-        # print(x.shape)
+        x = self.gap(x)
         x = self.head(x)
 
         # Output alpha/beta parameters
         alpha = torch.clamp(F.softplus(self.alpha(x)) + self.eps, max=100)
         beta = torch.clamp(F.softplus(self.beta(x)) + self.eps, max=100)
+
+        if len(batch_shape) > 1:
+            alpha = alpha.view(*batch_shape, -1)
+            beta = beta.view(*batch_shape, -1)
+
         return alpha, beta
 
     def get_action_dist(self, obs_actor: torch.Tensor) -> Beta:
@@ -119,6 +121,6 @@ class ActorNetwork(nn.Module):
         # betas = alpha_beta_pairs[..., 1]
         alphas, betas = self(obs_actor)
         dist = Beta(alphas, betas)
-        return dist # dist \in [0,1] -> 2 * dist - 1 -> [-1,1] * d -> [-d, d]
-    
-        # dist \in [0,1]^3 -> slow down speed by gradient 
+        return dist  # dist \in [0,1] -> 2 * dist - 1 -> [-1,1] * d -> [-d, d]
+
+        # dist \in [0,1]^3 -> slow down speed by gradient

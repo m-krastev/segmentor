@@ -183,9 +183,9 @@ def train_torchrl(
             actor_network=policy_module,
             critic_network=value_module,
             clip_epsilon=config.clip_epsilon,
-            entropy_coef=config.ent_coef,
+            entropy_coeff=config.ent_coef,
             entropy_bonus=bool(config.ent_coef),
-            critic_coef=config.vf_coef,
+            critic_coeff=config.vf_coef,
             loss_critic_type="smooth_l1",  # TorchRL standard
             # loss_critic_type="l2",
             normalize_advantage=True,
@@ -213,9 +213,10 @@ def train_torchrl(
     amp_dtype = torch.bfloat16 if config.amp_dtype == "bf16" else torch.float16
     scaler = torch.GradScaler(enabled=config.amp and amp_dtype == torch.float16)
     # Cosine annealing scheduler (optional)
+    T_max = max(1, total_timesteps * config.update_epochs // batch_size)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_max=(total_timesteps * config.update_epochs // batch_size),
+        T_max=T_max,
         eta_min=5e-6,
     )
     # scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
@@ -303,20 +304,28 @@ def train_torchrl(
         pbar.update(current_frames)
         collected_frames += current_frames
 
+        # --- GAE Computation ---
+        # 1. Compute advantages BEFORE flattening the batch
+        with (
+            torch.no_grad(),
+            torch.autocast(device.type, amp_dtype, enabled=config.amp),
+        ):
+            if not qnets:
+                adv_module(batch_data)
+
+        # 2. Flatten for PPO minibatches
+        batch_data = batch_data.reshape(-1)
+        current_frames_flat = batch_data.numel()
+
         # --- PPO Update Phase ---
         actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
         for _ in range(config.update_epochs):
-            batch_data = batch_data.reshape(-1)
+            # 3. Shuffle data for i.i.d. minibatches
+            perm = torch.randperm(current_frames_flat, device=device)
+            batch_data_shuffled = batch_data[perm]
 
-            with (
-                torch.no_grad(),
-                torch.autocast(device.type, amp_dtype, enabled=config.amp),
-            ):
-                if not qnets:
-                    adv_module(batch_data)
-
-            for j in range(0, config.frames_per_batch, batch_size):
-                minibatch = batch_data[j : j + batch_size]
+            for j in range(0, current_frames_flat, batch_size):
+                minibatch = batch_data_shuffled[j : j + batch_size]
                 with torch.autocast(device.type, amp_dtype, enabled=config.amp):
                     loss_dict = loss_module(minibatch)
 
@@ -402,12 +411,14 @@ def train_torchrl(
             "charts/action_2_mode": action[:, 2].cpu().mode()[0],
         }
 
-        pbar.set_postfix({
-            "R": f"{avg_reward:.1f}",
-            "Cov": f"{final_coverage:.1f}",
-            "loss_P": f"{avg_actor_loss:.2f}",
-            "loss_V": f"{avg_critic_loss:.2f}",
-        })
+        pbar.set_postfix(
+            {
+                "R": f"{avg_reward:.1f}",
+                "Cov": f"{final_coverage:.1f}",
+                "loss_P": f"{avg_actor_loss:.2f}",
+                "loss_V": f"{avg_critic_loss:.2f}",
+            }
+        )
 
         if config.track_wandb and wandb is not None:
             log_wandb(log_data, step=collected_frames)
@@ -473,7 +484,7 @@ def train_torchrl(
         config,
         False,
         best_val_metric,
-        final_model_path
+        final_model_path,
     )
     print(f"Final model saved to {final_model_path}")
 
@@ -488,7 +499,7 @@ def save_checkpoint(
     config: Config,
     best=False,
     best_val_metric: float = float("-inf"),
-    checkpoint_path: str =None,
+    checkpoint_path: str = None,
 ):
     checkpoint_path = checkpoint_path or os.path.join(
         config.checkpoint_dir, f"checkpoint_{collected_frames}{'best' if best else ''}.pth"

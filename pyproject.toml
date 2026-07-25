@@ -19,13 +19,14 @@ dependencies = [
     "wandb",
     "kimimaro",
     "networkx",
-    "rustworkx"
+    "rustworkx",
+    "torchrl"
 ]
 
 [project.optional-dependencies]
 cuda = [
-    "cupy",
-    "cucim-cu12",
+    "cupy-cuda13x",
+    "cucim-cu13",
 ]
 
 [tool.ruff]
@@ -33,16 +34,16 @@ line-length = 100
 fix = true
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu130", marker = "platform_system != 'Darwin'"},
 ]
 torchvision = [
-  { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu130", marker = "platform_system != 'Darwin'"},
 ]
 
 [tool.uv.workspace]

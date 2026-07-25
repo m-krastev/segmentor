@@ -394,10 +394,8 @@ class SmallBowelEnv(EnvBase):
             # Additional coverage reward... rt+=
             self.max_gdt_achieved = next_gdt_val
 
-        # Survival reward
-        phi_t = self.current_step_count - 1
-        phi_tp1 = self.current_step_count
-        rt += self.config.gamma * phi_tp1 - phi_t
+        # Survival penalty (encourage reaching goal faster)
+        rt -= 0.05
 
         # 2.5 Peaks-based reward
         # rt += self.reward_map[S].sum() * self.config.r_peaks
@@ -602,7 +600,7 @@ class SmallBowelEnv(EnvBase):
             #     multiplier = 0.8
             # else:
             #     multiplier = 1.0
-            multiplier = 2 * final_coverage # Manual intervention
+            multiplier = 2 * final_coverage  # Manual intervention
             if termination_reason == TReason.GOAL_REACHED:
                 # else:
                 #     reward -= self.config.r_final * 0.5

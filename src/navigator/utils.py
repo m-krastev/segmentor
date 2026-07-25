@@ -51,7 +51,9 @@ try:
     from functools import partial
     import jax
     from jax import numpy as jnp
+
     os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
     @partial(jax.jit, static_argnames=("max_npoints",))
     def line_nd_jax(
         start: jnp.ndarray, stop: jnp.ndarray, max_npoints: int
@@ -335,7 +337,7 @@ def compute_gdt(
     """
     speed = np.ones_like(segmentation_mask, dtype=float)
     speed[segmentation_mask == 0] = 1e-5
-    phi = np.ones_like(segmentation_mask, dtype=float) * np.inf
+    phi = np.ones_like(segmentation_mask, dtype=np.float64) * 1e10
     if (
         0 <= start_voxel[0] < phi.shape[0]
         and 0 <= start_voxel[1] < phi.shape[1]
@@ -344,9 +346,12 @@ def compute_gdt(
         phi[start_voxel] = 0.0
     else:
         raise IndexError(f"Start voxel {start_voxel} outside mask bounds {phi.shape} for GDT.")
-    masked_phi = np.ma.MaskedArray(phi, np.logical_not(segmentation_mask > 0))
-    gdt = skfmm.travel_time(masked_phi, speed, dx=voxel_size)
-    gdt = gdt.filled(-np.inf)
+
+    # We use raw phi to avoid skfmm issues with MaskedArrays in some versions
+    gdt = skfmm.travel_time(phi, speed, dx=voxel_size)
+
+    # Manually mask the result to keep it consistent with the segmentation mask
+    gdt[segmentation_mask == 0] = -np.inf
     return gdt
 
 

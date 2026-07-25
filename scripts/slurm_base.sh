@@ -10,13 +10,14 @@
 #SBATCH --output=/home/%u/logs/%x-%A.out
 date
 
+
 # Definitions
-export HF_HOME="/scratch-shared/$USER"
+# export HF_HOME="/scratch-shared/$USER"
 export HF_TOKEN=
 export GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
 
 # make sure the correct modules are used and that the virtual environment is active
-PROJECT_ROOT=$HOME/segmentor
+PROJECT_ROOT=$HOME/project/segmentor
 source $PROJECT_ROOT/scripts/slurm_setup.sh
 setup $PROJECT_ROOT
 cd $PROJECT_ROOT
@@ -38,5 +39,13 @@ DATASET_ID=18
 # cd notebooks
 # python graph_approach_fail.py --sigmas 1 3 --thetav 3 --thetad 6 --supervoxel_size 216 --delta 5000 --use_rustworkx --precompute --filename_ct ../data/bowelseg/s0006/ct.nii.gz --filename_gt ../data/bowelseg/s0006/segmentations/small_bowel.nii.gz --start_volume ../data/bowelseg/s0006/segmentations/duodenum.nii.gz --end_volume ../data/bowelseg/s0006/segmentations/colon.nii.gz
 
-python -O -m navigator --data-dir data/data --amp --patch-size-mm 24
+
+export LD_LIBRARY_PATH=$HOME/project/segmentor/.venv/lib/python3.12/site-packages/nvidia/cu13/lib:$LD_LIBRARY_PATH
+export CUDA_PATH=$HOME/project/segmentor/.venv/lib/python3.12/site-packages/nvidia/cu13
+export CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
+
+export NVCC_APPEND_FLAGS="-std=c++17"
+export CUPY_NVCC_GENERATE_CODE="current"
+
+python -O -m navigator --data-dir data/phantoms --amp --patch-size-mm 24
 
