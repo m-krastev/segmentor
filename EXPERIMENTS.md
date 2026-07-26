@@ -338,10 +338,10 @@ command or service, acceptance metrics, and outcome here.
   - joint traversal success rate at Dice >= 0.40: **`1.00`**
 - Output:
   `results/navigator_nnunet/ablation-a6-final-eval/summary.json`
-- Verdict: **preliminary learned gate passed** on both held-out cohort cases.
-  This is genuine policy-only evaluation, not the oracle. The split is only
-  two cases, so broader unseen-case evaluation is required before claiming
-  robust generalization.
+- Original verdict at run time: the configured 9 mm gate passed on both
+  held-out cohort cases. The independent M0 audit below shows that this does
+  **not** pass the original 6 mm construction, so it must not be reported as
+  final learned acceptance.
 
 ## 2026-07-26 — A6.1: broader unseen connected-case audit
 
@@ -419,3 +419,40 @@ command or service, acceptance metrics, and outcome here.
 - Verdict: **failed generalization despite improving supervised fit**. More
   teacher-forced epochs alone overfit route actions and do not fix accumulated
   policy errors or the partially observed branch-ordering problem.
+
+## 2026-07-26 — M0: independent A6 metric audit
+
+- Purpose: verify the claimed A6 result without calling the environment's
+  coverage counters or success flag.
+- Method:
+  - load each saved trajectory and the raw small-bowel label independently;
+  - rasterize every consecutive trajectory segment;
+  - construct the path tube with SciPy's independent taxicab distance
+    transform, matching the environment's L1 dilation geometry;
+  - recompute binary Dice directly as
+    `2 * |tube ∩ bowel| / (|tube| + |bowel|)`;
+  - recompute Euclidean final-to-goal distance from saved coordinates.
+- At the A6 run's configured L1 radius of 9 mm:
+  - `s0190`: recomputed Dice `0.464288875` versus reported `0.464288861`
+  - `s0918`: recomputed Dice `0.417873926` versus reported `0.417873919`
+  - the counter implementation is numerically correct to floating-point
+    precision.
+- At the original L1 radius of 6 mm:
+  - `s0190`: Dice `0.28415`
+  - `s0918`: Dice `0.25862`
+  - mean Dice: `0.27139`, below the requested `0.40`.
+- Endpoint audit:
+  - `s0190` stopped `8.746 mm` from the saved goal;
+  - `s0918` stopped `8.617 mm` from the saved goal;
+  - neither path reached the exact endpoint or the original 6 mm tolerance;
+  - both passed only because the same radius parameter had been raised to
+    9 mm and is also reused as the endpoint tolerance.
+- Geometry cross-check: using a true Euclidean 9 mm tube instead of the
+  implemented L1 tube gives Dice `0.58614` and `0.51846`; therefore the code's
+  "radius" is an L1 diamond, not an isotropic physical sphere.
+- Verdict: **retract the A6 acceptance claim under the original task
+  definition**. The metric counters are internally correct, but evaluation
+  geometry and endpoint tolerance are coupled. Raising one parameter both
+  thickened the predicted path and relaxed what counted as end-to-end
+  traversal. A fixed 6 mm tube and a separately specified endpoint tolerance
+  are required for a trustworthy acceptance test.
