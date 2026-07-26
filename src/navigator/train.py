@@ -1,5 +1,6 @@
 import os
 import json
+import math
 from pathlib import Path
 from collections import defaultdict
 
@@ -8,25 +9,14 @@ import torch
 import torch.optim as optim
 from tensordict.nn import set_composite_lp_aggregate
 
-# TorchRL components
-from torchrl.collectors import (
-    MultiaSyncDataCollector,
-    MultiSyncDataCollector,
-    SyncDataCollector,
-)
-from torchrl.data import (
-    LazyTensorStorage,
-    SamplerWithoutReplacement,
-    TensorDictReplayBuffer,
-)
-from torchrl.data.replay_buffers import ReplayBuffer
-from torchrl.envs import GymEnv
+# TorchRL renamed SyncDataCollector to Collector in 0.13.
+try:
+    from torchrl.collectors import SyncDataCollector
+except ImportError:
+    from torchrl.collectors import Collector as SyncDataCollector
 from torchrl.envs.utils import ExplorationType, set_exploration_type
-from torchrl.modules import ProbabilisticActor, ValueOperator
 from torchrl.objectives import (
     ClipPPOLoss,
-    HardUpdate,
-    KLPENPPOLoss,
     SoftUpdate,
     TD3Loss,
 )
@@ -40,7 +30,7 @@ from .config import Config
 from .dataset import SmallBowelDataset  # Keep for creating the iterator
 
 # Use the TorchRL environment wrapper and factory function
-from .environment import SmallBowelEnv, make_sb_env
+from .environment import make_sb_env
 
 torch.set_float32_matmul_precision("medium")
 torch._dynamo.config.capture_dynamic_output_shape_ops = True
@@ -81,17 +71,19 @@ def validation_loop_torchrl(
 
     with (
         torch.no_grad(),
-        set_exploration_type(ExplorationType.MODE),
-    ):  # Use deterministic actions
+        # Behavioral cloning supervises and rolls out the Beta mean. Using the
+        # mode here can point elsewhere when concentration parameters are near
+        # one, so deterministic validation must use the same policy statistic.
+        set_exploration_type(ExplorationType.MEAN),
+    ):
         for i in tqdm(range(num_val_subjects), desc="Validation"):
-            # best of k
-            # Store intermediate results
+            # Deterministic mode produces one reproducible rollout per subject.
             paths = []
             path_masks = []
             intermediate_results = []
-            reward, step_count, final_coverage = 0, 0, 0
+            reward, step_count, final_coverage, success = 0, 0, 0, 0
             must_load_new_subject = True
-            for _ in range(10):
+            for _ in range(1):
                 try:
                     # Reset the environment for the current subject
                     # This will load the new subject's data
@@ -108,33 +100,40 @@ def validation_loop_torchrl(
                     total_reward = rollout["next", "info", "total_reward"].sum().item()
                     step_count = rollout["action"].shape[1]
                     final_coverage = val_env._get_final_coverage().item()
+                    success = rollout["next", "info", "final_success"].sum().item()
 
                     paths.append(val_env.get_tracking_history())
                     path_masks.append(val_env.get_tracking_mask())
-                    intermediate_results.append((reward, step_count, final_coverage, total_reward))
+                    intermediate_results.append(
+                        (reward, step_count, final_coverage, total_reward, success)
+                    )
                 except Exception as e:
                     print(f"Error during validation rollout for subject {i}: {e}")
 
-            # Choose the best result from the 10 rollouts
+            # Keep the common selection path so stochastic validation can be
+            # reintroduced explicitly later without silently cherry-picking.
             if len(intermediate_results) == 0:
                 print(
                     f"Too many errors caused no successful rollout to be generated. Skipping subject: {i}"
                 )
                 continue
-            best_run = intermediate_results.index(max(intermediate_results, key=lambda x: x[-1]))
-            reward, step_count, final_coverage, total_reward = intermediate_results[best_run]
+            best_run = intermediate_results.index(max(intermediate_results, key=lambda x: x[-2]))
+            reward, step_count, final_coverage, total_reward, success = intermediate_results[
+                best_run
+            ]
             path = paths[best_run]
             path_mask = path_masks[best_run]
 
             # Save the best path and mask
             val_env.tracking_path_history = path
             val_env.cumulative_path_mask = path_mask
-            val_env.save_path(save_path)
+            val_env.save_path(save_path / val_env._current_subject_data["id"])
 
             val_results["reward"].append(reward)
             val_results["length"].append(step_count)
             val_results["coverage"].append(final_coverage)
             val_results["total_reward"].append(total_reward)
+            val_results["success"].append(success)
 
     val_env.close()  # Close the validation environment
 
@@ -144,14 +143,17 @@ def validation_loop_torchrl(
         "validation/avg_length": np.mean(val_results["length"]),
         "validation/avg_coverage": np.mean(val_results["coverage"]),
         "validation/total_reward": np.mean(val_results["total_reward"]),
+        "validation/success_rate": np.mean(val_results["success"]),
     }
 
     with open(save_path / "metrics.json", "w") as f:
         json.dump(final_metrics | val_results, f, indent=4)
 
     print(
-        f"Validation Results: Avg R/L/C: {final_metrics['validation/avg_reward']:.2f} / "
-        f"{final_metrics['validation/avg_length']:.1f} / {final_metrics['validation/avg_coverage']:.2f} "
+        f"Validation Results: Avg R/L/C/S: {final_metrics['validation/avg_reward']:.2f} / "
+        f"{final_metrics['validation/avg_length']:.1f} / "
+        f"{final_metrics['validation/avg_coverage']:.2f} / "
+        f"{final_metrics['validation/success_rate']:.2f}"
     )
     return final_metrics
 
@@ -188,7 +190,9 @@ def train_torchrl(
             critic_coeff=config.vf_coef,
             loss_critic_type="smooth_l1",  # TorchRL standard
             # loss_critic_type="l2",
-            normalize_advantage=True,
+            # GAE standardizes once over the full rollout. Renormalizing each
+            # temporal minibatch changes advantage signs and destabilizes PPO.
+            normalize_advantage=False,
         )
         if not qnets
         else TD3Loss(
@@ -213,10 +217,10 @@ def train_torchrl(
     amp_dtype = torch.bfloat16 if config.amp_dtype == "bf16" else torch.float16
     scaler = torch.GradScaler(enabled=config.amp and amp_dtype == torch.float16)
     # Cosine annealing scheduler (optional)
-    T_max = max(1, total_timesteps * config.update_epochs // batch_size)
+    scheduler_steps = math.ceil(total_timesteps / config.frames_per_batch) * config.update_epochs
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_max=T_max,
+        T_max=max(1, scheduler_steps),
         eta_min=5e-6,
     )
     # scheduler_c = optim.lr_scheduler.CosineAnnealingLR(
@@ -225,11 +229,19 @@ def train_torchrl(
     #     eta_min=5e-6,
     # )
     collected_frames, num_updates = 0, 0
+    best_val_metric = float("-inf")
 
     # --- Checkpoint Reloading ---
     if config.reload_checkpoint_path:
         try:
-            checkpoint = torch.load(config.reload_checkpoint_path, map_location=device)
+            # Checkpoints are created locally by this trainer and include optimizer
+            # state with NumPy scalar values, which PyTorch's weights-only loader
+            # rejects by default in recent releases.
+            checkpoint = torch.load(
+                config.reload_checkpoint_path,
+                map_location=device,
+                weights_only=False,
+            )
             policy_module.load_state_dict(checkpoint["policy_module_state_dict"])
             value_module.load_state_dict(checkpoint["value_module_state_dict"])
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -248,19 +260,18 @@ def train_torchrl(
         except Exception as e:
             print(f"An unexpected error occurred while loading checkpoint: {e}")
 
-    # Advance the scheduler to the correct state
-    for _ in range(num_updates):
-        scheduler.step()
-
     # --- Collector ---
     # Collects data by interacting policy_module with environment instances
-    env_maker = lambda: make_sb_env(
-        config,
-        train_set,
-        device,
-        num_episodes_per_sample=config.num_episodes_per_sample,
-        check_env=False,
-    )
+    def env_maker():
+        return make_sb_env(
+            config,
+            train_set,
+            device,
+            num_episodes_per_sample=config.num_episodes_per_sample,
+            num_steps_per_sample=config.num_steps_per_sample,
+            check_env=False,
+        )
+
     collector = SyncDataCollector(
         create_env_fn=env_maker,  # Function to create environments
         policy=policy_module,  # Policy module to use for action selection
@@ -296,8 +307,6 @@ def train_torchrl(
 
     # --- Training Loop ---
     pbar = tqdm(total=total_timesteps, desc="Training", unit="steps", initial=collected_frames)
-    # Use a specific metric like coverage or reward
-    best_val_metric = float("-inf")
     # Use collector's iterator
     for i, batch_data in enumerate(collector, start=collected_frames):
         current_frames = batch_data.numel()  # Number of steps collected in this batch
@@ -333,12 +342,14 @@ def train_torchrl(
                         actor_loss = loss_dict["loss_actor"]
                         critic_loss = loss_dict["loss_qvalue"]
                     else:
-                        actor_loss = loss_dict["loss_objective"] + loss_dict["loss_entropy"]
+                        actor_loss = loss_dict["loss_objective"]
+                        if "loss_entropy" in loss_dict.keys():
+                            actor_loss = actor_loss + loss_dict["loss_entropy"]
                         critic_loss = loss_dict["loss_critic"]
 
+                total_loss = actor_loss + critic_loss
                 optimizer.zero_grad()
-                scaler.scale(actor_loss).backward()
-                scaler.scale(critic_loss).backward()
+                scaler.scale(total_loss).backward()
                 scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     loss_module.parameters(), config.max_grad_norm
@@ -347,10 +358,18 @@ def train_torchrl(
                 scaler.update()
 
                 # Log losses for this minibatch update
-                actor_losses.append(actor_loss)
-                critic_losses.append(critic_loss)
-                entropy_losses.append(loss_dict["loss_entropy"] if not qnets else torch.tensor(0.0))
-                kl_div.append(loss_dict["kl_approx"] if not qnets else torch.tensor(0.0))
+                actor_losses.append(actor_loss.detach())
+                critic_losses.append(critic_loss.detach())
+                entropy_losses.append(
+                    loss_dict["loss_entropy"].detach()
+                    if not qnets and "loss_entropy" in loss_dict.keys()
+                    else torch.tensor(0.0, device=device)
+                )
+                kl_div.append(
+                    loss_dict["kl_approx"].detach()
+                    if not qnets
+                    else torch.tensor(0.0, device=device)
+                )
 
             scheduler.step()
             # scheduler_c.step()
@@ -369,6 +388,8 @@ def train_torchrl(
         # Log episode stats from collected batch_data
         final_coverage = batch_data["next", "info", "final_coverage"]
         final_coverage = final_coverage[idx].mean()
+        success_rate = batch_data["next", "info", "final_success"]
+        success_rate = success_rate[idx].mean()
         step_count = batch_data["next", "info", "final_step_count"].float()
         step_count = step_count[idx].mean()
         ep_len = batch_data["next", "info", "final_length"].float()
@@ -394,6 +415,7 @@ def train_torchrl(
             "train/wall_gradient": wall_gradient,
             "train/episode_len": ep_len,
             "train/final_coverage": final_coverage,
+            "train/success_rate": success_rate,
             "train/total_reward": total_reward,
             "charts/learning_rate": optimizer.param_groups[0]["lr"],
             "charts/max_gdt_achieved": max_mean,

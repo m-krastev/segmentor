@@ -47,5 +47,10 @@ export CCCL_IGNORE_DEPRECATED_CPP_DIALECT=1
 export NVCC_APPEND_FLAGS="-std=c++17"
 export CUPY_NVCC_GENERATE_CODE="current"
 
-python -O -m navigator --data-dir data/phantoms --amp --patch-size-mm 24
-
+python -O -m navigator \
+  --data-dir data/phantoms \
+  --amp \
+  --voxel-size-mm 1.0 \
+  --patch-size-mm 24 \
+  --max-step-displacement-mm 6 \
+  --cumulative-path-radius-mm 6

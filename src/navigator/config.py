@@ -20,7 +20,7 @@ class Config:
     reload_checkpoint_path: Optional[str] = None  # Path to checkpoint for evaluation
     seed: int = 42  # Random seed for reproducibility
     td3: bool = False
-    train_gym_env: bool = False # Dummy flag to train a gym environment
+    train_gym_env: bool = False  # Dummy flag to train a gym environment
 
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training
@@ -30,7 +30,7 @@ class Config:
 
     # --- Wandb Logging ---
     track_wandb: bool = True  # Flag to enable/disable wandb
-    wandb_project_name: str = "toydata" # toydata
+    wandb_project_name: str = "toydata"  # toydata
     wandb_entity: Optional[str] = None  # Your wandb username or team name (optional)
     wandb_run_name: Optional[str] = None  # Optional run name, defaults to auto-generated
 
@@ -38,27 +38,41 @@ class Config:
     voxel_size_mm: float = 1.0
     patch_size_mm: int = 16
     max_step_displacement_mm: float = 6
-    use_immediate_gdt_reward: bool = False
+    use_immediate_gdt_reward: bool = True
     max_episode_steps: int = 2048
-    cumulative_path_radius_mm: float = 6.0 # The bowel should literally be no more than 2 cm in diameter
+    cumulative_path_radius_mm: float = 6.0
+    # Traversable space is the segmentation by default. A large dilation lets
+    # the policy jump across nearby bowel loops and solve only the endpoint task.
+    allowed_area_radius_mm: float = 0.0
     # wall_map_sigmas: Tuple[int, ...] = (1, 3)
     wall_map_sigmas: Tuple[int, ...] = (1,)
 
     # --- Reward Hyperparameters ---
-    # Typically a penalty related to the game mechanics, e.g. zero movement, crossing walls, out of segmentation, etc.
-    r_val1: float = 4.0
-    # More active reward, e.g. moving towards the target, used along with the GDT
-    r_val2: float = 6.0
-    r_zero_mov: float = 100.0
-    r_final: float = 100 # Seems to work okay with 1600
+    # Keep dense penalties on the same scale as one step of GDT progress. Large
+    # per-step costs make deliberate early termination optimal.
+    r_val1: float = 0.25
+    r_val2: float = 1.0
+    r_zero_mov: float = 1.0
+    r_final: float = 50.0
+    coverage_reward_scale: float = 50.0
+    success_coverage_threshold: float = 0.55
+    step_penalty: float = 0.01
+    wall_penalty_scale: float = 0.1
     # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
-    r_val3: float = 3.0
+    r_val3: float = 0.1
+    # An endpoint-directed prior bypasses visual navigation on the phantoms.
+    goal_action_prior: float = 0.0
+    log_episode_ends: bool = False
 
     # --- Training Hyperparameters ---
     # For each subject, how many episodes to run before switching to the next one (#16384)
     num_episodes_per_sample: int = 256  # 32768
     num_steps_per_sample: int = 8192
+    behavior_cloning_epochs: int = 0
+    behavior_cloning_learning_rate: float = 3e-4
+    behavior_cloning_batch_size: int = 64
+    behavior_cloning_max_policy_probability: float = 1.0
     # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 10_000_000
@@ -89,12 +103,36 @@ class Config:
     max_step_vox: int = field(init=False)
     patch_size_vox: Tuple[int, int, int] = field(init=False)
     cumulative_path_radius_vox: int = field(init=False)
+    allowed_area_radius_vox: int = field(init=False)
     gdt_max_increase_theta: float = field(init=False)
+    observation_channels: int = field(init=False, default=4)
+    context_features: int = field(init=False, default=5)
 
     def __post_init__(self):
         def mm_to_vox(dist_mm: float, voxel_dim_mm: float) -> int:
             """Convert millimeter distance to voxel units."""
             return int(dist_mm // voxel_dim_mm)
+
+        if self.voxel_size_mm <= 0:
+            raise ValueError("voxel_size_mm must be positive")
+        if self.allowed_area_radius_mm < 0:
+            raise ValueError("allowed_area_radius_mm must be non-negative")
+        if not 0 <= self.success_coverage_threshold <= 1:
+            raise ValueError("success_coverage_threshold must be between 0 and 1")
+        if self.coverage_reward_scale < 0:
+            raise ValueError("coverage_reward_scale must be non-negative")
+        if self.step_penalty < 0:
+            raise ValueError("step_penalty must be non-negative")
+        if self.behavior_cloning_epochs < 0:
+            raise ValueError("behavior_cloning_epochs must be non-negative")
+        if self.behavior_cloning_learning_rate <= 0:
+            raise ValueError("behavior_cloning_learning_rate must be positive")
+        if self.behavior_cloning_batch_size < 1:
+            raise ValueError("behavior_cloning_batch_size must be positive")
+        if not 0 <= self.behavior_cloning_max_policy_probability <= 1:
+            raise ValueError(
+                "behavior_cloning_max_policy_probability must be between 0 and 1"
+            )
 
         self.checkpoint_dir = self.checkpoint_dir + "/" + self.data_dir
         self.gdt_cell_length = self.voxel_size_mm
@@ -104,7 +142,14 @@ class Config:
         self.cumulative_path_radius_vox = mm_to_vox(
             self.cumulative_path_radius_mm, self.voxel_size_mm
         )
-        self.gdt_max_increase_theta = max(0.0, self.max_step_displacement_mm * math.sqrt(3))
+        self.allowed_area_radius_vox = mm_to_vox(self.allowed_area_radius_mm, self.voxel_size_mm)
+        if self.max_step_vox < 1:
+            raise ValueError("max_step_displacement_mm must span at least one voxel")
+        if patch_vox_dim < 8:
+            raise ValueError("patch_size_mm must span at least eight voxels")
+        if self.goal_action_prior < 0:
+            raise ValueError("goal_action_prior must be non-negative")
+        self.gdt_max_increase_theta = self.max_step_vox * self.voxel_size_mm * math.sqrt(3)
 
 
 def parse_args() -> Config:
@@ -125,7 +170,10 @@ def parse_args() -> Config:
             "max_step_vox",
             "patch_size_vox",
             "cumulative_path_radius_vox",
+            "allowed_area_radius_vox",
             "gdt_max_increase_theta",
+            "observation_channels",
+            "context_features",
         ]:
             continue
 

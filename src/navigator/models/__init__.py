@@ -5,12 +5,10 @@ Neural network models for the Navigator RL agent.
 from typing import Union
 import torch
 from tensordict.nn import TensorDictModule, TensorDictSequential
-from tensordict.nn.distributions import NormalParamExtractor
 from tensordict.nn import InteractionType
 from tensordict.nn.utils import biased_softplus
 from torchrl.modules import ProbabilisticActor, ValueOperator
 from torchrl.data import Bounded
-from torchrl.modules.distributions import TanhNormal
 from torch.distributions import Beta, Independent
 from .actor import ActorNetwork
 from .critic import CriticNetwork, StateActionValueNetwork
@@ -74,18 +72,28 @@ class IndependentBeta(Independent):
         return super().log_prob(((value - self.min) / self.scale).clamp(self.eps, 1.0 - self.eps))
 
 # --- TorchRL Modules ---
-def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False, in_channels_actor = 3, in_channels_critic = 3):
+def create_ppo_modules(
+    config: Config,
+    device: torch.device,
+    qnets: bool = False,
+    in_channels_actor: int | None = None,
+    in_channels_critic: int | None = None,
+):
     """Creates the PPO actor and critic modules compatible with TorchRL."""
+    in_channels_actor = in_channels_actor or config.observation_channels
+    in_channels_critic = in_channels_critic or config.observation_channels
 
     # Actor Network Base
     actor_cnn_base = ActorNetwork(
         input_channels=in_channels_actor,
+        context_features=config.context_features,
+        goal_action_prior=config.goal_action_prior,
     ).to(device)
 
     # Wrap CNN base to extract "actor" obs and output "dist_params"
     actor_cnn_module = TensorDictModule(
         module=actor_cnn_base,
-        in_keys=["actor"],  # Input key from observation spec
+        in_keys=["actor", "context"],
         # out_keys=["dist_params"],  # Intermediate output key
         out_keys=["alpha", "beta"],  # Intermediate output key
     )
@@ -125,17 +133,22 @@ def create_ppo_modules(config: Config, device: torch.device, qnets: bool = False
     ).to(device)
 
     if qnets:
-        critic_base = StateActionValueNetwork(in_channels_critic, 3).to(device)
+        critic_base = StateActionValueNetwork(
+            in_channels_critic,
+            action_dim=3,
+            context_features=config.context_features,
+        ).to(device)
     else:
         # Critic Network Base
         critic_base = CriticNetwork(
             input_channels=in_channels_critic,
+            context_features=config.context_features,
         ).to(device)
 
     # Wrap critic using ValueOperator
     value_module = ValueOperator(
         module=critic_base,
-        in_keys=["actor", "action"] if qnets else ["actor"],  # Input key from observation spec
+        in_keys=["actor", "context", "action"] if qnets else ["actor", "context"],
         out_keys=["state_action_value" if qnets else "state_value"],  # Standard output key for value estimates
     ).to(device)
 

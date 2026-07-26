@@ -8,7 +8,6 @@ import numpy as np
 from torch.utils.data import Dataset
 from typing import Dict, List, Any
 
-from segmentor.utils.medutils import load_and_normalize_nifti
 
 # Import necessary calculation functions
 from .utils import (
@@ -16,7 +15,6 @@ from .utils import (
     compute_wall_map,
     compute_gdt,
     distance_transform_edt,
-    binary_dilation,
 )
 
 from .config import Config
@@ -180,6 +178,13 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     result["image"] = image_np
     result["image_affine"] = image_nii.affine
     result["spacing"] = image_nii.header.get_zooms()
+    expected_spacing = (config.voxel_size_mm,) * 3
+    if not np.allclose(result["spacing"][:3], expected_spacing, atol=1e-3):
+        raise ValueError(
+            f"NIfTI spacing {result['spacing'][:3]} for {result['id']} does not match "
+            f"configured isotropic spacing {expected_spacing}. Pass the correct "
+            "--voxel-size-mm value or resample the data before training."
+        )
 
     # Load segmentations (ensure they exist before loading)
     seg_np = np.asanyarray(nib.load(subject_data["small_bowel"]).dataobj)
@@ -200,8 +205,6 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     if subject_data.get("path") is not None:
         try:
             result["gt_path"] = np.loadtxt(subject_data["path"], dtype=int)
-            if True:
-                result["gt_path"] = np.fliplr(result["gt_path"])
         except Exception as e:
             print(f"Warning: Could not load GT path {subject_data['path']}: {e}")
 
@@ -235,10 +238,9 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
             )
         elif result.get("gt_path") is not None:
             # Fallback for phantoms: use GT path.
-            # result["gt_path"] was already fliplr'd (to ZYX), so we flip it back to get XYZ native order
-            native_gt_path = np.fliplr(result["gt_path"])
-            start_coord = tuple(native_gt_path[0].astype(int))
-            end_coord = tuple(native_gt_path[-1].astype(int))
+            # Nibabel arrays and path.npy both use native XYZ voxel order.
+            start_coord = tuple(result["gt_path"][0].astype(int))
+            end_coord = tuple(result["gt_path"][-1].astype(int))
             print(f"Using GT path as start/end fallback for {result['id']}")
         else:
             raise ValueError(
@@ -260,7 +262,8 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     result["end_coord"] = end_coord
 
     # --- Load/Calculate Wall Map ---
-    wall_map_cache_path = cache_dir / CACHE_FILES["wall_map"]
+    sigma_key = "-".join(str(sigma) for sigma in config.wall_map_sigmas)
+    wall_map_cache_path = cache_dir / f"wall_map_sigmas-{sigma_key}.nii"
     if wall_map_cache_path.exists():
         wall_map_np = nib.load(wall_map_cache_path).get_fdata(dtype=np.float32)
     else:
@@ -332,6 +335,11 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         result["gdt_start"] = np.transpose(result["gdt_start"], (2, 1, 0))
         result["gdt_end"] = np.transpose(result["gdt_end"], (2, 1, 0))
         result["local_peaks"] = np.fliplr(result["local_peaks"])
+        # path.npy is native XYZ on disk. Keep the conversion next to the
+        # volume transposes so the path and every spatial tensor enter the
+        # environment in the same ZYX convention.
+        if result.get("gt_path") is not None:
+            result["gt_path"] = np.fliplr(result["gt_path"])
 
     return result
 
