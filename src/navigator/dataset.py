@@ -51,6 +51,21 @@ NNUNET_CASE_FILES = (
 )
 
 
+def normalize_coordinate_rows(
+    coordinates: np.ndarray,
+    fallback: tuple[tuple[int, int, int], ...],
+) -> np.ndarray:
+    """Return voxel coordinates with a stable ``[N, 3]`` shape."""
+    coordinates = np.asarray(coordinates, dtype=int)
+    if coordinates.size == 0:
+        coordinates = np.asarray(fallback, dtype=int)
+    if coordinates.size % 3:
+        raise ValueError(
+            f"Coordinate array contains {coordinates.size} values, expected a multiple of 3"
+        )
+    return coordinates.reshape(-1, 3)
+
+
 class SmallBowelDataset(Dataset):
     """
     Dataset class for small bowel path tracking that scans a directory for matching files.
@@ -418,7 +433,11 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         # Choose only peaks for which gdt > 0
         # peaks = [peak for peak in local_peaks_np if gdt_start_np[tuple(peak)] > 0]
         # local_peaks_np = np.array(peaks)
-        np.savetxt(local_peaks_cache_path, local_peaks_np, fmt="%d")
+    local_peaks_np = normalize_coordinate_rows(
+        local_peaks_np,
+        fallback=(result["start_coord"], result["end_coord"]),
+    )
+    np.savetxt(local_peaks_cache_path, local_peaks_np, fmt="%d")
     result["local_peaks"] = local_peaks_np
 
     if True:

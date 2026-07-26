@@ -3,10 +3,32 @@ import unittest
 from pathlib import Path
 
 from navigator.config import Config
-from navigator.dataset import NNUNET_CASE_FILES, NNUNetActualDataset
+from navigator.dataset import (
+    NNUNET_CASE_FILES,
+    NNUNetActualDataset,
+    normalize_coordinate_rows,
+)
 
 
 class NNUNetActualDatasetTest(unittest.TestCase):
+    def test_single_coordinate_keeps_two_dimensional_shape(self):
+        coordinates = normalize_coordinate_rows(
+            [1, 2, 3],
+            fallback=((4, 5, 6),),
+        )
+
+        self.assertEqual(coordinates.shape, (1, 3))
+        self.assertEqual(coordinates.tolist(), [[1, 2, 3]])
+
+    def test_empty_coordinates_use_fallback(self):
+        coordinates = normalize_coordinate_rows(
+            [],
+            fallback=((1, 2, 3), (4, 5, 6)),
+        )
+
+        self.assertEqual(coordinates.shape, (2, 3))
+        self.assertEqual(coordinates.tolist(), [[1, 2, 3], [4, 5, 6]])
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "nnUNet_raw"
