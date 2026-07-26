@@ -20,7 +20,8 @@ dependencies = [
     "kimimaro",
     "networkx",
     "rustworkx",
-    "torchrl"
+    "torchrl",
+    "tensorboard",
 ]
 
 [project.optional-dependencies]

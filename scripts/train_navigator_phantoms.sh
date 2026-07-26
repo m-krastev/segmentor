@@ -34,6 +34,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --amp \
   --amp-dtype bf16 \
   --no-track-wandb \
+  --track-tensorboard \
   --load-from-checkpoint "$CHECKPOINT" \
   --voxel-size-mm 1 \
   --patch-size-mm 24 \

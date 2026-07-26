@@ -9,9 +9,37 @@ from torchrl.objectives.value import GAE
 from navigator.config import Config
 from navigator.models import create_ppo_modules
 from navigator.models.actor import ActorNetwork
+from navigator.train import log_tensorboard
 
 
 class NavigatorPpoSmokeTest(unittest.TestCase):
+    def test_tensorboard_logger_only_writes_scalars(self):
+        class Writer:
+            def __init__(self):
+                self.scalars = []
+
+            def add_scalar(self, key, value, global_step):
+                self.scalars.append((key, value, global_step))
+
+        writer = Writer()
+        log_tensorboard(
+            writer,
+            {
+                "losses/policy_loss": torch.tensor(1.25),
+                "validation/success_rate": 0.5,
+                "ignored/vector": torch.tensor([1.0, 2.0]),
+            },
+            step=128,
+        )
+
+        self.assertEqual(
+            writer.scalars,
+            [
+                ("losses/policy_loss", 1.25, 128),
+                ("validation/success_rate", 0.5, 128),
+            ],
+        )
+
     def test_goal_prior_is_opt_in(self):
         config = Config(
             device="cpu",

@@ -34,6 +34,12 @@ class Config:
     wandb_entity: Optional[str] = None  # Your wandb username or team name (optional)
     wandb_run_name: Optional[str] = None  # Optional run name, defaults to auto-generated
 
+    # --- TensorBoard Logging ---
+    track_tensorboard: bool = False
+    # Exact run directory; otherwise a timestamped directory is created below
+    # <checkpoint_dir>/tensorboard.
+    tensorboard_log_dir: Optional[str] = None
+
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
     patch_size_mm: int = 16
@@ -130,9 +136,7 @@ class Config:
         if self.behavior_cloning_batch_size < 1:
             raise ValueError("behavior_cloning_batch_size must be positive")
         if not 0 <= self.behavior_cloning_max_policy_probability <= 1:
-            raise ValueError(
-                "behavior_cloning_max_policy_probability must be between 0 and 1"
-            )
+            raise ValueError("behavior_cloning_max_policy_probability must be between 0 and 1")
 
         self.checkpoint_dir = self.checkpoint_dir + "/" + self.data_dir
         self.gdt_cell_length = self.voxel_size_mm

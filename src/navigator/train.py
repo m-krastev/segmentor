@@ -1,6 +1,7 @@
 import os
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
 
@@ -25,6 +26,11 @@ from tqdm import tqdm
 
 import wandb
 
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    SummaryWriter = None
+
 # Your project components
 from .config import Config
 from .dataset import SmallBowelDataset  # Keep for creating the iterator
@@ -43,6 +49,47 @@ def log_wandb(data: dict, **kwargs):
         wandb.log(data, **kwargs)
     else:
         print("WandB not initialized. Skipping logging.")
+
+
+def create_tensorboard_writer(config: Config):
+    """Create a local TensorBoard writer when requested."""
+    if not config.track_tensorboard:
+        return None
+    if SummaryWriter is None:
+        print(
+            "TensorBoard tracking requested, but tensorboard is not installed. "
+            "Install project dependencies with `uv sync`."
+        )
+        return None
+
+    if config.tensorboard_log_dir:
+        log_dir = config.tensorboard_log_dir
+    else:
+        run_name = config.wandb_run_name or (f"{datetime.now():%Y%m%d-%H%M%S}-{os.getpid()}")
+        log_dir = str(Path(config.checkpoint_dir) / "tensorboard" / run_name)
+    writer = SummaryWriter(log_dir=log_dir, flush_secs=30)
+    writer.add_text(
+        "configuration",
+        f"```json\n{json.dumps(vars(config), indent=2)}\n```",
+        global_step=0,
+    )
+    print(f"TensorBoard logs: {Path(log_dir).resolve()}")
+    return writer
+
+
+def log_tensorboard(writer, data: dict, step: int):
+    """Write scalar entries from an existing metrics dictionary."""
+    if writer is None:
+        return
+    for key, value in data.items():
+        if isinstance(value, torch.Tensor):
+            if value.numel() != 1:
+                continue
+            value = value.detach().item()
+        elif isinstance(value, np.generic):
+            value = value.item()
+        if isinstance(value, (int, float)):
+            writer.add_scalar(key, value, global_step=step)
 
 
 # --- Validation Loop (Adaptation Needed) ---
@@ -167,6 +214,34 @@ def train_torchrl(
     val_set: SmallBowelDataset,
     device: torch.device = None,
     qnets: bool = False,
+):
+    """Run training and reliably flush local TensorBoard events."""
+    tensorboard_writer = create_tensorboard_writer(config)
+    try:
+        return _train_torchrl(
+            policy_module,
+            value_module,
+            config,
+            train_set,
+            val_set,
+            device=device,
+            qnets=qnets,
+            tensorboard_writer=tensorboard_writer,
+        )
+    finally:
+        if tensorboard_writer is not None:
+            tensorboard_writer.close()
+
+
+def _train_torchrl(
+    policy_module,
+    value_module,
+    config: Config,
+    train_set: SmallBowelDataset,
+    val_set: SmallBowelDataset,
+    device: torch.device = None,
+    qnets: bool = False,
+    tensorboard_writer=None,
 ):
     """Main PPO training loop using TorchRL."""
     # --- Setup ---
@@ -444,6 +519,7 @@ def train_torchrl(
 
         if config.track_wandb and wandb is not None:
             log_wandb(log_data, step=collected_frames)
+        log_tensorboard(tensorboard_writer, log_data, step=collected_frames)
 
         # --- Validation and Checkpointing ---
         if num_updates % config.eval_interval == 0:
@@ -456,6 +532,7 @@ def train_torchrl(
             policy_module.train()
             if config.track_wandb and wandb is not None:
                 log_wandb(val_metrics, step=collected_frames)
+            log_tensorboard(tensorboard_writer, val_metrics, step=collected_frames)
 
             # Checkpointing logic (save based on validation metric)
             current_metric = val_metrics.get(config.metric_to_optimize, float("-inf"))
