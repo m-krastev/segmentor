@@ -129,6 +129,7 @@ def validation_loop_torchrl(
             path_masks = []
             intermediate_results = []
             reward, step_count, final_coverage, success = 0, 0, 0, 0
+            endpoint_reached, endpoint_distance_mm = 0, float("inf")
             must_load_new_subject = True
             for _ in range(1):
                 try:
@@ -148,11 +149,24 @@ def validation_loop_torchrl(
                     step_count = rollout["action"].shape[1]
                     final_coverage = val_env._get_final_coverage().item()
                     success = rollout["next", "info", "final_success"].sum().item()
+                    endpoint_distance_vox = math.dist(val_env.current_pos_vox, val_env.goal)
+                    endpoint_distance_mm = endpoint_distance_vox * config.voxel_size_mm
+                    endpoint_reached = float(
+                        endpoint_distance_vox < config.cumulative_path_radius_vox
+                    )
 
                     paths.append(val_env.get_tracking_history())
                     path_masks.append(val_env.get_tracking_mask())
                     intermediate_results.append(
-                        (reward, step_count, final_coverage, total_reward, success)
+                        (
+                            reward,
+                            step_count,
+                            final_coverage,
+                            total_reward,
+                            success,
+                            endpoint_reached,
+                            endpoint_distance_mm,
+                        )
                     )
                 except Exception as e:
                     print(f"Error during validation rollout for subject {i}: {e}")
@@ -164,10 +178,16 @@ def validation_loop_torchrl(
                     f"Too many errors caused no successful rollout to be generated. Skipping subject: {i}"
                 )
                 continue
-            best_run = intermediate_results.index(max(intermediate_results, key=lambda x: x[-2]))
-            reward, step_count, final_coverage, total_reward, success = intermediate_results[
-                best_run
-            ]
+            best_run = intermediate_results.index(max(intermediate_results, key=lambda x: x[3]))
+            (
+                reward,
+                step_count,
+                final_coverage,
+                total_reward,
+                success,
+                endpoint_reached,
+                endpoint_distance_mm,
+            ) = intermediate_results[best_run]
             path = paths[best_run]
             path_mask = path_masks[best_run]
 
@@ -181,6 +201,8 @@ def validation_loop_torchrl(
             val_results["coverage"].append(final_coverage)
             val_results["total_reward"].append(total_reward)
             val_results["success"].append(success)
+            val_results["endpoint_reached"].append(endpoint_reached)
+            val_results["endpoint_distance_mm"].append(endpoint_distance_mm)
 
     val_env.close()  # Close the validation environment
 
@@ -189,8 +211,12 @@ def validation_loop_torchrl(
         "validation/avg_reward": np.mean(val_results["reward"]),
         "validation/avg_length": np.mean(val_results["length"]),
         "validation/avg_coverage": np.mean(val_results["coverage"]),
+        "validation/avg_dice": np.mean(val_results["coverage"]),
         "validation/total_reward": np.mean(val_results["total_reward"]),
         "validation/success_rate": np.mean(val_results["success"]),
+        "validation/traversal_success_rate": np.mean(val_results["success"]),
+        "validation/endpoint_reach_rate": np.mean(val_results["endpoint_reached"]),
+        "validation/avg_endpoint_distance_mm": np.mean(val_results["endpoint_distance_mm"]),
     }
 
     with open(save_path / "metrics.json", "w") as f:
@@ -490,7 +516,9 @@ def _train_torchrl(
             "train/wall_gradient": wall_gradient,
             "train/episode_len": ep_len,
             "train/final_coverage": final_coverage,
+            "train/final_dice": final_coverage,
             "train/success_rate": success_rate,
+            "train/traversal_success_rate": success_rate,
             "train/total_reward": total_reward,
             "charts/learning_rate": optimizer.param_groups[0]["lr"],
             "charts/max_gdt_achieved": max_mean,

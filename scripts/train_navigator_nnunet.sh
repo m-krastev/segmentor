@@ -17,6 +17,29 @@ EVAL_INTERVAL="${NAVIGATOR_EVAL_INTERVAL:-400}"
 SAVE_FREQ="${NAVIGATOR_SAVE_FREQ:-50}"
 BATCH_SIZE="${NAVIGATOR_BATCH_SIZE:-128}"
 UPDATE_EPOCHS="${NAVIGATOR_UPDATE_EPOCHS:-4}"
+CASE_IDS_FILE="${NAVIGATOR_NNUNET_CASE_IDS_FILE:-}"
+GENERATE_EXPERT_PATH="${NAVIGATOR_GENERATE_EXPERT_PATH:-0}"
+BEHAVIOR_CLONING_EPOCHS="${NAVIGATOR_BEHAVIOR_CLONING_EPOCHS:-0}"
+BC_MAX_POLICY_PROBABILITY="${NAVIGATOR_BC_MAX_POLICY_PROBABILITY:-1}"
+PATH_RADIUS_MM="${NAVIGATOR_PATH_RADIUS_MM:-6}"
+GDT_REWARD_SCALE="${NAVIGATOR_GDT_REWARD_SCALE:-1}"
+TRAIN_VAL_SPLIT="${NAVIGATOR_TRAIN_VAL_SPLIT:-0.9}"
+LOAD_FROM_CHECKPOINT="${NAVIGATOR_LOAD_FROM_CHECKPOINT:-}"
+
+CASE_ARGS=()
+if [[ -n "$CASE_IDS_FILE" ]]; then
+  CASE_ARGS=(--nnunet-case-ids-file "$CASE_IDS_FILE")
+fi
+
+EXPERT_ARGS=()
+if [[ "$GENERATE_EXPERT_PATH" == "1" || "$GENERATE_EXPERT_PATH" == "true" ]]; then
+  EXPERT_ARGS=(--nnunet-generate-expert-path)
+fi
+
+LOAD_ARGS=()
+if [[ -n "$LOAD_FROM_CHECKPOINT" ]]; then
+  LOAD_ARGS=(--load-from-checkpoint "$LOAD_FROM_CHECKPOINT")
+fi
 
 cd "$PROJECT_ROOT"
 
@@ -34,21 +57,25 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --data-dir nnunet-actual \
   --nnunet-raw-dir "$NNUNET_RAW" \
   --nnunet-cache-dir "$NNUNET_CACHE_DIR" \
+  "${CASE_ARGS[@]}" \
+  "${EXPERT_ARGS[@]}" \
+  "${LOAD_ARGS[@]}" \
   --device cuda \
   --amp \
   --amp-dtype bf16 \
   --no-track-wandb \
   --track-tensorboard \
-  --train-val-split 0.9 \
+  --train-val-split "$TRAIN_VAL_SPLIT" \
   --shuffle-dataset \
   --voxel-size-mm 1.5 \
   --patch-size-mm 24 \
   --max-step-displacement-mm 6 \
-  --cumulative-path-radius-mm 6 \
+  --cumulative-path-radius-mm "$PATH_RADIUS_MM" \
   --allowed-area-radius-mm 0 \
   --goal-action-prior 0 \
-  --success-coverage-threshold 0.55 \
+  --success-coverage-threshold 0.40 \
   --coverage-reward-scale 50 \
+  --gdt-reward-scale "$GDT_REWARD_SCALE" \
   --r-val2 1 \
   --r-zero-mov 1 \
   --max-episode-steps 1024 \
@@ -59,7 +86,8 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --learning-rate "$LEARNING_RATE" \
   --ent-coef 0.003 \
   --vf-coef 0.5 \
-  --behavior-cloning-epochs 0 \
+  --behavior-cloning-epochs "$BEHAVIOR_CLONING_EPOCHS" \
+  --behavior-cloning-max-policy-probability "$BC_MAX_POLICY_PROBABILITY" \
   --num-episodes-per-sample 2 \
   --num-steps-per-sample 2048 \
   --num-workers 1 \

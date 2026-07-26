@@ -9,13 +9,13 @@ from math import copysign
 from typing import List, Tuple, Union
 
 import numpy as np
-import skfmm
 import torch
 import torch.nn.functional as F
 from einops import rearrange
 from scipy.ndimage import binary_dilation
 from skimage.draw import disk
 from skimage.filters import meijering
+from skimage.graph import MCP_Geometric
 from torch import nn
 
 # try:
@@ -335,23 +335,33 @@ def compute_gdt(
     Returns:
         Distance map with geodesic distances from the start point
     """
-    speed = np.ones_like(segmentation_mask, dtype=float)
-    speed[segmentation_mask == 0] = 1e-5
-    phi = np.ones_like(segmentation_mask, dtype=np.float64) * 1e10
-    if (
-        0 <= start_voxel[0] < phi.shape[0]
-        and 0 <= start_voxel[1] < phi.shape[1]
-        and 0 <= start_voxel[2] < phi.shape[2]
-    ):
-        phi[start_voxel] = 0.0
+    mask = np.asarray(segmentation_mask, dtype=bool)
+    start_voxel = tuple(int(value) for value in start_voxel)
+    if not all(0 <= value < size for value, size in zip(start_voxel, mask.shape)):
+        raise IndexError(f"Start voxel {start_voxel} outside mask bounds {mask.shape} for GDT.")
+    if not mask[start_voxel]:
+        raise ValueError(f"Start voxel {start_voxel} is outside the segmentation mask.")
+
+    if np.isscalar(voxel_size):
+        sampling = (float(voxel_size),) * mask.ndim
     else:
-        raise IndexError(f"Start voxel {start_voxel} outside mask bounds {phi.shape} for GDT.")
+        sampling = tuple(float(value) for value in voxel_size)
+        if len(sampling) != mask.ndim:
+            raise ValueError(f"voxel_size has {len(sampling)} dimensions, expected {mask.ndim}")
 
-    # We use raw phi to avoid skfmm issues with MaskedArrays in some versions
-    gdt = skfmm.travel_time(phi, speed, dx=voxel_size)
-
-    # Manually mask the result to keep it consistent with the segmentation mask
-    gdt[segmentation_mask == 0] = -np.inf
+    # Background must be an impassable barrier. Giving it even a tiny speed
+    # lets a geodesic leak between adjacent or disconnected bowel loops and
+    # creates a reward potential that the constrained environment cannot
+    # follow. Fully connected movement matches the environment's 26-neighbour
+    # one-voxel fallback.
+    costs = np.where(mask, 1.0, np.inf)
+    gdt, _ = MCP_Geometric(
+        costs,
+        sampling=sampling,
+        fully_connected=True,
+    ).find_costs([start_voxel])
+    gdt = np.asarray(gdt, dtype=np.float32)
+    gdt[~np.isfinite(gdt)] = -np.inf
     return gdt
 
 

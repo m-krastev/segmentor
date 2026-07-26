@@ -309,6 +309,9 @@ class SmallBowelEnv(EnvBase):
         cum_path_patch = get_patch(
             self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
         )
+        segmentation_patch = get_patch(
+            self.seg, self.current_pos_vox, self.config.patch_size_vox
+        ).to(self.dtype)
         # gt_path_patch = get_patch(
         #     self.gt_path_vol, self.current_pos_vox, self.config.patch_size_vox
         # )
@@ -334,7 +337,13 @@ class SmallBowelEnv(EnvBase):
             progress_fraction = 1.0 - float(self.current_goal_distance) / initial_goal_distance
             progress_fraction = min(max(progress_fraction, 0.0), 1.0)
         actor_state = torch.stack(
-            [img_patch_1, img_patch, wall_patch, cum_path_patch],
+            [
+                img_patch_1,
+                img_patch,
+                segmentation_patch,
+                wall_patch,
+                cum_path_patch,
+            ],
             dim=0,
         )
         context = torch.cat(
@@ -524,7 +533,7 @@ class SmallBowelEnv(EnvBase):
             rt += gdt_progress_reward(
                 delta,
                 max(float(self.initial_goal_distance), torch.finfo(self.dtype).eps),
-                self.config.r_val2,
+                self.config.gdt_reward_scale,
             )
             self.current_goal_distance = next_goal_distance
 
@@ -761,7 +770,13 @@ class SmallBowelEnv(EnvBase):
                 at_goal,
                 self.config.success_coverage_threshold,
                 self.config.r_final,
-                self.config.coverage_reward_scale + self.config.r_val2,
+                self.config.coverage_reward_scale
+                + (
+                    self.config.gdt_reward_scale
+                    if self.config.use_immediate_gdt_reward
+                    else 0.0
+                )
+                + self.config.r_val2,
             )
 
         # Get Next State Patches

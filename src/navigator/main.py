@@ -58,10 +58,25 @@ def main():
             config.track_wandb = False  # Disable tracking if init fails
 
     if config.nnunet_raw_dir:
+        case_ids = None
+        if config.nnunet_case_ids_file:
+            with open(config.nnunet_case_ids_file) as case_file:
+                case_ids = [
+                    line.strip()
+                    for line in case_file
+                    if line.strip() and not line.lstrip().startswith("#")
+                ]
+            if not case_ids:
+                raise ValueError(f"No case IDs found in {config.nnunet_case_ids_file}")
+            print(
+                f"Restricting nnU-Net dataset to {len(case_ids)} cases from "
+                f"{config.nnunet_case_ids_file}"
+            )
         dataset = NNUNetActualDataset(
             nnunet_raw=config.nnunet_raw_dir,
             cache_dir=config.nnunet_cache_dir,
             config=config,
+            case_ids=case_ids,
         )
     else:
         dataset = SmallBowelDataset(

@@ -1,5 +1,7 @@
 """Behavior-cloning warm start for the Navigator policy."""
 
+from itertools import product
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -7,6 +9,40 @@ from tensordict import TensorDict
 from tqdm import tqdm
 
 from .environment import make_sb_env
+
+
+def _geodesic_expert_action(env) -> torch.Tensor:
+    """Choose the realizable action with the lowest mask-constrained goal distance."""
+    current = np.asarray(env.current_pos_vox, dtype=int)
+    candidates = []
+    seen_displacements = set()
+    for direction in product((-1, 0, 1), repeat=3):
+        if not any(direction):
+            continue
+        action = torch.as_tensor(
+            (np.asarray(direction, dtype=np.float32) + 1.0) / 2.0,
+            dtype=env.dtype,
+            device=env.device,
+        )
+        displacement = env._project_action_to_allowed_displacement(action)
+        if not any(displacement) or displacement in seen_displacements:
+            continue
+        seen_displacements.add(displacement)
+        next_position = tuple((current + np.asarray(displacement, dtype=int)).tolist())
+        goal_distance = float(env.goal_distance_map[next_position])
+        if np.isfinite(goal_distance):
+            candidates.append(
+                (
+                    goal_distance,
+                    -float(np.linalg.norm(displacement)),
+                    action,
+                )
+            )
+    if not candidates:
+        raise RuntimeError(
+            f"No realizable geodesic expert action from {env.current_pos_vox} toward {env.goal}."
+        )
+    return min(candidates, key=lambda candidate: candidate[:2])[2]
 
 
 def _monotonic_expert_action(env, path_index: int) -> tuple[torch.Tensor, int]:
@@ -23,7 +59,10 @@ def _monotonic_expert_action(env, path_index: int) -> tuple[torch.Tensor, int]:
         raise ValueError("Behavior cloning requires a non-empty ground-truth path.")
 
     current = np.asarray(env.current_pos_vox)
-    while path_index < len(path) - 1:
+    # Keep the final waypoint as an actionable target. Advancing the cursor all
+    # the way to the end before stepping used to emit a neutral action instead
+    # of actually reaching the endpoint.
+    while path_index < len(path) - 2:
         next_distance = float(np.linalg.norm(path[path_index + 1] - current))
         if next_distance > env.config.max_step_vox:
             break
@@ -47,11 +86,12 @@ def _monotonic_expert_action(env, path_index: int) -> tuple[torch.Tensor, int]:
 
 
 def pretrain_behavior_cloning(policy_module, config, train_set, device) -> None:
-    """Fit the stochastic actor to training-set centerline actions.
+    """Fit the stochastic actor to training-set route actions.
 
-    Ground-truth paths are used only for this training warm start. Validation
-    subjects remain held out, and subsequent PPO training uses the unchanged
-    environment reward and strict success criterion.
+    Ground-truth or segmentation-derived skeleton routes are used only for this
+    training warm start. Validation subjects remain held out, and subsequent
+    PPO training uses the unchanged environment reward and strict success
+    criterion.
     """
     device = torch.device(device)
     optimizer = torch.optim.AdamW(
@@ -124,9 +164,10 @@ def pretrain_behavior_cloning(policy_module, config, train_set, device) -> None:
                 observation = env._reset(must_load_new_subject=True)
                 path_index = 0
                 for _ in range(config.max_episode_steps):
-                    expert_action, path_index = _monotonic_expert_action(env, path_index)
-                    if path_index >= len(env.gt_path_voxels) - 1:
-                        break
+                    if env.gt_path_voxels is None:
+                        expert_action = _geodesic_expert_action(env)
+                    else:
+                        expert_action, path_index = _monotonic_expert_action(env, path_index)
                     batch.append(
                         (
                             observation["actor"][0].detach().clone(),
@@ -142,9 +183,7 @@ def pretrain_behavior_cloning(policy_module, config, train_set, device) -> None:
                     rollout_action = expert_action
                     if torch.rand(()) < policy_probability:
                         with torch.no_grad():
-                            rollout_action = (
-                                policy_module.get_dist(observation).mean.squeeze(0)
-                            )
+                            rollout_action = policy_module.get_dist(observation).mean.squeeze(0)
                     transition = env._step(
                         TensorDict(
                             {"action": rollout_action.unsqueeze(0)},

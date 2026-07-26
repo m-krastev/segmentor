@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--voxel-size-mm", type=float, default=1.5)
     parser.add_argument("--patch-size-mm", type=int, default=24)
+    parser.add_argument("--path-radius-mm", type=float, default=6.0)
     parser.add_argument("--max-episode-steps", type=int, default=1024)
     parser.add_argument(
         "--cache-dir",
@@ -100,10 +101,10 @@ def main() -> None:
         voxel_size_mm=args.voxel_size_mm,
         patch_size_mm=args.patch_size_mm,
         max_step_displacement_mm=6,
-        cumulative_path_radius_mm=6,
+        cumulative_path_radius_mm=args.path_radius_mm,
         allowed_area_radius_mm=0,
         goal_action_prior=0,
-        success_coverage_threshold=0.55,
+        success_coverage_threshold=0.40,
         coverage_reward_scale=50,
         r_val2=1,
         r_zero_mov=1,
@@ -156,7 +157,10 @@ def main() -> None:
                 "case": case_id,
                 "steps": int(history.shape[0] - 1),
                 "coverage": float(env.current_coverage),
+                "dice": float(env.current_coverage),
                 "success": int(rollout["next", "info", "final_success"].sum().item()),
+                "traversal_success": int(rollout["next", "info", "final_success"].sum().item()),
+                "endpoint_reached": int(endpoint_distance_vox < config.cumulative_path_radius_vox),
                 "endpoint_distance_mm": (endpoint_distance_vox * config.voxel_size_mm),
                 "start": [int(value) for value in env.start_coord],
                 "goal": [int(value) for value in env.goal],
@@ -172,8 +176,14 @@ def main() -> None:
         "checkpoint": str(args.checkpoint),
         "interaction_type": args.interaction_type,
         "voxel_size_mm": args.voxel_size_mm,
+        "path_radius_mm": args.path_radius_mm,
         "success_rate": float(np.mean([result["success"] for result in results])),
         "average_coverage": float(np.mean([result["coverage"] for result in results])),
+        "average_dice": float(np.mean([result["dice"] for result in results])),
+        "traversal_success_rate": float(
+            np.mean([result["traversal_success"] for result in results])
+        ),
+        "endpoint_reach_rate": float(np.mean([result["endpoint_reached"] for result in results])),
         "average_endpoint_distance_mm": float(
             np.mean([result["endpoint_distance_mm"] for result in results])
         ),

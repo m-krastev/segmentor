@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -6,10 +7,15 @@ from tensordict import TensorDict
 
 from navigator.config import Config
 from navigator.environment import SmallBowelEnv
-from navigator.utils import BinaryDilation3D
+from navigator.pretrain import _geodesic_expert_action, _monotonic_expert_action
+from navigator.utils import BinaryDilation3D, compute_gdt
 
 
 class NavigatorEnvironmentSmokeTest(unittest.TestCase):
+    def test_gdt_reward_scale_must_be_non_negative(self):
+        with self.assertRaisesRegex(ValueError, "gdt_reward_scale"):
+            Config(gdt_reward_scale=-1)
+
     @staticmethod
     def _make_subject(shape, start, end, segmentation):
         coordinates = np.indices(shape)
@@ -56,13 +62,17 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         )
 
         try:
-            environment._reset()
+            initial = environment._reset()
             expected = torch.zeros(shape, dtype=torch.uint8, device=device)
             expected[start] = 1
             dilation = torch.nn.Sequential(BinaryDilation3D(), BinaryDilation3D()).to(device)
             expected = dilation(expected[None, None]).squeeze()
             self.assertTrue(torch.equal(environment.cumulative_path_mask, expected))
             self.assertEqual(environment.path_voxels, int(expected.sum().item()))
+            torch.testing.assert_close(
+                initial["actor"][0, 2],
+                torch.ones(config.patch_size_vox, device=device),
+            )
         finally:
             environment.close()
 
@@ -221,6 +231,61 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
                 self.assertFalse(transition["done"].item())
             finally:
                 environment.close()
+
+    def test_geodesic_expert_reduces_mask_constrained_goal_distance(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            allowed_area_radius_mm=0,
+            max_episode_steps=8,
+        )
+        shape = (16, 16, 16)
+        start = (4, 4, 4)
+        end = (4, 4, 10)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[4, 4, 4:11] = 1
+        subject = self._make_subject(shape, start, end, segmentation)
+        subject["gdt_start"] = compute_gdt(segmentation, start)
+        subject["gdt_end"] = compute_gdt(segmentation, end)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([subject]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            before = environment.current_goal_distance
+            expert_action = _geodesic_expert_action(environment)
+            displacement = environment._project_action_to_allowed_displacement(expert_action)
+            next_position = tuple(
+                np.asarray(environment.current_pos_vox) + np.asarray(displacement)
+            )
+            self.assertLess(environment.goal_distance_map[next_position], before)
+        finally:
+            environment.close()
+
+    def test_monotonic_expert_targets_final_waypoint(self):
+        environment = SimpleNamespace(
+            gt_path_voxels=np.asarray(
+                [(4, 4, 4), (4, 4, 5), (4, 4, 6)],
+                dtype=int,
+            ),
+            current_pos_vox=(4, 4, 5),
+            config=SimpleNamespace(max_step_vox=4),
+            dtype=torch.float32,
+            device=torch.device("cpu"),
+        )
+
+        action, path_index = _monotonic_expert_action(environment, path_index=1)
+
+        self.assertEqual(path_index, 1)
+        torch.testing.assert_close(action, torch.tensor([0.5, 0.5, 1.0]))
 
     def test_endpoint_alone_does_not_end_episode(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

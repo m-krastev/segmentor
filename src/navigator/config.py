@@ -27,6 +27,8 @@ class Config:
     shuffle_dataset: bool = True  # Whether to shuffle dataset before splitting
     nnunet_raw_dir: Optional[str] = None
     nnunet_cache_dir: str = "results/navigator_nnunet/cache"
+    nnunet_case_ids_file: Optional[str] = None
+    nnunet_generate_expert_path: bool = False
     amp: bool = False
     amp_dtype: str = "bf16"
 
@@ -63,6 +65,9 @@ class Config:
     r_zero_mov: float = 1.0
     r_final: float = 50.0
     coverage_reward_scale: float = 50.0
+    # Total return available for monotonic mask-constrained progress to the
+    # requested endpoint. This is a telescoping potential, not a per-step bonus.
+    gdt_reward_scale: float = 1.0
     success_coverage_threshold: float = 0.55
     step_penalty: float = 0.01
     wall_penalty_scale: float = 0.1
@@ -113,7 +118,7 @@ class Config:
     cumulative_path_radius_vox: int = field(init=False)
     allowed_area_radius_vox: int = field(init=False)
     gdt_max_increase_theta: float = field(init=False)
-    observation_channels: int = field(init=False, default=4)
+    observation_channels: int = field(init=False, default=5)
     context_features: int = field(init=False, default=5)
 
     def __post_init__(self):
@@ -131,6 +136,8 @@ class Config:
             raise ValueError("success_coverage_threshold must be between 0 and 1")
         if self.coverage_reward_scale < 0:
             raise ValueError("coverage_reward_scale must be non-negative")
+        if self.gdt_reward_scale < 0:
+            raise ValueError("gdt_reward_scale must be non-negative")
         if self.step_penalty < 0:
             raise ValueError("step_penalty must be non-negative")
         if self.behavior_cloning_epochs < 0:

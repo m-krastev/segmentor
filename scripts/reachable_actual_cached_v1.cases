@@ -1,0 +1,23 @@
+# Preliminary ablation cohort, 2026-07-26.
+# Start/end are 26-neighbor connected and small-bowel volume is >= 100,000
+# voxels in the first 30 cached cases. This is not a final benchmark cohort.
+s0001
+s0038
+s0040
+s0096
+s0106
+s0107
+s0190
+s0194
+s0334
+s0406
+s0546
+s0703
+s0842
+s0896
+s0918
+s0928
+s0979
+s1109
+s1145
+s1267

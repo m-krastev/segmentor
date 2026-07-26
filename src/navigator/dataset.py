@@ -18,6 +18,7 @@ from .utils import (
 )
 
 from .config import Config
+from .oracle import skeleton_covering_route
 from skimage.feature import peak_local_max
 
 FILE_PATTERNS = {
@@ -38,9 +39,12 @@ MRI_PATH_FILE_PATTERNS = {
 CACHE_FILES = {
     "start_end": "start_end.npy",
     "wall_map": "wall_map.nii",
-    "gdt_start": "gdt_start.nii",
-    "gdt_end": "gdt_end.nii",
+    # Version the distance caches so pre-fix fast-marching fields, which could
+    # cross forbidden background, are never silently reused.
+    "gdt_start": "gdt_start_mcp26_v1.nii",
+    "gdt_end": "gdt_end_mcp26_v1.nii",
     "local_peaks": "local_peaks.npy",
+    "expert_path": "expert_path_skeleton_tree_v1.npy",
 }
 
 NNUNET_CASE_FILES = (
@@ -268,7 +272,7 @@ class NNUNetActualDataset(Dataset):
             "start_coord": data["start_coord"],
             "end_coord": data["end_coord"],
             "local_peaks": data["local_peaks"],
-            "gt_path": None,
+            "gt_path": data.get("gt_path"),
         }
 
 
@@ -418,11 +422,11 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     # Handles weird edge case related to the local peaks
     # Disconnected segmentation components lead to wildly inconsistent result, in particular when using the GDT which turns any unreachable point into -inf.
     result["gdt_end"] = gdt_end_np
-    if np.isfinite(gdt_end_np).sum() < 1000:
-        result["gdt_end"] = np.where(
-            np.isfinite(gdt_start_np), gdt_start_np.max() - gdt_start_np.copy(), -np.inf
+    if not np.isfinite(gdt_end_np[result["start_coord"]]):
+        raise ValueError(
+            f"Anatomical endpoints for {result['id']} are disconnected in the "
+            "small-bowel segmentation; full end-to-end traversal is impossible."
         )
-        result["end_coord"] = np.unravel_index(gdt_start_np.argmax(), gdt_start_np.shape)
 
     local_peaks_cache_path = cache_dir / CACHE_FILES["local_peaks"]
     if local_peaks_cache_path.exists():
@@ -439,6 +443,22 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     )
     np.savetxt(local_peaks_cache_path, local_peaks_np, fmt="%d")
     result["local_peaks"] = local_peaks_np
+
+    if result.get("gt_path") is None and config.nnunet_generate_expert_path:
+        expert_path_cache = cache_dir / CACHE_FILES["expert_path"]
+        if expert_path_cache.exists():
+            expert_path = np.load(expert_path_cache)
+        else:
+            expert_path = skeleton_covering_route(
+                result["seg"],
+                result["start_coord"],
+                result["end_coord"],
+            )
+            np.save(expert_path_cache, expert_path)
+        result["gt_path"] = normalize_coordinate_rows(
+            expert_path,
+            fallback=(result["start_coord"], result["end_coord"]),
+        )
 
     if True:
         # Transpose everything
