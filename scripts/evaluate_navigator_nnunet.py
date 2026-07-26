@@ -11,87 +11,9 @@ from tensordict import TensorDict
 from torchrl.envs.utils import ExplorationType, set_exploration_type
 
 from navigator.config import Config
-from navigator.dataset import load_subject_data
+from navigator.dataset import NNUNetActualDataset
 from navigator.environment import make_sb_env
 from navigator.models import create_ppo_modules
-
-
-class NNUNetActualDataset(torch.utils.data.Dataset):
-    """Join matching small-bowel, duodenum, and colon nnU-Net cases."""
-
-    def __init__(
-        self,
-        nnunet_raw: Path,
-        case_ids: list[str],
-        cache_dir: Path,
-        config: Config,
-    ):
-        self.nnunet_raw = nnunet_raw
-        self.case_ids = case_ids
-        self.cache_dir = cache_dir
-        self.config = config
-        self._validate_cases()
-
-    def _case_path(self, dataset: str, folder: str, case_id: str) -> Path:
-        suffix = "_0000.nii.gz" if folder == "imagesTr" else ".nii.gz"
-        return self.nnunet_raw / dataset / folder / f"{case_id}{suffix}"
-
-    def _validate_cases(self) -> None:
-        missing = []
-        for case_id in self.case_ids:
-            required = (
-                self._case_path("Dataset018_small_bowel", "imagesTr", case_id),
-                self._case_path("Dataset018_small_bowel", "labelsTr", case_id),
-                self._case_path("Dataset019_duodenum", "labelsTr", case_id),
-                self._case_path("Dataset020_colon", "labelsTr", case_id),
-            )
-            missing.extend(str(path) for path in required if not path.is_file())
-        if missing:
-            raise FileNotFoundError(
-                "Missing nnU-Net files:\n" + "\n".join(f"- {path}" for path in missing)
-            )
-
-    def __len__(self) -> int:
-        return len(self.case_ids)
-
-    def __getitem__(self, index: int) -> dict:
-        case_id = self.case_ids[index]
-        patient_dir = self.cache_dir / case_id
-        patient_dir.mkdir(parents=True, exist_ok=True)
-        data = load_subject_data(
-            {
-                "id": case_id,
-                "image": self._case_path(
-                    "Dataset018_small_bowel", "imagesTr", case_id
-                ),
-                "small_bowel": self._case_path(
-                    "Dataset018_small_bowel", "labelsTr", case_id
-                ),
-                "duodenum": self._case_path(
-                    "Dataset019_duodenum", "labelsTr", case_id
-                ),
-                "colon": self._case_path("Dataset020_colon", "labelsTr", case_id),
-                "path": None,
-                "patient_dir": patient_dir,
-            },
-            self.config,
-        )
-        return {
-            "id": data["id"],
-            "image": data["image"],
-            "seg": data["seg"],
-            "duodenum": data["duodenum"],
-            "colon": data["colon"],
-            "wall_map": data["wall_map"],
-            "gdt_start": data["gdt_start"],
-            "gdt_end": data["gdt_end"],
-            "image_affine": data["image_affine"],
-            "spacing": data["spacing"],
-            "start_coord": data["start_coord"],
-            "end_coord": data["end_coord"],
-            "local_peaks": data["local_peaks"],
-            "gt_path": None,
-        }
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,10 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=Path(
-            "checkpoints/dagger-ppo-million-v1/data/phantoms/"
-            "checkpoint_102400best.pth"
-        ),
+        default=Path("checkpoints/dagger-ppo-million-v1/data/phantoms/checkpoint_102400best.pth"),
     )
     parser.add_argument("--cases", nargs="+", default=["s0001"])
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
@@ -194,10 +113,10 @@ def main() -> None:
         track_wandb=False,
     )
     dataset = NNUNetActualDataset(
-        args.nnunet_raw,
-        args.cases,
-        args.cache_dir,
-        config,
+        nnunet_raw=args.nnunet_raw,
+        case_ids=args.cases,
+        cache_dir=args.cache_dir,
+        config=config,
     )
     policy = create_policy(config, args.checkpoint)
     device = torch.device(args.device)
@@ -209,9 +128,7 @@ def main() -> None:
         num_steps_per_sample=config.max_episode_steps,
     )
     interaction_type = (
-        ExplorationType.MEAN
-        if args.interaction_type == "mean"
-        else ExplorationType.MODE
+        ExplorationType.MEAN if args.interaction_type == "mean" else ExplorationType.MODE
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     results = []
@@ -233,20 +150,14 @@ def main() -> None:
             path_output = case_output_dir / "path.txt"
             np.savetxt(path_output, history, fmt="%d")
             endpoint_distance_vox = float(
-                np.linalg.norm(
-                    np.asarray(env.current_pos_vox) - np.asarray(env.goal)
-                )
+                np.linalg.norm(np.asarray(env.current_pos_vox) - np.asarray(env.goal))
             )
             result = {
                 "case": case_id,
                 "steps": int(history.shape[0] - 1),
                 "coverage": float(env.current_coverage),
-                "success": int(
-                    rollout["next", "info", "final_success"].sum().item()
-                ),
-                "endpoint_distance_mm": (
-                    endpoint_distance_vox * config.voxel_size_mm
-                ),
+                "success": int(rollout["next", "info", "final_success"].sum().item()),
+                "endpoint_distance_mm": (endpoint_distance_vox * config.voxel_size_mm),
                 "start": [int(value) for value in env.start_coord],
                 "goal": [int(value) for value in env.goal],
                 "final": [int(value) for value in env.current_pos_vox],
@@ -262,9 +173,7 @@ def main() -> None:
         "interaction_type": args.interaction_type,
         "voxel_size_mm": args.voxel_size_mm,
         "success_rate": float(np.mean([result["success"] for result in results])),
-        "average_coverage": float(
-            np.mean([result["coverage"] for result in results])
-        ),
+        "average_coverage": float(np.mean([result["coverage"] for result in results])),
         "average_endpoint_distance_mm": float(
             np.mean([result["endpoint_distance_mm"] for result in results])
         ),

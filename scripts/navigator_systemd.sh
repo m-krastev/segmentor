@@ -6,6 +6,7 @@ PROJECT_ROOT="${NAVIGATOR_PROJECT_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
 ACTION="${1:-status}"
 UNIT="${2:-navigator-success-million}"
 SERVICE="${UNIT%.service}.service"
+TRAIN_SCRIPT="${NAVIGATOR_TRAIN_SCRIPT:-scripts/train_navigator_phantoms.sh}"
 
 usage() {
   cat <<EOF
@@ -17,8 +18,10 @@ Examples:
   $0 logs navigator-success-million
   $0 stop navigator-success-million
 
-The start action runs scripts/train_navigator_phantoms.sh. Override its
-defaults with NAVIGATOR_* environment variables documented in that script.
+The start action runs scripts/train_navigator_phantoms.sh by default. Set
+NAVIGATOR_TRAIN_SCRIPT=scripts/train_navigator_nnunet.sh for scratch training
+on nnU-Net data. Override defaults with the NAVIGATOR_* variables documented
+in the selected script.
 EOF
 }
 
@@ -43,6 +46,10 @@ start_service() {
     NAVIGATOR_LEARNING_RATE \
     NAVIGATOR_EVAL_INTERVAL \
     NAVIGATOR_SAVE_FREQ \
+    NAVIGATOR_NNUNET_RAW \
+    NAVIGATOR_NNUNET_CACHE_DIR \
+    NAVIGATOR_BATCH_SIZE \
+    NAVIGATOR_UPDATE_EPOCHS \
     UV_BIN
   do
     if [[ -n "${!variable:-}" ]]; then
@@ -50,7 +57,12 @@ start_service() {
     fi
   done
 
-  systemd-run "${systemd_args[@]}" "$PROJECT_ROOT/scripts/train_navigator_phantoms.sh"
+  if [[ ! -x "$PROJECT_ROOT/$TRAIN_SCRIPT" ]]; then
+    echo "Navigator training script is not executable: $PROJECT_ROOT/$TRAIN_SCRIPT" >&2
+    exit 1
+  fi
+
+  systemd-run "${systemd_args[@]}" "$PROJECT_ROOT/$TRAIN_SCRIPT"
   echo "Follow logs with: $0 logs ${SERVICE%.service}"
 }
 

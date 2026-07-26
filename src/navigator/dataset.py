@@ -43,6 +43,13 @@ CACHE_FILES = {
     "local_peaks": "local_peaks.npy",
 }
 
+NNUNET_CASE_FILES = (
+    ("Dataset018_small_bowel", "imagesTr", "_0000.nii.gz"),
+    ("Dataset018_small_bowel", "labelsTr", ".nii.gz"),
+    ("Dataset019_duodenum", "labelsTr", ".nii.gz"),
+    ("Dataset020_colon", "labelsTr", ".nii.gz"),
+)
+
 
 class SmallBowelDataset(Dataset):
     """
@@ -152,6 +159,102 @@ class SmallBowelDataset(Dataset):
         else:
             # Handle slice indexing
             return [self[i] for i in range(*idx.indices(len(self)))]
+
+
+class NNUNetActualDataset(Dataset):
+    """Join matching small-bowel, duodenum, and colon nnU-Net cases."""
+
+    def __init__(
+        self,
+        nnunet_raw: str | Path,
+        config: Config,
+        cache_dir: str | Path,
+        case_ids: list[str] | None = None,
+    ):
+        self.nnunet_raw = Path(nnunet_raw)
+        self.cache_dir = Path(cache_dir)
+        self.config = config
+
+        if not self.nnunet_raw.is_dir():
+            raise FileNotFoundError(f"nnU-Net raw directory not found: {self.nnunet_raw}")
+
+        if case_ids is None:
+            case_ids = self._discover_complete_case_ids()
+        self.case_ids = sorted(case_ids)
+        if not self.case_ids:
+            raise ValueError(f"No complete nnU-Net cases found in {self.nnunet_raw}")
+        self._validate_cases()
+
+        # Match SmallBowelDataset's public metadata used by the main entrypoint.
+        self.subjects = [{"id": case_id} for case_id in self.case_ids]
+        print(f"Found {len(self.case_ids)} complete nnU-Net subject(s) in {self.nnunet_raw}")
+
+    def _case_path(self, dataset: str, folder: str, case_id: str) -> Path:
+        suffix = "_0000.nii.gz" if folder == "imagesTr" else ".nii.gz"
+        return self.nnunet_raw / dataset / folder / f"{case_id}{suffix}"
+
+    def _discover_complete_case_ids(self) -> list[str]:
+        case_sets = []
+        for dataset, folder, suffix in NNUNET_CASE_FILES:
+            directory = self.nnunet_raw / dataset / folder
+            if not directory.is_dir():
+                raise FileNotFoundError(f"nnU-Net dataset directory not found: {directory}")
+            case_sets.append(
+                {
+                    path.name[: -len(suffix)]
+                    for path in directory.glob(f"*{suffix}")
+                    if path.name.endswith(suffix)
+                }
+            )
+        return sorted(set.intersection(*case_sets))
+
+    def _validate_cases(self) -> None:
+        missing = []
+        for case_id in self.case_ids:
+            for dataset, folder, _ in NNUNET_CASE_FILES:
+                path = self._case_path(dataset, folder, case_id)
+                if not path.is_file():
+                    missing.append(str(path))
+        if missing:
+            raise FileNotFoundError(
+                "Missing nnU-Net files:\n" + "\n".join(f"- {path}" for path in missing)
+            )
+
+    def __len__(self) -> int:
+        return len(self.case_ids)
+
+    def __getitem__(self, index: int) -> dict:
+        case_id = self.case_ids[index]
+        patient_dir = self.cache_dir / case_id
+        patient_dir.mkdir(parents=True, exist_ok=True)
+        data = load_subject_data(
+            {
+                "id": case_id,
+                "image": self._case_path("Dataset018_small_bowel", "imagesTr", case_id),
+                "small_bowel": self._case_path("Dataset018_small_bowel", "labelsTr", case_id),
+                "duodenum": self._case_path("Dataset019_duodenum", "labelsTr", case_id),
+                "colon": self._case_path("Dataset020_colon", "labelsTr", case_id),
+                "path": None,
+                "patient_dir": patient_dir,
+            },
+            self.config,
+        )
+        return {
+            "id": data["id"],
+            "image": data["image"],
+            "seg": data["seg"],
+            "duodenum": data["duodenum"],
+            "colon": data["colon"],
+            "wall_map": data["wall_map"],
+            "gdt_start": data["gdt_start"],
+            "gdt_end": data["gdt_end"],
+            "image_affine": data["image_affine"],
+            "spacing": data["spacing"],
+            "start_coord": data["start_coord"],
+            "end_coord": data["end_coord"],
+            "local_peaks": data["local_peaks"],
+            "gt_path": None,
+        }
 
 
 def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> Dict[str, Any]:

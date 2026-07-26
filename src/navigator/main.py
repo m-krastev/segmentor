@@ -16,11 +16,12 @@ except ImportError:
     wandb = None
 
 from .config import parse_args, Config
-from .dataset import SmallBowelDataset
+from .dataset import NNUNetActualDataset, SmallBowelDataset
 from .train import train_torchrl, validation_loop_torchrl
 from .pretrain import pretrain_behavior_cloning
 from .models import create_ppo_modules
 from .utils import seed_everything
+
 
 def main():
     """Main entry point for the Navigator system."""
@@ -32,7 +33,7 @@ def main():
     # Convert dataclass to dict for printing/wandb config
     config_dict = vars(config)
     print(config_dict)
-    
+
     seed_everything(config.seed)
 
     # Create checkpoint directory if needed
@@ -56,10 +57,17 @@ def main():
             print(f"Error initializing wandb: {e}. Wandb tracking disabled.")
             config.track_wandb = False  # Disable tracking if init fails
 
-    dataset = SmallBowelDataset(
-        data_dir=config.data_dir,
-        config=config,
-    )
+    if config.nnunet_raw_dir:
+        dataset = NNUNetActualDataset(
+            nnunet_raw=config.nnunet_raw_dir,
+            cache_dir=config.nnunet_cache_dir,
+            config=config,
+        )
+    else:
+        dataset = SmallBowelDataset(
+            data_dir=config.data_dir,
+            config=config,
+        )
     print(f"Dataset loaded with {len(dataset)} samples.")
 
     # --- Setup ---
@@ -74,8 +82,12 @@ def main():
 
     train_set = Subset(dataset, train_indices)
     val_set = Subset(dataset, val_indices)
-    print(f"Train indices\t({train_size:0>2}/{len(dataset)}): {train_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in train_indices]}")
-    print(f"Val indices \t({len(dataset)-train_size:0>2}/{len(dataset)}): {val_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in val_indices]}")
+    print(
+        f"Train indices\t({train_size:0>2}/{len(dataset)}): {train_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in train_indices]}"
+    )
+    print(
+        f"Val indices \t({len(dataset) - train_size:0>2}/{len(dataset)}): {val_indices}, subjects: {[dataset.subjects[idx]['id'] for idx in val_indices]}"
+    )
 
     # --- Models ---
     in_act = in_crit = config.observation_channels
@@ -123,6 +135,7 @@ def main():
     elif config.train_gym_env:
         print("Training dummy Gym environment.")
         from .train_gym import train_gym_environment
+
         train_gym_environment(config)
     else:
         if config.load_from_checkpoint:
@@ -157,7 +170,6 @@ def main():
     #     traceback.print_exc()  # Print detailed traceback
     # finally:
     #     run.finish()
-
 
 
 if __name__ == "__main__":

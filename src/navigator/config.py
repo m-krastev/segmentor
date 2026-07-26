@@ -25,6 +25,8 @@ class Config:
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training
     shuffle_dataset: bool = True  # Whether to shuffle dataset before splitting
+    nnunet_raw_dir: Optional[str] = None
+    nnunet_cache_dir: str = "results/navigator_nnunet/cache"
     amp: bool = False
     amp_dtype: str = "bf16"
 
@@ -121,6 +123,8 @@ class Config:
 
         if self.voxel_size_mm <= 0:
             raise ValueError("voxel_size_mm must be positive")
+        if not 0 < self.train_val_split < 1:
+            raise ValueError("train_val_split must be between zero and one")
         if self.allowed_area_radius_mm < 0:
             raise ValueError("allowed_area_radius_mm must be non-negative")
         if not 0 <= self.success_coverage_threshold <= 1:
