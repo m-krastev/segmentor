@@ -9,10 +9,26 @@ from torchrl.objectives.value import GAE
 from navigator.config import Config
 from navigator.models import create_ppo_modules
 from navigator.models.actor import ActorNetwork
-from navigator.train import log_tensorboard
+from navigator.train import log_tensorboard, validation_rank
 
 
 class NavigatorPpoSmokeTest(unittest.TestCase):
+    def test_validation_rank_prioritizes_complete_traversal(self):
+        incomplete = {
+            "validation/traversal_success_rate": 0.0,
+            "validation/endpoint_reach_rate": 1.0,
+            "validation/avg_dice": 0.9,
+            "validation/avg_endpoint_distance_mm": 0.0,
+        }
+        complete = {
+            "validation/traversal_success_rate": 0.1,
+            "validation/endpoint_reach_rate": 0.1,
+            "validation/avg_dice": 0.4,
+            "validation/avg_endpoint_distance_mm": 100.0,
+        }
+
+        self.assertGreater(validation_rank(complete), validation_rank(incomplete))
+
     def test_tensorboard_logger_only_writes_scalars(self):
         class Writer:
             def __init__(self):

@@ -62,8 +62,26 @@ python notebooks/graph_approach.py
 To train the RL agent for navigation:
 
 ```bash
-python -m navigator --data-dir <your_data> --patch-size-mm 32 --voxel-size-mm 1.5 --amp
+uv run python -m navigator --data-dir <your_data> --patch-size-mm 32 --voxel-size-mm 1.5 --amp
 ```
+
+For the preregistered real-data G1 experiment, run the versioned systemd
+launchers in order:
+
+```bash
+scripts/run_navigator_g1_preflight.sh
+systemctl --user status navigator-preflight-v1
+
+scripts/run_navigator_g1_oracle.sh
+systemctl --user status navigator-g1-oracle-validation-v1
+
+scripts/run_navigator_g1_diagnostic.sh
+journalctl --user -u navigator-g1-diagnostic-250k -f
+```
+
+These commands freeze disjoint train/validation/test manifests, verify the
+validation oracle, and then run the 250k-step CUDA diagnostic with TensorBoard.
+The test manifest is not consumed by either training or validation.
 
 #### Data Preprocessing for nnUNet
 

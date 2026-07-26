@@ -7,8 +7,9 @@ from tensordict import TensorDict
 
 from navigator.config import Config
 from navigator.environment import SmallBowelEnv
+from navigator.metrics import physical_path_tube
 from navigator.pretrain import _geodesic_expert_action, _monotonic_expert_action
-from navigator.utils import BinaryDilation3D, compute_gdt
+from navigator.utils import compute_gdt
 
 
 class NavigatorEnvironmentSmokeTest(unittest.TestCase):
@@ -40,7 +41,7 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             "local_peaks": np.empty((0, 3), dtype=int),
         }
 
-    def test_local_path_dilation_matches_repeated_star_kernel(self):
+    def test_local_path_dilation_is_euclidean(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(
             device=str(device),
@@ -64,17 +65,55 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         try:
             initial = environment._reset()
             expected = torch.zeros(shape, dtype=torch.uint8, device=device)
-            expected[start] = 1
-            dilation = torch.nn.Sequential(BinaryDilation3D(), BinaryDilation3D()).to(device)
-            expected = dilation(expected[None, None]).squeeze()
+            coordinates = torch.stack(
+                torch.meshgrid(
+                    *(torch.arange(size, device=device) for size in shape),
+                    indexing="ij",
+                ),
+                dim=-1,
+            )
+            center = torch.tensor(start, device=device)
+            expected[(coordinates - center).float().square().sum(dim=-1).sqrt() <= 2.0] = 1
             self.assertTrue(torch.equal(environment.cumulative_path_mask, expected))
             self.assertEqual(environment.path_voxels, int(expected.sum().item()))
             torch.testing.assert_close(
                 initial["actor"][0, 2],
                 torch.ones(config.patch_size_vox, device=device),
             )
+            environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            independent = physical_path_tube(
+                shape,
+                environment.get_tracking_history(),
+                spacing_mm=(1.0, 1.0, 1.0),
+                radius_mm=2,
+            )
+            self.assertTrue(
+                torch.equal(
+                    environment.cumulative_path_mask.bool().cpu(),
+                    torch.from_numpy(independent),
+                )
+            )
         finally:
             environment.close()
+
+    def test_nine_mm_radius_and_three_mm_endpoint_are_independent(self):
+        config = Config(
+            device="cpu",
+            patch_size_mm=24,
+            voxel_size_mm=1.5,
+            max_step_displacement_mm=6,
+            cumulative_path_radius_mm=9,
+            endpoint_tolerance_mm=3,
+        )
+
+        self.assertEqual(config.cumulative_path_radius_vox, 6)
+        self.assertEqual(config.endpoint_tolerance_vox, 2)
 
     def test_timeout_is_terminal_and_preserves_ground_truth_path(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -240,6 +279,7 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             voxel_size_mm=1.0,
             max_step_displacement_mm=2,
             cumulative_path_radius_mm=1,
+            endpoint_tolerance_mm=1,
             allowed_area_radius_mm=0,
             max_episode_steps=8,
         )
@@ -332,6 +372,7 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             voxel_size_mm=1.0,
             max_step_displacement_mm=2,
             cumulative_path_radius_mm=1,
+            endpoint_tolerance_mm=1,
             allowed_area_radius_mm=0,
             max_episode_steps=8,
             success_coverage_threshold=0.55,

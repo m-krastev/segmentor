@@ -454,5 +454,84 @@ command or service, acceptance metrics, and outcome here.
   definition**. The metric counters are internally correct, but evaluation
   geometry and endpoint tolerance are coupled. Raising one parameter both
   thickened the predicted path and relaxed what counted as end-to-end
-  traversal. A fixed 6 mm tube and a separately specified endpoint tolerance
-  are required for a trustworthy acceptance test.
+  traversal. At this audit stage a fixed 6 mm tube and a separately specified
+  endpoint tolerance were proposed; M0.1 supersedes the radius choice after
+  correcting the voxel/mm interpretation.
+
+## 2026-07-26 — M0.1: anatomical-radius clarification
+
+- Correction: the previous M0 conclusion treated 6 mm as the required
+  anatomical path radius. At the actual 1.5 mm spacing, A6's 9 mm radius is six
+  voxels and corresponds to an 18 mm-diameter construction, which is plausible
+  for small bowel. A literal 6 mm radius is four voxels and produces only a
+  12 mm-diameter construction.
+- Revised decision: preregister the **9 mm radius** before further training.
+  This is not selected per checkpoint or per case. The invalid part of A6 was
+  coupling that radius to a 9 mm endpoint tolerance and implementing an L1
+  diamond, not the anatomical radius itself.
+- New fixed acceptance geometry:
+  - Euclidean physical-space tube radius: `9 mm`;
+  - independent endpoint tolerance: `3 mm`;
+  - traversal success: Dice `>= 0.40` **and** endpoint distance `<= 3 mm`.
+- Sensitivity analyses may report 6, 7.5, 9, and 10.5 mm radii, but checkpoint
+  selection and the headline result use only the preregistered 9 mm radius.
+
+## 2026-07-26 — G1/T7: trustworthy real-data traversal goal
+
+- New goal: obtain at least `0.40` Dice and full start-to-end traversal on an
+  untouched nnU-Net test cohort, using the M0.1 geometry.
+- Cohort protocol:
+  - preflight all 585 complete raw cases;
+  - record every rejected case and reason;
+  - freeze a seed-42 80/10/10 train/validation/test split after eligibility;
+  - after the automated, model-independent eligibility pass and split, use test
+    cases only once after architecture, reward, and checkpoint are fixed; never
+    use test metrics for BC, PPO, ablations, or checkpoint choice.
+- Training changes:
+  - 2,048-step horizon;
+  - coverage-then-end skeleton demonstrations;
+  - 12-value route context: time, geodesic progress, Dice coverage, normalized
+    global position, previous direction, and goal direction;
+  - checkpoint ranking is lexicographic by traversal success, endpoint reach,
+    Dice, then endpoint distance;
+  - validation uses an independent SciPy Euclidean-distance implementation and
+    aborts rather than silently skipping failed cases;
+  - validation iterates the immutable manifest in a fixed order even though
+    the training loader remains shuffled;
+  - diagnostic checkpoints and validation outputs use fresh, run-specific
+    directories, and every scheduled validation retains a step-numbered JSON
+    metric snapshot in addition to TensorBoard.
+- Metric and launcher regressions: `9 mm / 1.5 mm = 6` path-radius voxels,
+  while `3 mm / 1.5 mm = 2` endpoint-tolerance voxels.
+- Verification on commander with `uv`: **40 passed**, 18 upstream deprecation
+  warnings.
+- Preflight service: `navigator-preflight-v1.service`.
+- Preflight output: `experiments/navigator-nnunet-v1/` (immutable; pending at
+  the time of this entry).
+- Diagnostic protocol after preflight: one behavior-cloning warm-start epoch
+  followed by 250k PPO steps. Scale to one million only if validation shows
+  joint improvement rather than Dice-only or endpoint-only progress.
+
+## 2026-07-26 — T7.1: full-cohort preflight corrections
+
+- The first preflight attempt retained CuCIM/CuPy allocations across cases and
+  reached 8.5 GiB of GPU memory by case 82. Added an explicit per-case CuPy
+  memory-pool release and restarted; derived caches remain reusable and no
+  immutable manifests had yet been written.
+- The corrected run exposed an expert-route bug on `s0236`: endpoints were
+  mask-connected, but the nearest skeleton node belonged to a nearby
+  disconnected segmentation fragment. Restricting skeletonization to the
+  26-connected component containing both anatomical endpoints fixes the
+  attachment without dilating or repairing the segmentation.
+- Added synthetic regressions for a thick connected target with a closer
+  disconnected distractor and for an empty medial skeleton. Focused `uv`
+  result: **5 passed**.
+- Bumped the expert-route cache key from `skeleton_tree_v1` to
+  `skeleton_tree_v2` so preflight cannot reuse routes generated before the
+  connected-component correction.
+- Case `s0422` exposed a connected but degenerate component for which Lee
+  skeletonization is empty. Such cases now fall back to the exact
+  mask-constrained endpoint route instead of being falsely labeled
+  anatomically disconnected.
+- Preflight restarted under the same `navigator-preflight-v1.service` name;
+  output remains pending and versioned.

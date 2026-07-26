@@ -13,6 +13,7 @@ from tensordict import TensorDict
 from navigator.config import Config
 from navigator.dataset import NNUNetActualDataset
 from navigator.environment import make_sb_env
+from navigator.metrics import compute_path_metrics
 from navigator.oracle import skeleton_covering_route
 from navigator.pretrain import _geodesic_expert_action, _monotonic_expert_action
 
@@ -39,14 +40,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
     parser.add_argument("--voxel-size-mm", type=float, default=1.5)
     parser.add_argument("--patch-size-mm", type=int, default=24)
-    parser.add_argument("--max-episode-steps", type=int, default=1024)
+    parser.add_argument("--max-episode-steps", type=int, default=2048)
     parser.add_argument("--success-dice", type=float, default=0.40)
     parser.add_argument(
         "--oracle",
         choices=("geodesic", "skeleton"),
         default="geodesic",
     )
-    parser.add_argument("--path-radius-mm", type=float, default=6.0)
+    parser.add_argument("--path-radius-mm", type=float, default=9.0)
+    parser.add_argument("--endpoint-tolerance-mm", type=float, default=3.0)
     return parser.parse_args()
 
 
@@ -72,6 +74,8 @@ def main() -> None:
         patch_size_mm=args.patch_size_mm,
         max_step_displacement_mm=6,
         cumulative_path_radius_mm=args.path_radius_mm,
+        endpoint_tolerance_mm=args.endpoint_tolerance_mm,
+        terminate_on_success=args.oracle != "skeleton",
         allowed_area_radius_mm=0,
         success_coverage_threshold=args.success_dice,
         coverage_reward_scale=50,
@@ -127,7 +131,9 @@ def main() -> None:
                 )
                 observation = transition
                 endpoint_distance_vox = math.dist(env.current_pos_vox, env.goal)
-                endpoint_reached = endpoint_distance_vox < config.cumulative_path_radius_vox
+                endpoint_reached = (
+                    endpoint_distance_vox <= config.endpoint_tolerance_vox
+                )
                 route_complete = dense_route is not None and path_index >= len(dense_route) - 2
                 if (
                     bool(transition["done"].item())
@@ -141,17 +147,25 @@ def main() -> None:
             case_output.mkdir(parents=True, exist_ok=True)
             path_output = case_output / "path.txt"
             np.savetxt(path_output, history, fmt="%d")
-            endpoint_distance_mm = math.dist(env.current_pos_vox, env.goal) * config.voxel_size_mm
-            dice = float(env.current_coverage)
+            metrics = compute_path_metrics(
+                env.seg.numpy(force=True),
+                history,
+                env.goal,
+                tuple(float(value) for value in env.spacing),
+                config.cumulative_path_radius_mm,
+                config.endpoint_tolerance_mm,
+                config.success_coverage_threshold,
+            )
+            endpoint_distance_mm = metrics.endpoint_distance_mm
+            dice = metrics.dice
             result = {
                 "case": case_id,
-                "steps": int(history.shape[0] - 1),
+                "steps": int(env.current_step_count),
+                "valid_moves": int(history.shape[0] - 1),
                 "dense_route_voxels": (int(len(dense_route)) if dense_route is not None else None),
                 "dice": dice,
-                "endpoint_reached": int(endpoint_reached),
-                "traversal_success": int(
-                    endpoint_reached and dice >= config.success_coverage_threshold
-                ),
+                "endpoint_reached": int(metrics.endpoint_reached),
+                "traversal_success": int(metrics.traversal_success),
                 "endpoint_distance_mm": endpoint_distance_mm,
                 "start": [int(value) for value in env.start_coord],
                 "goal": [int(value) for value in env.goal],
@@ -166,6 +180,8 @@ def main() -> None:
     summary = {
         "oracle": args.oracle,
         "path_radius_mm": config.cumulative_path_radius_mm,
+        "path_radius_geometry": "euclidean_physical",
+        "endpoint_tolerance_mm": config.endpoint_tolerance_mm,
         "success_dice": config.success_coverage_threshold,
         "num_cases": len(results),
         "average_dice": float(np.mean([result["dice"] for result in results])),

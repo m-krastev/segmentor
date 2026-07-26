@@ -28,6 +28,8 @@ class Config:
     nnunet_raw_dir: Optional[str] = None
     nnunet_cache_dir: str = "results/navigator_nnunet/cache"
     nnunet_case_ids_file: Optional[str] = None
+    nnunet_train_case_ids_file: Optional[str] = None
+    nnunet_val_case_ids_file: Optional[str] = None
     nnunet_generate_expert_path: bool = False
     amp: bool = False
     amp_dtype: str = "bf16"
@@ -43,6 +45,8 @@ class Config:
     # Exact run directory; otherwise a timestamped directory is created below
     # <checkpoint_dir>/tensorboard.
     tensorboard_log_dir: Optional[str] = None
+    validation_save_paths: bool = False
+    validation_output_dir: Optional[str] = None
 
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
@@ -50,7 +54,12 @@ class Config:
     max_step_displacement_mm: float = 6
     use_immediate_gdt_reward: bool = True
     max_episode_steps: int = 2048
-    cumulative_path_radius_mm: float = 6.0
+    terminate_on_success: bool = True
+    # A 9 mm radius corresponds to an 18 mm diameter at the 1.5 mm nnU-Net
+    # spacing, within the expected small-bowel caliber. Endpoint tolerance is a
+    # separate localization criterion and must never be inferred from this.
+    cumulative_path_radius_mm: float = 9.0
+    endpoint_tolerance_mm: float = 3.0
     # Traversable space is the segmentation by default. A large dilation lets
     # the policy jump across nearby bowel loops and solve only the endpoint task.
     allowed_area_radius_mm: float = 0.0
@@ -106,7 +115,7 @@ class Config:
     max_grad_norm: float = 0.5
     eval_interval: int = 3000  # Interval for evaluation
     save_freq: int = 500  # Frequency to save model checkpoints
-    metric_to_optimize: str = "validation/avg_coverage"
+    metric_to_optimize: str = "validation/traversal_success_rate"
 
     # --- Training/Device ---
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -116,10 +125,13 @@ class Config:
     max_step_vox: int = field(init=False)
     patch_size_vox: Tuple[int, int, int] = field(init=False)
     cumulative_path_radius_vox: int = field(init=False)
+    endpoint_tolerance_vox: float = field(init=False)
     allowed_area_radius_vox: int = field(init=False)
     gdt_max_increase_theta: float = field(init=False)
     observation_channels: int = field(init=False, default=5)
-    context_features: int = field(init=False, default=5)
+    # time, geodesic progress, Dice coverage, normalized position (3),
+    # previous direction (3), and goal direction (3)
+    context_features: int = field(init=False, default=12)
 
     def __post_init__(self):
         def mm_to_vox(dist_mm: float, voxel_dim_mm: float) -> int:
@@ -132,6 +144,10 @@ class Config:
             raise ValueError("train_val_split must be between zero and one")
         if self.allowed_area_radius_mm < 0:
             raise ValueError("allowed_area_radius_mm must be non-negative")
+        if self.cumulative_path_radius_mm < 0:
+            raise ValueError("cumulative_path_radius_mm must be non-negative")
+        if self.endpoint_tolerance_mm < 0:
+            raise ValueError("endpoint_tolerance_mm must be non-negative")
         if not 0 <= self.success_coverage_threshold <= 1:
             raise ValueError("success_coverage_threshold must be between 0 and 1")
         if self.coverage_reward_scale < 0:
@@ -157,6 +173,7 @@ class Config:
         self.cumulative_path_radius_vox = mm_to_vox(
             self.cumulative_path_radius_mm, self.voxel_size_mm
         )
+        self.endpoint_tolerance_vox = self.endpoint_tolerance_mm / self.voxel_size_mm
         self.allowed_area_radius_vox = mm_to_vox(self.allowed_area_radius_mm, self.voxel_size_mm)
         if self.max_step_vox < 1:
             raise ValueError("max_step_displacement_mm must span at least one voxel")
@@ -185,6 +202,7 @@ def parse_args() -> Config:
             "max_step_vox",
             "patch_size_vox",
             "cumulative_path_radius_vox",
+            "endpoint_tolerance_vox",
             "allowed_area_radius_vox",
             "gdt_max_increase_theta",
             "observation_channels",

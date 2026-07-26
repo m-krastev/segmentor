@@ -44,7 +44,7 @@ CACHE_FILES = {
     "gdt_start": "gdt_start_mcp26_v1.nii",
     "gdt_end": "gdt_end_mcp26_v1.nii",
     "local_peaks": "local_peaks.npy",
-    "expert_path": "expert_path_skeleton_tree_v1.npy",
+    "expert_path": "expert_path_skeleton_tree_v2.npy",
 }
 
 NNUNET_CASE_FILES = (

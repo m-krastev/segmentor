@@ -4,7 +4,7 @@ from itertools import product
 
 import networkx as nx
 import numpy as np
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, binary_propagation
 from scipy.spatial import cKDTree
 from skimage.graph import MCP_Geometric
 from skimage.morphology import skeletonize
@@ -107,7 +107,23 @@ def skeleton_covering_route(
     if not mask[start] or not mask[end]:
         raise ValueError("Skeleton route endpoints must be inside the segmentation.")
 
-    skeleton = skeletonize(mask, method="lee")
+    component_seed = np.zeros_like(mask, dtype=bool)
+    component_seed[start] = True
+    component_mask = binary_propagation(
+        component_seed,
+        structure=np.ones((3, 3, 3), dtype=bool),
+        mask=mask,
+    )
+    if not component_mask[end]:
+        raise ValueError(f"No mask-constrained path between {start} and {end}.")
+
+    # Nearby disconnected fragments can be closer to an endpoint than the
+    # medial skeleton of its actual (thick) bowel component. Skeletonizing only
+    # the start/end component prevents the expert from attaching to a spatially
+    # close but topologically unreachable fragment.
+    skeleton = skeletonize(component_mask, method="lee")
+    if not np.any(skeleton):
+        return _mask_path(component_mask, start, end)
     graph, coordinates = _skeleton_graph(skeleton)
     coordinate_tree = cKDTree(coordinates)
     start_node = int(coordinate_tree.query(start)[1])
@@ -139,12 +155,12 @@ def skeleton_covering_route(
 
     skeleton_coordinates = coordinates[np.asarray(skeleton_route)]
     start_connector = _mask_path(
-        mask,
+        component_mask,
         start,
         tuple(skeleton_coordinates[0]),
     )
     end_connector = _mask_path(
-        mask,
+        component_mask,
         tuple(skeleton_coordinates[-1]),
         end,
     )

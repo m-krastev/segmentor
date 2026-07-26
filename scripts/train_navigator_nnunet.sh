@@ -11,6 +11,7 @@ UV_BIN="${UV_BIN:-$(command -v uv)}"
 NNUNET_RAW="${NAVIGATOR_NNUNET_RAW:-data/nnunet/nnUNet_raw}"
 NNUNET_CACHE_DIR="${NAVIGATOR_NNUNET_CACHE_DIR:-results/navigator_nnunet/cache}"
 CHECKPOINT_DIR="${NAVIGATOR_CHECKPOINT_DIR:-checkpoints/navigator-nnunet-scratch-v1}"
+VALIDATION_OUTPUT_DIR="${NAVIGATOR_VALIDATION_OUTPUT_DIR:-}"
 TOTAL_TIMESTEPS="${NAVIGATOR_TOTAL_TIMESTEPS:-1000000}"
 LEARNING_RATE="${NAVIGATOR_LEARNING_RATE:-0.00005}"
 EVAL_INTERVAL="${NAVIGATOR_EVAL_INTERVAL:-400}"
@@ -18,10 +19,15 @@ SAVE_FREQ="${NAVIGATOR_SAVE_FREQ:-50}"
 BATCH_SIZE="${NAVIGATOR_BATCH_SIZE:-128}"
 UPDATE_EPOCHS="${NAVIGATOR_UPDATE_EPOCHS:-4}"
 CASE_IDS_FILE="${NAVIGATOR_NNUNET_CASE_IDS_FILE:-}"
+TRAIN_CASE_IDS_FILE="${NAVIGATOR_NNUNET_TRAIN_CASE_IDS_FILE:-}"
+VAL_CASE_IDS_FILE="${NAVIGATOR_NNUNET_VAL_CASE_IDS_FILE:-}"
 GENERATE_EXPERT_PATH="${NAVIGATOR_GENERATE_EXPERT_PATH:-0}"
 BEHAVIOR_CLONING_EPOCHS="${NAVIGATOR_BEHAVIOR_CLONING_EPOCHS:-0}"
 BC_MAX_POLICY_PROBABILITY="${NAVIGATOR_BC_MAX_POLICY_PROBABILITY:-1}"
-PATH_RADIUS_MM="${NAVIGATOR_PATH_RADIUS_MM:-6}"
+PATH_RADIUS_MM="${NAVIGATOR_PATH_RADIUS_MM:-9}"
+ENDPOINT_TOLERANCE_MM="${NAVIGATOR_ENDPOINT_TOLERANCE_MM:-3}"
+MAX_EPISODE_STEPS="${NAVIGATOR_MAX_EPISODE_STEPS:-2048}"
+FRAMES_PER_BATCH="${NAVIGATOR_FRAMES_PER_BATCH:-1024}"
 GDT_REWARD_SCALE="${NAVIGATOR_GDT_REWARD_SCALE:-1}"
 TRAIN_VAL_SPLIT="${NAVIGATOR_TRAIN_VAL_SPLIT:-0.9}"
 LOAD_FROM_CHECKPOINT="${NAVIGATOR_LOAD_FROM_CHECKPOINT:-}"
@@ -29,6 +35,20 @@ LOAD_FROM_CHECKPOINT="${NAVIGATOR_LOAD_FROM_CHECKPOINT:-}"
 CASE_ARGS=()
 if [[ -n "$CASE_IDS_FILE" ]]; then
   CASE_ARGS=(--nnunet-case-ids-file "$CASE_IDS_FILE")
+fi
+if [[ -n "$TRAIN_CASE_IDS_FILE" || -n "$VAL_CASE_IDS_FILE" ]]; then
+  if [[ -z "$TRAIN_CASE_IDS_FILE" || -z "$VAL_CASE_IDS_FILE" ]]; then
+    echo "Both NAVIGATOR_NNUNET_TRAIN_CASE_IDS_FILE and NAVIGATOR_NNUNET_VAL_CASE_IDS_FILE are required." >&2
+    exit 2
+  fi
+  if [[ -n "$CASE_IDS_FILE" ]]; then
+    echo "Explicit train/validation manifests cannot be combined with NAVIGATOR_NNUNET_CASE_IDS_FILE." >&2
+    exit 2
+  fi
+  CASE_ARGS=(
+    --nnunet-train-case-ids-file "$TRAIN_CASE_IDS_FILE"
+    --nnunet-val-case-ids-file "$VAL_CASE_IDS_FILE"
+  )
 fi
 
 EXPERT_ARGS=()
@@ -39,6 +59,11 @@ fi
 LOAD_ARGS=()
 if [[ -n "$LOAD_FROM_CHECKPOINT" ]]; then
   LOAD_ARGS=(--load-from-checkpoint "$LOAD_FROM_CHECKPOINT")
+fi
+
+VALIDATION_ARGS=()
+if [[ -n "$VALIDATION_OUTPUT_DIR" ]]; then
+  VALIDATION_ARGS=(--validation-output-dir "$VALIDATION_OUTPUT_DIR")
 fi
 
 cd "$PROJECT_ROOT"
@@ -60,6 +85,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   "${CASE_ARGS[@]}" \
   "${EXPERT_ARGS[@]}" \
   "${LOAD_ARGS[@]}" \
+  "${VALIDATION_ARGS[@]}" \
   --device cuda \
   --amp \
   --amp-dtype bf16 \
@@ -71,6 +97,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --patch-size-mm 24 \
   --max-step-displacement-mm 6 \
   --cumulative-path-radius-mm "$PATH_RADIUS_MM" \
+  --endpoint-tolerance-mm "$ENDPOINT_TOLERANCE_MM" \
   --allowed-area-radius-mm 0 \
   --goal-action-prior 0 \
   --success-coverage-threshold 0.40 \
@@ -78,9 +105,9 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --gdt-reward-scale "$GDT_REWARD_SCALE" \
   --r-val2 1 \
   --r-zero-mov 1 \
-  --max-episode-steps 1024 \
+  --max-episode-steps "$MAX_EPISODE_STEPS" \
   --total-timesteps "$TOTAL_TIMESTEPS" \
-  --frames-per-batch 1024 \
+  --frames-per-batch "$FRAMES_PER_BATCH" \
   --batch-size "$BATCH_SIZE" \
   --update-epochs "$UPDATE_EPOCHS" \
   --learning-rate "$LEARNING_RATE" \

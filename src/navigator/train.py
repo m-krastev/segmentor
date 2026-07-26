@@ -37,6 +37,7 @@ from .dataset import SmallBowelDataset  # Keep for creating the iterator
 
 # Use the TorchRL environment wrapper and factory function
 from .environment import make_sb_env
+from .metrics import compute_path_metrics
 
 torch.set_float32_matmul_precision("medium")
 torch._dynamo.config.capture_dynamic_output_shape_ops = True
@@ -92,12 +93,31 @@ def log_tensorboard(writer, data: dict, step: int):
             writer.add_scalar(key, value, global_step=step)
 
 
+def validation_rank(metrics: dict) -> tuple[float, float, float, float]:
+    """Rank checkpoints by the preregistered traversal objective.
+
+    This is lexicographic: completed traversals dominate endpoint-only runs,
+    endpoint reach breaks success-rate ties, and Dice/distance only break the
+    remaining ties. It avoids selecting a high-Dice path that never reaches
+    the anatomical endpoint while still making progress visible before the
+    first complete traversal.
+    """
+
+    return (
+        float(metrics["validation/traversal_success_rate"]),
+        float(metrics["validation/endpoint_reach_rate"]),
+        float(metrics["validation/avg_dice"]),
+        -float(metrics["validation/avg_endpoint_distance_mm"]),
+    )
+
+
 # --- Validation Loop (Adaptation Needed) ---
 def validation_loop_torchrl(
     actor_module,  # Pass the trained policy module
     config: Config,
     val_dataset: SmallBowelDataset,  # Pass the validation subset
     device: torch.device = None,
+    global_step: int | None = None,
 ):
     """Validation loop adapted for TorchRL env and modules."""
     actor_module.eval()  # Set actor to evaluation mode
@@ -105,14 +125,28 @@ def validation_loop_torchrl(
 
     # Create a validation environment instance
     # Pass the validation iterator to this env instance
-    save_path = Path("results").joinpath(
-        config.data_dir.split("/")[-1],
-        f"ps{config.patch_size_vox}_y{config.gamma:.03f}_rv1{config.r_val1:g}_rv2{config.r_val2:g}",
+    save_path = (
+        Path(config.validation_output_dir)
+        if config.validation_output_dir
+        else Path("results").joinpath(
+            config.data_dir.split("/")[-1],
+            (
+                f"ps{config.patch_size_vox}_y{config.gamma:.03f}_"
+                f"rv1{config.r_val1:g}_rv2{config.r_val2:g}"
+            ),
+        )
     )
     save_path.mkdir(parents=True, exist_ok=True)
     with open(save_path / "config.json", "w") as f:
         json.dump(vars(config), f, indent=4)
-    val_env = make_sb_env(config, val_dataset, device, 1, check_env=False)
+    val_env = make_sb_env(
+        config,
+        val_dataset,
+        device,
+        1,
+        check_env=False,
+        shuffle=False,
+    )
 
     num_val_subjects = len(val_dataset)
 
@@ -147,15 +181,22 @@ def validation_loop_torchrl(
                     reward = rollout["next", "reward"].mean().item()
                     total_reward = rollout["next", "info", "total_reward"].sum().item()
                     step_count = rollout["action"].shape[1]
-                    final_coverage = val_env._get_final_coverage().item()
-                    success = rollout["next", "info", "final_success"].sum().item()
-                    endpoint_distance_vox = math.dist(val_env.current_pos_vox, val_env.goal)
-                    endpoint_distance_mm = endpoint_distance_vox * config.voxel_size_mm
-                    endpoint_reached = float(
-                        endpoint_distance_vox < config.cumulative_path_radius_vox
+                    path = val_env.get_tracking_history()
+                    independent_metrics = compute_path_metrics(
+                        val_env.seg.numpy(force=True),
+                        path,
+                        val_env.goal,
+                        tuple(float(value) for value in val_env.spacing),
+                        config.cumulative_path_radius_mm,
+                        config.endpoint_tolerance_mm,
+                        config.success_coverage_threshold,
                     )
+                    final_coverage = independent_metrics.dice
+                    success = float(independent_metrics.traversal_success)
+                    endpoint_distance_mm = independent_metrics.endpoint_distance_mm
+                    endpoint_reached = float(independent_metrics.endpoint_reached)
 
-                    paths.append(val_env.get_tracking_history())
+                    paths.append(path)
                     path_masks.append(val_env.get_tracking_mask())
                     intermediate_results.append(
                         (
@@ -169,7 +210,10 @@ def validation_loop_torchrl(
                         )
                     )
                 except Exception as e:
-                    print(f"Error during validation rollout for subject {i}: {e}")
+                    raise RuntimeError(
+                        f"Validation failed for subject {i}; refusing to report "
+                        "a metric on a silently reduced cohort."
+                    ) from e
 
             # Keep the common selection path so stochastic validation can be
             # reintroduced explicitly later without silently cherry-picking.
@@ -192,10 +236,13 @@ def validation_loop_torchrl(
             path_mask = path_masks[best_run]
 
             # Save the best path and mask
-            val_env.tracking_path_history = path
-            val_env.cumulative_path_mask = path_mask
-            val_env.save_path(save_path / val_env._current_subject_data["id"])
+            case_id = val_env._current_subject_data["id"]
+            if config.validation_save_paths:
+                val_env.tracking_path_history = path
+                val_env.cumulative_path_mask = path_mask
+                val_env.save_path(save_path / case_id)
 
+            val_results["case"].append(case_id)
             val_results["reward"].append(reward)
             val_results["length"].append(step_count)
             val_results["coverage"].append(final_coverage)
@@ -205,6 +252,11 @@ def validation_loop_torchrl(
             val_results["endpoint_distance_mm"].append(endpoint_distance_mm)
 
     val_env.close()  # Close the validation environment
+
+    if len(val_results["coverage"]) != num_val_subjects:
+        raise RuntimeError(
+            f"Validation produced {len(val_results['coverage'])}/{num_val_subjects} results."
+        )
 
     # Calculate mean results
     final_metrics = {
@@ -217,10 +269,15 @@ def validation_loop_torchrl(
         "validation/traversal_success_rate": np.mean(val_results["success"]),
         "validation/endpoint_reach_rate": np.mean(val_results["endpoint_reached"]),
         "validation/avg_endpoint_distance_mm": np.mean(val_results["endpoint_distance_mm"]),
+        "validation/num_cases": len(val_results["coverage"]),
     }
 
+    metric_payload = final_metrics | val_results
     with open(save_path / "metrics.json", "w") as f:
-        json.dump(final_metrics | val_results, f, indent=4)
+        json.dump(metric_payload, f, indent=4)
+    if global_step is not None:
+        with open(save_path / f"metrics_{global_step}.json", "w") as f:
+            json.dump(metric_payload, f, indent=4)
 
     print(
         f"Validation Results: Avg R/L/C/S: {final_metrics['validation/avg_reward']:.2f} / "
@@ -331,6 +388,7 @@ def _train_torchrl(
     # )
     collected_frames, num_updates = 0, 0
     best_val_metric = float("-inf")
+    best_val_rank = (float("-inf"),) * 4
 
     # --- Checkpoint Reloading ---
     if config.reload_checkpoint_path:
@@ -350,6 +408,12 @@ def _train_torchrl(
             collected_frames = checkpoint.get("collected_frames", 0)
             num_updates = checkpoint.get("num_updates", 0)
             best_val_metric = checkpoint.get("best_val_metric", float("-inf"))
+            saved_rank = checkpoint.get("best_val_rank")
+            best_val_rank = tuple(
+                saved_rank
+                if saved_rank is not None
+                else (best_val_metric, float("-inf"), float("-inf"), float("-inf"))
+            )
             print("Checkpoint loaded successfully.")
             print(
                 f"Resuming training from collected_frames: {collected_frames}, num_updates: {num_updates}"
@@ -486,22 +550,33 @@ def _train_torchrl(
         avg_reward = batch_data["next", "reward"].mean().item()
         max_reward = batch_data["next", "reward"].max().item()
         idx = batch_data["next", "done"]
-        # Log episode stats from collected batch_data
-        final_coverage = batch_data["next", "info", "final_coverage"]
-        final_coverage = final_coverage[idx].mean()
-        success_rate = batch_data["next", "info", "final_success"]
-        success_rate = success_rate[idx].mean()
-        step_count = batch_data["next", "info", "final_step_count"].float()
-        step_count = step_count[idx].mean()
-        ep_len = batch_data["next", "info", "final_length"].float()
-        ep_len = ep_len[idx].mean()
-        wall_gradient = batch_data["next", "info", "final_wall_gradient"].float()
-        wall_gradient = wall_gradient[idx].mean()
-        total_reward = batch_data["next", "info", "total_reward"]
-        total_reward = total_reward[idx].mean()
+        # A 2,048-step episode legitimately spans multiple 1,024-frame
+        # collector batches. Keep optimizing on those batches while logging NaN
+        # for episode-only statistics until a terminal transition is present.
+        completed_episode = bool(idx.any().item())
+        missing_episode_stat = torch.full((), float("nan"), device=device)
+
+        def completed_mean(key: str, *, as_float: bool = False):
+            if not completed_episode:
+                return missing_episode_stat
+            values = batch_data["next", "info", key]
+            if as_float:
+                values = values.float()
+            return values[idx].mean()
+
+        final_coverage = completed_mean("final_coverage")
+        success_rate = completed_mean("final_success")
+        step_count = completed_mean("final_step_count", as_float=True)
+        ep_len = completed_mean("final_length", as_float=True)
+        wall_gradient = completed_mean("final_wall_gradient", as_float=True)
+        total_reward = completed_mean("total_reward")
         action = ((batch_data["action"] * 2 - 1) * config.max_step_vox).round()
-        max_gdt_achieved = batch_data["next", "info", "max_gdt_achieved"][idx]
-        max_std, max_mean = torch.std_mean(max_gdt_achieved)
+        if completed_episode:
+            max_gdt_achieved = batch_data["next", "info", "max_gdt_achieved"][idx]
+            max_std, max_mean = torch.std_mean(max_gdt_achieved, unbiased=False)
+            max_gdt_value = max_gdt_achieved.max()
+        else:
+            max_std = max_mean = max_gdt_value = missing_episode_stat
         log_data = {
             "losses/policy_loss": avg_actor_loss,
             "losses/value_loss": avg_critic_loss,
@@ -523,7 +598,7 @@ def _train_torchrl(
             "charts/learning_rate": optimizer.param_groups[0]["lr"],
             "charts/max_gdt_achieved": max_mean,
             "charts/max_gdt_achieved_std": max_std,
-            "charts/max_gdt_achieved_max": max_gdt_achieved.max(),
+            "charts/max_gdt_achieved_max": max_gdt_value,
             "charts/num_updates": num_updates,
             "charts/action_0": action[:, 0].mean(),
             "charts/action_1": action[:, 1].mean(),
@@ -556,6 +631,7 @@ def _train_torchrl(
                 config=config,
                 val_dataset=val_set,
                 device=device,
+                global_step=collected_frames,
             )
             policy_module.train()
             if config.track_wandb and wandb is not None:
@@ -564,10 +640,13 @@ def _train_torchrl(
 
             # Checkpointing logic (save based on validation metric)
             current_metric = val_metrics.get(config.metric_to_optimize, float("-inf"))
-            if current_metric > best_val_metric:
+            current_rank = validation_rank(val_metrics)
+            if current_rank > best_val_rank:
                 best_val_metric = current_metric
+                best_val_rank = current_rank
                 print(
-                    f"  New best validation metric ({config.metric_to_optimize}): {best_val_metric:.4f}"
+                    f"  New best validation rank: {best_val_rank} "
+                    f"({config.metric_to_optimize}={best_val_metric:.4f})"
                 )
                 save_checkpoint(
                     policy_module,
@@ -579,6 +658,7 @@ def _train_torchrl(
                     config,
                     True,
                     best_val_metric,
+                    best_val_rank=best_val_rank,
                 )
 
         # Regular checkpoint saving
@@ -593,6 +673,7 @@ def _train_torchrl(
                 config,
                 False,
                 best_val_metric,
+                best_val_rank=best_val_rank,
             )
 
     # --- End of Training ---
@@ -612,6 +693,7 @@ def _train_torchrl(
         False,
         best_val_metric,
         final_model_path,
+        best_val_rank=best_val_rank,
     )
     print(f"Final model saved to {final_model_path}")
 
@@ -627,6 +709,7 @@ def save_checkpoint(
     best=False,
     best_val_metric: float = float("-inf"),
     checkpoint_path: str = None,
+    best_val_rank: tuple[float, float, float, float] | None = None,
 ):
     checkpoint_path = checkpoint_path or os.path.join(
         config.checkpoint_dir, f"checkpoint_{collected_frames}{'best' if best else ''}.pth"
@@ -640,6 +723,7 @@ def save_checkpoint(
         "collected_frames": collected_frames,
         "num_updates": num_updates,
         "best_val_metric": best_val_metric,
+        "best_val_rank": best_val_rank,
         "config": vars(config),
     }
     torch.save(save_dict, checkpoint_path)

@@ -13,6 +13,7 @@ from torchrl.envs.utils import ExplorationType, set_exploration_type
 from navigator.config import Config
 from navigator.dataset import NNUNetActualDataset
 from navigator.environment import make_sb_env
+from navigator.metrics import compute_path_metrics
 from navigator.models import create_ppo_modules
 
 
@@ -28,7 +29,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("checkpoints/dagger-ppo-million-v1/data/phantoms/checkpoint_102400best.pth"),
     )
-    parser.add_argument("--cases", nargs="+", default=["s0001"])
+    parser.add_argument("--cases", nargs="*")
+    parser.add_argument("--case-ids-file", type=Path)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
     parser.add_argument(
         "--interaction-type",
@@ -38,8 +40,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--voxel-size-mm", type=float, default=1.5)
     parser.add_argument("--patch-size-mm", type=int, default=24)
-    parser.add_argument("--path-radius-mm", type=float, default=6.0)
-    parser.add_argument("--max-episode-steps", type=int, default=1024)
+    parser.add_argument("--path-radius-mm", type=float, default=9.0)
+    parser.add_argument("--endpoint-tolerance-mm", type=float, default=3.0)
+    parser.add_argument("--max-episode-steps", type=int, default=2048)
     parser.add_argument(
         "--cache-dir",
         type=Path,
@@ -51,6 +54,20 @@ def parse_args() -> argparse.Namespace:
         default=Path("results/navigator_nnunet/evaluation"),
     )
     return parser.parse_args()
+
+
+def read_case_ids(args: argparse.Namespace) -> list[str]:
+    case_ids = list(args.cases or [])
+    if args.case_ids_file:
+        case_ids.extend(
+            line.strip()
+            for line in args.case_ids_file.read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    case_ids = sorted(set(case_ids))
+    if not case_ids:
+        raise ValueError("Pass --cases or --case-ids-file for frozen evaluation.")
+    return case_ids
 
 
 def create_policy(config: Config, checkpoint_path: Path) -> torch.nn.Module:
@@ -89,6 +106,7 @@ def create_policy(config: Config, checkpoint_path: Path) -> torch.nn.Module:
 
 def main() -> None:
     args = parse_args()
+    case_ids = read_case_ids(args)
     if not args.checkpoint.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -102,6 +120,7 @@ def main() -> None:
         patch_size_mm=args.patch_size_mm,
         max_step_displacement_mm=6,
         cumulative_path_radius_mm=args.path_radius_mm,
+        endpoint_tolerance_mm=args.endpoint_tolerance_mm,
         allowed_area_radius_mm=0,
         goal_action_prior=0,
         success_coverage_threshold=0.40,
@@ -115,7 +134,7 @@ def main() -> None:
     )
     dataset = NNUNetActualDataset(
         nnunet_raw=args.nnunet_raw,
-        case_ids=args.cases,
+        case_ids=case_ids,
         cache_dir=args.cache_dir,
         config=config,
     )
@@ -150,18 +169,27 @@ def main() -> None:
             case_output_dir.mkdir(parents=True, exist_ok=True)
             path_output = case_output_dir / "path.txt"
             np.savetxt(path_output, history, fmt="%d")
-            endpoint_distance_vox = float(
-                np.linalg.norm(np.asarray(env.current_pos_vox) - np.asarray(env.goal))
+            metrics = compute_path_metrics(
+                env.seg.numpy(force=True),
+                history,
+                env.goal,
+                tuple(float(value) for value in env.spacing),
+                config.cumulative_path_radius_mm,
+                config.endpoint_tolerance_mm,
+                config.success_coverage_threshold,
             )
             result = {
                 "case": case_id,
-                "steps": int(history.shape[0] - 1),
-                "coverage": float(env.current_coverage),
-                "dice": float(env.current_coverage),
-                "success": int(rollout["next", "info", "final_success"].sum().item()),
-                "traversal_success": int(rollout["next", "info", "final_success"].sum().item()),
-                "endpoint_reached": int(endpoint_distance_vox < config.cumulative_path_radius_vox),
-                "endpoint_distance_mm": (endpoint_distance_vox * config.voxel_size_mm),
+                "steps": int(env.current_step_count),
+                "valid_moves": int(history.shape[0] - 1),
+                "coverage": metrics.dice,
+                "dice": metrics.dice,
+                "success": int(metrics.traversal_success),
+                "traversal_success": int(metrics.traversal_success),
+                "endpoint_reached": int(metrics.endpoint_reached),
+                "endpoint_distance_mm": metrics.endpoint_distance_mm,
+                "path_voxels": metrics.path_voxels,
+                "target_intersection": metrics.target_intersection,
                 "start": [int(value) for value in env.start_coord],
                 "goal": [int(value) for value in env.goal],
                 "final": [int(value) for value in env.current_pos_vox],
@@ -177,6 +205,8 @@ def main() -> None:
         "interaction_type": args.interaction_type,
         "voxel_size_mm": args.voxel_size_mm,
         "path_radius_mm": args.path_radius_mm,
+        "path_radius_geometry": "euclidean_physical",
+        "endpoint_tolerance_mm": args.endpoint_tolerance_mm,
         "success_rate": float(np.mean([result["success"] for result in results])),
         "average_coverage": float(np.mean([result["coverage"] for result in results])),
         "average_dice": float(np.mean([result["dice"] for result in results])),

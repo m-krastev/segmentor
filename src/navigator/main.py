@@ -26,6 +26,19 @@ from .utils import seed_everything
 def main():
     """Main entry point for the Navigator system."""
 
+    def read_case_ids(path: str) -> list[str]:
+        with open(path) as case_file:
+            case_ids = [
+                line.strip()
+                for line in case_file
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+        if not case_ids:
+            raise ValueError(f"No case IDs found in {path}")
+        if len(case_ids) != len(set(case_ids)):
+            raise ValueError(f"Duplicate case IDs found in {path}")
+        return case_ids
+
     # Parse command line arguments
     config = parse_args()
     print("Parsed configuration:")
@@ -59,15 +72,38 @@ def main():
 
     if config.nnunet_raw_dir:
         case_ids = None
+        explicit_train_ids = explicit_val_ids = None
+        has_explicit_split = bool(
+            config.nnunet_train_case_ids_file or config.nnunet_val_case_ids_file
+        )
+        if has_explicit_split:
+            if not (
+                config.nnunet_train_case_ids_file
+                and config.nnunet_val_case_ids_file
+            ):
+                raise ValueError(
+                    "Both --nnunet-train-case-ids-file and "
+                    "--nnunet-val-case-ids-file are required."
+                )
+            if config.nnunet_case_ids_file:
+                raise ValueError(
+                    "--nnunet-case-ids-file cannot be combined with explicit "
+                    "train/validation manifests."
+                )
+            explicit_train_ids = read_case_ids(config.nnunet_train_case_ids_file)
+            explicit_val_ids = read_case_ids(config.nnunet_val_case_ids_file)
+            overlap = set(explicit_train_ids) & set(explicit_val_ids)
+            if overlap:
+                raise ValueError(
+                    f"Train/validation manifests overlap: {sorted(overlap)}"
+                )
+            case_ids = explicit_train_ids + explicit_val_ids
+            print(
+                "Using immutable nnU-Net split: "
+                f"{len(explicit_train_ids)} train / {len(explicit_val_ids)} validation"
+            )
         if config.nnunet_case_ids_file:
-            with open(config.nnunet_case_ids_file) as case_file:
-                case_ids = [
-                    line.strip()
-                    for line in case_file
-                    if line.strip() and not line.lstrip().startswith("#")
-                ]
-            if not case_ids:
-                raise ValueError(f"No case IDs found in {config.nnunet_case_ids_file}")
+            case_ids = read_case_ids(config.nnunet_case_ids_file)
             print(
                 f"Restricting nnU-Net dataset to {len(case_ids)} cases from "
                 f"{config.nnunet_case_ids_file}"
@@ -89,11 +125,25 @@ def main():
     os.makedirs(config.checkpoint_dir, exist_ok=True)
 
     # --- Dataset Splitting and Iterators ---
-    train_size = int(len(dataset) * config.train_val_split)
-    indices = np.arange(len(dataset))
-    if config.shuffle_dataset:
-        np.random.shuffle(indices)
-    train_indices, val_indices = indices[:train_size], indices[train_size:]
+    if config.nnunet_raw_dir and explicit_train_ids is not None:
+        index_by_id = {
+            subject["id"]: index for index, subject in enumerate(dataset.subjects)
+        }
+        train_indices = np.asarray(
+            [index_by_id[case_id] for case_id in explicit_train_ids],
+            dtype=int,
+        )
+        val_indices = np.asarray(
+            [index_by_id[case_id] for case_id in explicit_val_ids],
+            dtype=int,
+        )
+        train_size = len(train_indices)
+    else:
+        train_size = int(len(dataset) * config.train_val_split)
+        indices = np.arange(len(dataset))
+        if config.shuffle_dataset:
+            np.random.shuffle(indices)
+        train_indices, val_indices = indices[:train_size], indices[train_size:]
 
     train_set = Subset(dataset, train_indices)
     val_set = Subset(dataset, val_indices)

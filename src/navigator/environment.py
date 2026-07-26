@@ -5,7 +5,7 @@ integrated with TorchRL. Simplified version without try-except blocks.
 
 from rich import print
 from itertools import cycle, product
-from math import dist, isfinite
+from math import ceil, dist, isfinite, sqrt
 from pathlib import Path
 import random
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -123,11 +123,12 @@ class SmallBowelEnv(EnvBase):
         # Transforms
         self.ct_transform = torch.compile(ClipTransform(30 - 150, 30 + 150))  # -150, 250
         self.wall_transform = torch.compile(ClipTransform(0.0, 0.1))
-        radius = config.cumulative_path_radius_vox
+        radius = ceil(config.cumulative_path_radius_mm / config.voxel_size_mm)
         dilation_offsets = [
             offset
             for offset in product(range(-radius, radius + 1), repeat=3)
-            if sum(abs(component) for component in offset) <= radius
+            if sqrt(sum(component**2 for component in offset)) * config.voxel_size_mm
+            <= config.cumulative_path_radius_mm + torch.finfo(self.dtype).eps
         ]
         self.path_dilation_offsets = torch.as_tensor(
             dilation_offsets, dtype=torch.long, device=self.device
@@ -302,9 +303,15 @@ class SmallBowelEnv(EnvBase):
         """Get state patches centered at current position. Assumes tensors are valid."""
         img_patch = get_patch(self.image, self.current_pos_vox, self.config.patch_size_vox)
         wall_patch = get_patch(self.wall_map, self.current_pos_vox, self.config.patch_size_vox)
-        _ = len(self.tracking_path_history)
+        history_length = len(self.tracking_path_history)
         img_patch_1 = get_patch(
-            self.image, self.tracking_path_history[-2 % _], self.config.patch_size_vox
+            self.image,
+            (
+                self.tracking_path_history[-2]
+                if history_length > 1
+                else self.tracking_path_history[-1]
+            ),
+            self.config.patch_size_vox,
         )
         cum_path_patch = get_patch(
             self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
@@ -326,6 +333,29 @@ class SmallBowelEnv(EnvBase):
         # Keep the physical direction ratios intact. Per-axis image-size
         # normalization bends the direction whenever the volume is anisotropic.
         goal_direction = goal_delta / goal_delta.abs().max().clamp_min(1)
+        shape = torch.as_tensor(
+            self.image.shape,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        position = torch.as_tensor(
+            self.current_pos_vox,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        # Absolute position resolves locally similar contacts in different
+        # parts of the scan without exposing any label or expert route.
+        normalized_position = 2.0 * position / (shape - 1.0).clamp_min(1.0) - 1.0
+        if history_length > 1:
+            previous_delta = torch.as_tensor(
+                np.asarray(self.tracking_path_history[-1])
+                - np.asarray(self.tracking_path_history[-2]),
+                dtype=self.dtype,
+                device=self.device,
+            )
+            previous_direction = previous_delta / previous_delta.abs().max().clamp_min(1)
+        else:
+            previous_direction = torch.zeros(3, dtype=self.dtype, device=self.device)
 
         initial_goal_distance = float(self.initial_goal_distance)
         if initial_goal_distance <= torch.finfo(self.dtype).eps:
@@ -349,10 +379,12 @@ class SmallBowelEnv(EnvBase):
         context = torch.cat(
             [
                 torch.as_tensor(
-                    [time_fraction, progress_fraction],
+                    [time_fraction, progress_fraction, self.current_coverage],
                     dtype=self.dtype,
                     device=self.device,
                 ),
+                normalized_position,
+                previous_direction,
                 goal_direction,
             ]
         )
@@ -422,12 +454,7 @@ class SmallBowelEnv(EnvBase):
         return self.seg.bool()
 
     def _add_path_segment(self, voxels: Coords | Tuple[np.ndarray, ...]) -> None:
-        """Add an exactly dilated local segment and update Dice counters.
-
-        Repeated star-kernel dilation is an L1 ball. Generating that ball around
-        the handful of segment voxels is equivalent to six full-volume 3D
-        convolutions, but touches only a few thousand coordinates.
-        """
+        """Add a Euclidean physical-radius local segment and update Dice counters."""
         points = np.asarray(voxels, dtype=np.int64)
         if points.ndim == 1:
             points = points[None, :]
@@ -745,7 +772,7 @@ class SmallBowelEnv(EnvBase):
         terminated, truncated = False, False
         termination_reason = TReason.NOT_DONE
         at_goal = is_next_pos_allowed and (
-            dist(self.current_pos_vox, self.goal) < self.config.cumulative_path_radius_vox
+            dist(self.current_pos_vox, self.goal) <= self.config.endpoint_tolerance_vox
         )
         coverage_for_decision = self.current_coverage
         solved_path = is_path_success(
@@ -753,7 +780,7 @@ class SmallBowelEnv(EnvBase):
             coverage_for_decision,
             self.config.success_coverage_threshold,
         )
-        if solved_path:
+        if solved_path and self.config.terminate_on_success:
             terminated, termination_reason = True, TReason.GOAL_REACHED
         elif self.current_step_count >= self.config.max_episode_steps:
             # The horizon is part of this finite task: failing to reach the goal is terminal,
@@ -915,6 +942,7 @@ def make_sb_env(
     num_episodes_per_sample: int = 32,
     num_steps_per_sample: Optional[int] = None,
     check_env: bool = False,
+    shuffle: bool | None = None,
 ):
     """Factory function for the integrated SmallBowelEnv."""
     if device is None:
@@ -925,7 +953,7 @@ def make_sb_env(
         DataLoader(
             dataset,
             batch_size=1,
-            shuffle=config.shuffle_dataset,
+            shuffle=config.shuffle_dataset if shuffle is None else shuffle,
             num_workers=num_workers,
             collate_fn=get_first,
             pin_memory=True,
