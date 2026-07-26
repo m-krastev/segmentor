@@ -8,6 +8,7 @@ UNIT="${NAVIGATOR_ORACLE_UNIT:-navigator-g1-oracle-validation-v1}"
 MANIFEST_DIR="${NAVIGATOR_MANIFEST_DIR:-experiments/navigator-nnunet-v1}"
 MANIFEST="$MANIFEST_DIR/validation.txt"
 OUTPUT_DIR="${NAVIGATOR_ORACLE_OUTPUT_DIR:-results/navigator_nnunet/g1-oracle-validation-v1}"
+MAX_EPISODE_STEPS="${NAVIGATOR_MAX_EPISODE_STEPS:-2048}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -s "$MANIFEST" ]]; then
@@ -36,7 +37,7 @@ exec systemd-run \
   --oracle skeleton \
   --voxel-size-mm 1.5 \
   --patch-size-mm 24 \
-  --max-episode-steps 2048 \
+  --max-episode-steps "$MAX_EPISODE_STEPS" \
   --success-dice 0.40 \
   --path-radius-mm 9 \
   --endpoint-tolerance-mm 3

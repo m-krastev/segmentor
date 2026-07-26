@@ -506,8 +506,14 @@ command or service, acceptance metrics, and outcome here.
 - Verification on commander with `uv`: **40 passed**, 18 upstream deprecation
   warnings.
 - Preflight service: `navigator-preflight-v1.service`.
-- Preflight output: `experiments/navigator-nnunet-v1/` (immutable; pending at
-  the time of this entry).
+- Preflight output: `experiments/navigator-nnunet-v1/` (immutable).
+- Preflight result:
+  - 585 complete matched cases inspected;
+  - 468 eligible cases with connected anatomical endpoints and an executable
+    expert route;
+  - 117 rejected cases retained with their exception type and message;
+  - frozen seed-42 split: 374 train / 46 validation / 48 sealed test;
+  - median expert-route length: 2,787 dense voxels; maximum: 9,689.
 - Diagnostic protocol after preflight: one behavior-cloning warm-start epoch
   followed by 250k PPO steps. Scale to one million only if validation shows
   joint improvement rather than Dice-only or endpoint-only progress.
