@@ -1,0 +1,862 @@
+[
+  {
+    "case": "s0015",
+    "error": "Anatomical endpoints for s0015 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0028",
+    "error": "Anatomical endpoints for s0028 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0034",
+    "error": "Anatomical endpoints for s0034 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0039",
+    "error": "Expert route for s0039 is only 1.500 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0046",
+    "error": "Expert route for s0046 is only 112.416 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0057",
+    "error": "Anatomical endpoints for s0057 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0059",
+    "error": "Anatomical endpoints for s0059 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0062",
+    "error": "Anatomical endpoints for s0062 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0072",
+    "error": "Anatomical endpoints for s0072 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0080",
+    "error": "Anatomical endpoints for s0080 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0092",
+    "error": "Anatomical endpoints for s0092 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0109",
+    "error": "Anatomical endpoints for s0109 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0111",
+    "error": "Expert route for s0111 is only 42.507 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0123",
+    "error": "Expert route for s0123 is only 124.603 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0135",
+    "error": "Anatomical endpoints for s0135 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0138",
+    "error": "Expert route for s0138 is only 126.136 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0158",
+    "error": "Anatomical endpoints for s0158 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0160",
+    "error": "Anatomical endpoints for s0160 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0165",
+    "error": "Expert route for s0165 is only 72.357 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0206",
+    "error": "Anatomical endpoints for s0206 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0209",
+    "error": "Anatomical endpoints for s0209 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0211",
+    "error": "Anatomical endpoints for s0211 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0233",
+    "error": "Anatomical endpoints for s0233 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0240",
+    "error": "Anatomical endpoints for s0240 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0246",
+    "error": "Anatomical endpoints for s0246 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0247",
+    "error": "Anatomical endpoints for s0247 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0258",
+    "error": "Anatomical endpoints for s0258 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0262",
+    "error": "Expert route for s0262 is only 57.142 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0266",
+    "error": "Expert route for s0266 is only 243.263 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0283",
+    "error": "Anatomical endpoints for s0283 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0286",
+    "error": "Anatomical endpoints for s0286 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0287",
+    "error": "Anatomical endpoints for s0287 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0300",
+    "error": "Anatomical endpoints for s0300 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0303",
+    "error": "Anatomical endpoints for s0303 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0305",
+    "error": "Anatomical endpoints for s0305 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0306",
+    "error": "Anatomical endpoints for s0306 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0313",
+    "error": "Anatomical endpoints for s0313 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0321",
+    "error": "Anatomical endpoints for s0321 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0330",
+    "error": "Anatomical endpoints for s0330 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0331",
+    "error": "Expert route for s0331 is only 71.885 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0341",
+    "error": "Anatomical endpoints for s0341 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0353",
+    "error": "Anatomical endpoints for s0353 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0365",
+    "error": "Expert route for s0365 is only 153.760 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0376",
+    "error": "Expert route for s0376 is only 57.357 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0393",
+    "error": "Expert route for s0393 is only 98.189 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0398",
+    "error": "Expert route for s0398 is only 57.689 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0422",
+    "error": "Expert route for s0422 is only 0.000 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0431",
+    "error": "Anatomical endpoints for s0431 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0439",
+    "error": "Expert route for s0439 is only 124.705 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0452",
+    "error": "Anatomical endpoints for s0452 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0463",
+    "error": "Expert route for s0463 is only 281.561 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0469",
+    "error": "Expert route for s0469 is only 78.250 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0470",
+    "error": "Expert route for s0470 is only 23.705 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0471",
+    "error": "Anatomical endpoints for s0471 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0482",
+    "error": "Expert route for s0482 is only 8.341 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0486",
+    "error": "Anatomical endpoints for s0486 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0488",
+    "error": "Expert route for s0488 is only 18.364 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0494",
+    "error": "Anatomical endpoints for s0494 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0498",
+    "error": "Expert route for s0498 is only 78.432 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0499",
+    "error": "Anatomical endpoints for s0499 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0502",
+    "error": "Anatomical endpoints for s0502 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0505",
+    "error": "Anatomical endpoints for s0505 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0506",
+    "error": "Anatomical endpoints for s0506 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0510",
+    "error": "Expert route for s0510 is only 5.743 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0516",
+    "error": "Anatomical endpoints for s0516 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0520",
+    "error": "Expert route for s0520 is only 128.561 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0522",
+    "error": "Anatomical endpoints for s0522 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0523",
+    "error": "Anatomical endpoints for s0523 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0529",
+    "error": "Anatomical endpoints for s0529 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0536",
+    "error": "Anatomical endpoints for s0536 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0543",
+    "error": "Anatomical endpoints for s0543 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0545",
+    "error": "Anatomical endpoints for s0545 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0548",
+    "error": "Anatomical endpoints for s0548 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0557",
+    "error": "Expert route for s0557 is only 19.971 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0565",
+    "error": "Anatomical endpoints for s0565 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0579",
+    "error": "Anatomical endpoints for s0579 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0580",
+    "error": "Expert route for s0580 is only 155.911 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0606",
+    "error": "Expert route for s0606 is only 215.393 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0618",
+    "error": "Expert route for s0618 is only 28.242 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0628",
+    "error": "Anatomical endpoints for s0628 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0632",
+    "error": "Anatomical endpoints for s0632 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0640",
+    "error": "Anatomical endpoints for s0640 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0647",
+    "error": "Anatomical endpoints for s0647 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0674",
+    "error": "Expert route for s0674 is only 110.557 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0679",
+    "error": "Anatomical endpoints for s0679 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0688",
+    "error": "Anatomical endpoints for s0688 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0693",
+    "error": "Anatomical endpoints for s0693 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0696",
+    "error": "Expert route for s0696 is only 108.356 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0704",
+    "error": "Expert route for s0704 is only 87.693 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0707",
+    "error": "Anatomical endpoints for s0707 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0727",
+    "error": "Anatomical endpoints for s0727 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0729",
+    "error": "Expert route for s0729 is only 214.561 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0737",
+    "error": "Anatomical endpoints for s0737 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0743",
+    "error": "Expert route for s0743 is only 143.959 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0765",
+    "error": "Anatomical endpoints for s0765 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0770",
+    "error": "Expert route for s0770 is only 124.706 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0776",
+    "error": "Anatomical endpoints for s0776 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0778",
+    "error": "Anatomical endpoints for s0778 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0784",
+    "error": "Expert route for s0784 is only 168.203 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0785",
+    "error": "Expert route for s0785 is only 54.443 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0788",
+    "error": "Anatomical endpoints for s0788 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0789",
+    "error": "Expert route for s0789 is only 142.077 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0806",
+    "error": "Anatomical endpoints for s0806 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0810",
+    "error": "Expert route for s0810 is only 15.364 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0816",
+    "error": "Expert route for s0816 is only 16.864 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0821",
+    "error": "Anatomical endpoints for s0821 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0822",
+    "error": "Expert route for s0822 is only 227.338 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0836",
+    "error": "Anatomical endpoints for s0836 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0845",
+    "error": "Anatomical endpoints for s0845 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0847",
+    "error": "Expert route for s0847 is only 190.741 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0898",
+    "error": "Expert route for s0898 is only 27.583 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0903",
+    "error": "Anatomical endpoints for s0903 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0924",
+    "error": "Anatomical endpoints for s0924 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0930",
+    "error": "Anatomical endpoints for s0930 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0934",
+    "error": "Anatomical endpoints for s0934 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0941",
+    "error": "Anatomical endpoints for s0941 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0946",
+    "error": "Anatomical endpoints for s0946 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0952",
+    "error": "Anatomical endpoints for s0952 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0965",
+    "error": "Anatomical endpoints for s0965 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0970",
+    "error": "Anatomical endpoints for s0970 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0976",
+    "error": "Anatomical endpoints for s0976 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0978",
+    "error": "Expert route for s0978 is only 193.600 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0983",
+    "error": "Anatomical endpoints for s0983 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s0988",
+    "error": "Anatomical endpoints for s0988 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1006",
+    "error": "Anatomical endpoints for s1006 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1007",
+    "error": "Anatomical endpoints for s1007 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1008",
+    "error": "Anatomical endpoints for s1008 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1028",
+    "error": "Anatomical endpoints for s1028 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1029",
+    "error": "Anatomical endpoints for s1029 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1041",
+    "error": "Anatomical endpoints for s1041 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1048",
+    "error": "Anatomical endpoints for s1048 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1057",
+    "error": "Anatomical endpoints for s1057 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1066",
+    "error": "Expert route for s1066 is only 181.075 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1070",
+    "error": "Anatomical endpoints for s1070 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1110",
+    "error": "Anatomical endpoints for s1110 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1119",
+    "error": "Expert route for s1119 is only 51.803 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1124",
+    "error": "Anatomical endpoints for s1124 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1132",
+    "error": "Expert route for s1132 is only 42.545 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1137",
+    "error": "Anatomical endpoints for s1137 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1140",
+    "error": "Expert route for s1140 is only 60.363 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1142",
+    "error": "Anatomical endpoints for s1142 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1151",
+    "error": "Anatomical endpoints for s1151 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1155",
+    "error": "Expert route for s1155 is only 245.063 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1157",
+    "error": "Expert route for s1157 is only 189.277 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1158",
+    "error": "Expert route for s1158 is only 14.485 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1164",
+    "error": "Expert route for s1164 is only 20.228 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1165",
+    "error": "Anatomical endpoints for s1165 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1178",
+    "error": "Anatomical endpoints for s1178 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1187",
+    "error": "Anatomical endpoints for s1187 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1196",
+    "error": "Expert route for s1196 is only 155.921 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1208",
+    "error": "Anatomical endpoints for s1208 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1224",
+    "error": "Anatomical endpoints for s1224 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1238",
+    "error": "Anatomical endpoints for s1238 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1269",
+    "error": "Expert route for s1269 is only 116.696 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1270",
+    "error": "Expert route for s1270 is only 47.227 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1278",
+    "error": "Anatomical endpoints for s1278 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1286",
+    "error": "Anatomical endpoints for s1286 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1287",
+    "error": "Anatomical endpoints for s1287 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1289",
+    "error": "Anatomical endpoints for s1289 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1292",
+    "error": "Anatomical endpoints for s1292 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1298",
+    "error": "Expert route for s1298 is only 121.389 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1332",
+    "error": "Anatomical endpoints for s1332 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1337",
+    "error": "Expert route for s1337 is only 114.794 mm; minimum required physical length is 300.000 mm.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1338",
+    "error": "Anatomical endpoints for s1338 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1346",
+    "error": "Anatomical endpoints for s1346 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1357",
+    "error": "Anatomical endpoints for s1357 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1370",
+    "error": "Anatomical endpoints for s1370 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1373",
+    "error": "Anatomical endpoints for s1373 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1377",
+    "error": "Anatomical endpoints for s1377 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1404",
+    "error": "Anatomical endpoints for s1404 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1415",
+    "error": "Anatomical endpoints for s1415 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  },
+  {
+    "case": "s1426",
+    "error": "Anatomical endpoints for s1426 are disconnected in the small-bowel segmentation; full end-to-end traversal is impossible.",
+    "error_type": "ValueError"
+  }
+]

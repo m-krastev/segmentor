@@ -1,0 +1,52 @@
+{
+    "validation/avg_reward": -0.033775871619582176,
+    "validation/avg_length": 2048.0,
+    "validation/avg_coverage": 0.36127081726136095,
+    "validation/avg_dice": 0.36127081726136095,
+    "validation/total_reward": -69.1729850769043,
+    "validation/success_rate": 0.0,
+    "validation/traversal_success_rate": 0.0,
+    "validation/endpoint_reach_rate": 0.0,
+    "validation/avg_endpoint_distance_mm": 10.920412531985846,
+    "validation/num_cases": 3,
+    "case": [
+        "s1389",
+        "s0224",
+        "s0120"
+    ],
+    "reward": [
+        -0.028203019872307777,
+        -0.03019402176141739,
+        -0.04293057322502136
+    ],
+    "length": [
+        2048,
+        2048,
+        2048
+    ],
+    "coverage": [
+        0.5683997193857666,
+        0.3894137096298046,
+        0.12599902276851155
+    ],
+    "total_reward": [
+        -57.75971603393555,
+        -61.83735656738281,
+        -87.92188262939453
+    ],
+    "success": [
+        0.0,
+        0.0,
+        0.0
+    ],
+    "endpoint_reached": [
+        0.0,
+        0.0,
+        0.0
+    ],
+    "endpoint_distance_mm": [
+        11.715374895439627,
+        9.72111104761179,
+        11.324751652906125
+    ]
+}

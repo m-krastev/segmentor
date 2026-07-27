@@ -1,0 +1,3306 @@
+{
+  "s0001": {
+    "expert_route_length_mm": 6610.67466979804,
+    "expert_route_voxels": 3411,
+    "segmentation_volume_ml": 897.4461073547659,
+    "segmentation_voxels": 265910,
+    "start_component_fraction": 0.9999887179872889,
+    "start_component_voxels": 265907
+  },
+  "s0004": {
+    "expert_route_length_mm": 6812.916535010969,
+    "expert_route_voxels": 3400,
+    "segmentation_volume_ml": 1106.392412071824,
+    "segmentation_voxels": 327820,
+    "start_component_fraction": 0.9777926911109756,
+    "start_component_voxels": 320540
+  },
+  "s0006": {
+    "expert_route_length_mm": 4434.286975574213,
+    "expert_route_voxels": 2199,
+    "segmentation_volume_ml": 709.394625,
+    "segmentation_voxels": 210191,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 210191
+  },
+  "s0010": {
+    "expert_route_length_mm": 6623.733467843197,
+    "expert_route_voxels": 3294,
+    "segmentation_volume_ml": 1089.585,
+    "segmentation_voxels": 322840,
+    "start_component_fraction": 0.998417172593235,
+    "start_component_voxels": 322329
+  },
+  "s0011": {
+    "expert_route_length_mm": 7273.876216211567,
+    "expert_route_voxels": 3645,
+    "segmentation_volume_ml": 1241.109,
+    "segmentation_voxels": 367736,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 367736
+  },
+  "s0013": {
+    "expert_route_length_mm": 7265.441642267888,
+    "expert_route_voxels": 3600,
+    "segmentation_volume_ml": 1087.725375,
+    "segmentation_voxels": 322289,
+    "start_component_fraction": 0.9996214577599608,
+    "start_component_voxels": 322167
+  },
+  "s0014": {
+    "expert_route_length_mm": 6371.982290949795,
+    "expert_route_voxels": 3102,
+    "segmentation_volume_ml": 1129.9365,
+    "segmentation_voxels": 334796,
+    "start_component_fraction": 0.9944145091339204,
+    "start_component_voxels": 332926
+  },
+  "s0016": {
+    "expert_route_length_mm": 7123.438282218444,
+    "expert_route_voxels": 3534,
+    "segmentation_volume_ml": 986.765625,
+    "segmentation_voxels": 292375,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 292375
+  },
+  "s0022": {
+    "expert_route_length_mm": 6748.95439274317,
+    "expert_route_voxels": 3388,
+    "segmentation_volume_ml": 1975.0905,
+    "segmentation_voxels": 585212,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 585212
+  },
+  "s0024": {
+    "expert_route_length_mm": 5811.295843012089,
+    "expert_route_voxels": 2865,
+    "segmentation_volume_ml": 1046.131875,
+    "segmentation_voxels": 309965,
+    "start_component_fraction": 0.9998935363670092,
+    "start_component_voxels": 309932
+  },
+  "s0029": {
+    "expert_route_length_mm": 5689.564873328067,
+    "expert_route_voxels": 2839,
+    "segmentation_volume_ml": 963.28575,
+    "segmentation_voxels": 285418,
+    "start_component_fraction": 0.9999509491342522,
+    "start_component_voxels": 285404
+  },
+  "s0030": {
+    "expert_route_length_mm": 6681.254738022235,
+    "expert_route_voxels": 3288,
+    "segmentation_volume_ml": 1210.1265,
+    "segmentation_voxels": 358556,
+    "start_component_fraction": 0.9979584778946664,
+    "start_component_voxels": 357824
+  },
+  "s0031": {
+    "expert_route_length_mm": 6900.46073300842,
+    "expert_route_voxels": 3428,
+    "segmentation_volume_ml": 801.1035,
+    "segmentation_voxels": 237364,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 237364
+  },
+  "s0038": {
+    "expert_route_length_mm": 7380.315144135106,
+    "expert_route_voxels": 3673,
+    "segmentation_volume_ml": 939.53925,
+    "segmentation_voxels": 278382,
+    "start_component_fraction": 0.9992779705584413,
+    "start_component_voxels": 278181
+  },
+  "s0040": {
+    "expert_route_length_mm": 4979.57733440863,
+    "expert_route_voxels": 2477,
+    "segmentation_volume_ml": 772.399125,
+    "segmentation_voxels": 228859,
+    "start_component_fraction": 0.9999650439790438,
+    "start_component_voxels": 228851
+  },
+  "s0042": {
+    "expert_route_length_mm": 7679.345827772041,
+    "expert_route_voxels": 3992,
+    "segmentation_volume_ml": 1177.98975,
+    "segmentation_voxels": 349034,
+    "start_component_fraction": 0.9999971349496037,
+    "start_component_voxels": 349033
+  },
+  "s0045": {
+    "expert_route_length_mm": 6146.362307430563,
+    "expert_route_voxels": 3051,
+    "segmentation_volume_ml": 1112.886,
+    "segmentation_voxels": 329744,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 329744
+  },
+  "s0049": {
+    "expert_route_length_mm": 8073.138736811142,
+    "expert_route_voxels": 3981,
+    "segmentation_volume_ml": 1311.643125,
+    "segmentation_voxels": 388635,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 388635
+  },
+  "s0052": {
+    "expert_route_length_mm": 9447.791013683829,
+    "expert_route_voxels": 4836,
+    "segmentation_volume_ml": 1062.40275,
+    "segmentation_voxels": 314786,
+    "start_component_fraction": 0.9967088752358745,
+    "start_component_voxels": 313750
+  },
+  "s0053": {
+    "expert_route_length_mm": 6157.527190897365,
+    "expert_route_voxels": 3094,
+    "segmentation_volume_ml": 974.176875,
+    "segmentation_voxels": 288645,
+    "start_component_fraction": 0.9998648859325469,
+    "start_component_voxels": 288606
+  },
+  "s0065": {
+    "expert_route_length_mm": 5724.195521587758,
+    "expert_route_voxels": 2894,
+    "segmentation_volume_ml": 877.18275,
+    "segmentation_voxels": 259906,
+    "start_component_fraction": 0.9947827291405354,
+    "start_component_voxels": 258550
+  },
+  "s0066": {
+    "expert_route_length_mm": 4405.279233764619,
+    "expert_route_voxels": 2180,
+    "segmentation_volume_ml": 700.643138635759,
+    "segmentation_voxels": 207598,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 207598
+  },
+  "s0068": {
+    "expert_route_length_mm": 5538.240641890807,
+    "expert_route_voxels": 2996,
+    "segmentation_volume_ml": 568.771875,
+    "segmentation_voxels": 168525,
+    "start_component_fraction": 0.9995549621717846,
+    "start_component_voxels": 168450
+  },
+  "s0069": {
+    "expert_route_length_mm": 1990.3344998415555,
+    "expert_route_voxels": 996,
+    "segmentation_volume_ml": 376.31925,
+    "segmentation_voxels": 111502,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 111502
+  },
+  "s0070": {
+    "expert_route_length_mm": 5875.958668851974,
+    "expert_route_voxels": 3495,
+    "segmentation_volume_ml": 427.6125,
+    "segmentation_voxels": 126700,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 126700
+  },
+  "s0071": {
+    "expert_route_length_mm": 2398.590186928208,
+    "expert_route_voxels": 1222,
+    "segmentation_volume_ml": 362.788875,
+    "segmentation_voxels": 107493,
+    "start_component_fraction": 0.937502907166048,
+    "start_component_voxels": 100775
+  },
+  "s0073": {
+    "expert_route_length_mm": 8037.7717725325965,
+    "expert_route_voxels": 3988,
+    "segmentation_volume_ml": 1226.390625,
+    "segmentation_voxels": 363375,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 363375
+  },
+  "s0075": {
+    "expert_route_length_mm": 6544.040585031018,
+    "expert_route_voxels": 3231,
+    "segmentation_volume_ml": 1162.971,
+    "segmentation_voxels": 344584,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 344584
+  },
+  "s0077": {
+    "expert_route_length_mm": 4131.360925504598,
+    "expert_route_voxels": 2006,
+    "segmentation_volume_ml": 706.4955,
+    "segmentation_voxels": 209332,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 209332
+  },
+  "s0086": {
+    "expert_route_length_mm": 5882.063576038326,
+    "expert_route_voxels": 3073,
+    "segmentation_volume_ml": 777.492,
+    "segmentation_voxels": 230368,
+    "start_component_fraction": 0.9968311571051535,
+    "start_component_voxels": 229638
+  },
+  "s0089": {
+    "expert_route_length_mm": 7132.371384524082,
+    "expert_route_voxels": 3521,
+    "segmentation_volume_ml": 1069.142625,
+    "segmentation_voxels": 316783,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 316783
+  },
+  "s0090": {
+    "expert_route_length_mm": 4534.435819641095,
+    "expert_route_voxels": 2294,
+    "segmentation_volume_ml": 602.1844228573143,
+    "segmentation_voxels": 178425,
+    "start_component_fraction": 0.9994339358273785,
+    "start_component_voxels": 178324
+  },
+  "s0091": {
+    "expert_route_length_mm": 7604.5322099352725,
+    "expert_route_voxels": 3776,
+    "segmentation_volume_ml": 1002.810375,
+    "segmentation_voxels": 297129,
+    "start_component_fraction": 0.9998283573801279,
+    "start_component_voxels": 297078
+  },
+  "s0095": {
+    "expert_route_length_mm": 6704.294307231957,
+    "expert_route_voxels": 3323,
+    "segmentation_volume_ml": 1257.562125,
+    "segmentation_voxels": 372611,
+    "start_component_fraction": 0.9978610400659133,
+    "start_component_voxels": 371814
+  },
+  "s0096": {
+    "expert_route_length_mm": 10256.741090528045,
+    "expert_route_voxels": 5298,
+    "segmentation_volume_ml": 1064.50875,
+    "segmentation_voxels": 315410,
+    "start_component_fraction": 0.9984115912621667,
+    "start_component_voxels": 314909
+  },
+  "s0098": {
+    "expert_route_length_mm": 6190.996846854866,
+    "expert_route_voxels": 3108,
+    "segmentation_volume_ml": 1327.3977304920852,
+    "segmentation_voxels": 393303,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 393303
+  },
+  "s0104": {
+    "expert_route_length_mm": 13547.154148602858,
+    "expert_route_voxels": 7984,
+    "segmentation_volume_ml": 826.767,
+    "segmentation_voxels": 244968,
+    "start_component_fraction": 0.9850837660429117,
+    "start_component_voxels": 241314
+  },
+  "s0105": {
+    "expert_route_length_mm": 5379.702595223454,
+    "expert_route_voxels": 2707,
+    "segmentation_volume_ml": 710.474625,
+    "segmentation_voxels": 210511,
+    "start_component_fraction": 0.9690847509156291,
+    "start_component_voxels": 204003
+  },
+  "s0106": {
+    "expert_route_length_mm": 2201.650378488288,
+    "expert_route_voxels": 1094,
+    "segmentation_volume_ml": 407.349,
+    "segmentation_voxels": 120696,
+    "start_component_fraction": 0.9986246437330152,
+    "start_component_voxels": 120530
+  },
+  "s0107": {
+    "expert_route_length_mm": 5562.989895735369,
+    "expert_route_voxels": 2770,
+    "segmentation_volume_ml": 1369.146375,
+    "segmentation_voxels": 405673,
+    "start_component_fraction": 0.9995710831137394,
+    "start_component_voxels": 405499
+  },
+  "s0108": {
+    "expert_route_length_mm": 7409.294890918545,
+    "expert_route_voxels": 3686,
+    "segmentation_volume_ml": 1352.1195,
+    "segmentation_voxels": 400628,
+    "start_component_fraction": 0.9999825274319318,
+    "start_component_voxels": 400621
+  },
+  "s0117": {
+    "expert_route_length_mm": 6398.4267058245705,
+    "expert_route_voxels": 3204,
+    "segmentation_volume_ml": 1239.219,
+    "segmentation_voxels": 367176,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 367176
+  },
+  "s0120": {
+    "expert_route_length_mm": 11094.48912682194,
+    "expert_route_voxels": 5676,
+    "segmentation_volume_ml": 1245.061125,
+    "segmentation_voxels": 368907,
+    "start_component_fraction": 0.9963053018782512,
+    "start_component_voxels": 367544
+  },
+  "s0124": {
+    "expert_route_length_mm": 5381.9745950554025,
+    "expert_route_voxels": 2705,
+    "segmentation_volume_ml": 755.70975,
+    "segmentation_voxels": 223914,
+    "start_component_fraction": 0.9994060219548576,
+    "start_component_voxels": 223781
+  },
+  "s0131": {
+    "expert_route_length_mm": 5788.036458841711,
+    "expert_route_voxels": 3026,
+    "segmentation_volume_ml": 780.296625,
+    "segmentation_voxels": 231199,
+    "start_component_fraction": 0.9953113984057025,
+    "start_component_voxels": 230115
+  },
+  "s0137": {
+    "expert_route_length_mm": 5973.801166314863,
+    "expert_route_voxels": 2963,
+    "segmentation_volume_ml": 767.19825,
+    "segmentation_voxels": 227318,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 227318
+  },
+  "s0139": {
+    "expert_route_length_mm": 2278.358326027967,
+    "expert_route_voxels": 1131,
+    "segmentation_volume_ml": 414.63225,
+    "segmentation_voxels": 122854,
+    "start_component_fraction": 0.999886043596464,
+    "start_component_voxels": 122840
+  },
+  "s0141": {
+    "expert_route_length_mm": 6807.59231849151,
+    "expert_route_voxels": 3391,
+    "segmentation_volume_ml": 896.90625,
+    "segmentation_voxels": 265750,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 265750
+  },
+  "s0143": {
+    "expert_route_length_mm": 3203.2324806210117,
+    "expert_route_voxels": 1567,
+    "segmentation_volume_ml": 508.8555,
+    "segmentation_voxels": 150772,
+    "start_component_fraction": 0.9999734698750431,
+    "start_component_voxels": 150768
+  },
+  "s0150": {
+    "expert_route_length_mm": 8642.072421170986,
+    "expert_route_voxels": 4284,
+    "segmentation_volume_ml": 1149.055875,
+    "segmentation_voxels": 340461,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 340461
+  },
+  "s0151": {
+    "expert_route_length_mm": 5353.022657672056,
+    "expert_route_voxels": 2625,
+    "segmentation_volume_ml": 1105.866,
+    "segmentation_voxels": 327664,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 327664
+  },
+  "s0153": {
+    "expert_route_length_mm": 6205.374081203801,
+    "expert_route_voxels": 3092,
+    "segmentation_volume_ml": 968.2842019523084,
+    "segmentation_voxels": 286899,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 286899
+  },
+  "s0157": {
+    "expert_route_length_mm": 8502.83263749134,
+    "expert_route_voxels": 4551,
+    "segmentation_volume_ml": 905.050125,
+    "segmentation_voxels": 268163,
+    "start_component_fraction": 0.9994406387160049,
+    "start_component_voxels": 268013
+  },
+  "s0161": {
+    "expert_route_length_mm": 4709.108521993076,
+    "expert_route_voxels": 2353,
+    "segmentation_volume_ml": 1104.17175,
+    "segmentation_voxels": 327162,
+    "start_component_fraction": 0.9998869061810357,
+    "start_component_voxels": 327125
+  },
+  "s0166": {
+    "expert_route_length_mm": 5349.86275720898,
+    "expert_route_voxels": 2778,
+    "segmentation_volume_ml": 814.7925,
+    "segmentation_voxels": 241420,
+    "start_component_fraction": 0.9996893380830089,
+    "start_component_voxels": 241345
+  },
+  "s0168": {
+    "expert_route_length_mm": 4929.5172883621,
+    "expert_route_voxels": 2426,
+    "segmentation_volume_ml": 588.411,
+    "segmentation_voxels": 174344,
+    "start_component_fraction": 0.99784907997981,
+    "start_component_voxels": 173969
+  },
+  "s0179": {
+    "expert_route_length_mm": 3919.5696278143987,
+    "expert_route_voxels": 2007,
+    "segmentation_volume_ml": 668.09475,
+    "segmentation_voxels": 197954,
+    "start_component_fraction": 0.9992927649858048,
+    "start_component_voxels": 197814
+  },
+  "s0182": {
+    "expert_route_length_mm": 5253.124470501722,
+    "expert_route_voxels": 2632,
+    "segmentation_volume_ml": 1036.665,
+    "segmentation_voxels": 307160,
+    "start_component_fraction": 0.9999967443677562,
+    "start_component_voxels": 307159
+  },
+  "s0183": {
+    "expert_route_length_mm": 9729.85731445384,
+    "expert_route_voxels": 4849,
+    "segmentation_volume_ml": 1779.003,
+    "segmentation_voxels": 527112,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 527112
+  },
+  "s0189": {
+    "expert_route_length_mm": 6859.950533643365,
+    "expert_route_voxels": 3405,
+    "segmentation_volume_ml": 977.8995,
+    "segmentation_voxels": 289748,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 289748
+  },
+  "s0190": {
+    "expert_route_length_mm": 6678.306704170427,
+    "expert_route_voxels": 3338,
+    "segmentation_volume_ml": 1267.882875,
+    "segmentation_voxels": 375669,
+    "start_component_fraction": 0.9997204986304433,
+    "start_component_voxels": 375564
+  },
+  "s0191": {
+    "expert_route_length_mm": 3837.8359491743786,
+    "expert_route_voxels": 1909,
+    "segmentation_volume_ml": 355.16475,
+    "segmentation_voxels": 105234,
+    "start_component_fraction": 0.9991637683638368,
+    "start_component_voxels": 105146
+  },
+  "s0194": {
+    "expert_route_length_mm": 7388.879649470556,
+    "expert_route_voxels": 3848,
+    "segmentation_volume_ml": 972.192375,
+    "segmentation_voxels": 288057,
+    "start_component_fraction": 0.9960702222129648,
+    "start_component_voxels": 286925
+  },
+  "s0196": {
+    "expert_route_length_mm": 6111.904409615601,
+    "expert_route_voxels": 3032,
+    "segmentation_volume_ml": 845.88975,
+    "segmentation_voxels": 250634,
+    "start_component_fraction": 0.9999720708283792,
+    "start_component_voxels": 250627
+  },
+  "s0197": {
+    "expert_route_length_mm": 1517.7247049875414,
+    "expert_route_voxels": 750,
+    "segmentation_volume_ml": 352.7415,
+    "segmentation_voxels": 104516,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 104516
+  },
+  "s0201": {
+    "expert_route_length_mm": 3231.6128448359013,
+    "expert_route_voxels": 1610,
+    "segmentation_volume_ml": 517.25925,
+    "segmentation_voxels": 153262,
+    "start_component_fraction": 0.9996802860461171,
+    "start_component_voxels": 153213
+  },
+  "s0204": {
+    "expert_route_length_mm": 6262.851360730458,
+    "expert_route_voxels": 3102,
+    "segmentation_volume_ml": 1423.1025,
+    "segmentation_voxels": 421660,
+    "start_component_fraction": 0.9999217378930892,
+    "start_component_voxels": 421627
+  },
+  "s0213": {
+    "expert_route_length_mm": 2944.273800163657,
+    "expert_route_voxels": 1467,
+    "segmentation_volume_ml": 538.194375,
+    "segmentation_voxels": 159465,
+    "start_component_fraction": 0.9857899852632239,
+    "start_component_voxels": 157199
+  },
+  "s0216": {
+    "expert_route_length_mm": 4144.67068424156,
+    "expert_route_voxels": 2124,
+    "segmentation_volume_ml": 459.27675,
+    "segmentation_voxels": 136082,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 136082
+  },
+  "s0220": {
+    "expert_route_length_mm": 9012.701570825906,
+    "expert_route_voxels": 5054,
+    "segmentation_volume_ml": 853.08525,
+    "segmentation_voxels": 252766,
+    "start_component_fraction": 0.9997547138460078,
+    "start_component_voxels": 252704
+  },
+  "s0222": {
+    "expert_route_length_mm": 2817.5653946836483,
+    "expert_route_voxels": 1387,
+    "segmentation_volume_ml": 526.932,
+    "segmentation_voxels": 156128,
+    "start_component_fraction": 0.9931338389014143,
+    "start_component_voxels": 155056
+  },
+  "s0224": {
+    "expert_route_length_mm": 5564.123389397154,
+    "expert_route_voxels": 2811,
+    "segmentation_volume_ml": 1422.822375,
+    "segmentation_voxels": 421577,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 421577
+  },
+  "s0227": {
+    "expert_route_length_mm": 2804.1948163252196,
+    "expert_route_voxels": 1396,
+    "segmentation_volume_ml": 528.103125,
+    "segmentation_voxels": 156475,
+    "start_component_fraction": 0.999993609202748,
+    "start_component_voxels": 156474
+  },
+  "s0228": {
+    "expert_route_length_mm": 6458.422488290806,
+    "expert_route_voxels": 3236,
+    "segmentation_volume_ml": 1207.834875,
+    "segmentation_voxels": 357877,
+    "start_component_fraction": 0.9988739147807766,
+    "start_component_voxels": 357474
+  },
+  "s0232": {
+    "expert_route_length_mm": 6241.270111911748,
+    "expert_route_voxels": 3094,
+    "segmentation_volume_ml": 1983.538125,
+    "segmentation_voxels": 587715,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 587715
+  },
+  "s0235": {
+    "expert_route_length_mm": 5026.1378827702865,
+    "expert_route_voxels": 2512,
+    "segmentation_volume_ml": 757.002375,
+    "segmentation_voxels": 224297,
+    "start_component_fraction": 0.999924207635412,
+    "start_component_voxels": 224280
+  },
+  "s0236": {
+    "expert_route_length_mm": 9739.641675806259,
+    "expert_route_voxels": 5247,
+    "segmentation_volume_ml": 1427.0781365860105,
+    "segmentation_voxels": 422838,
+    "start_component_fraction": 0.9999716203368666,
+    "start_component_voxels": 422826
+  },
+  "s0238": {
+    "expert_route_length_mm": 3661.857507115753,
+    "expert_route_voxels": 1818,
+    "segmentation_volume_ml": 683.089875,
+    "segmentation_voxels": 202397,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 202397
+  },
+  "s0239": {
+    "expert_route_length_mm": 4917.555774834873,
+    "expert_route_voxels": 2459,
+    "segmentation_volume_ml": 729.76275,
+    "segmentation_voxels": 216226,
+    "start_component_fraction": 0.9999445025112613,
+    "start_component_voxels": 216214
+  },
+  "s0242": {
+    "expert_route_length_mm": 7426.063625310272,
+    "expert_route_voxels": 3930,
+    "segmentation_volume_ml": 1074.0735,
+    "segmentation_voxels": 318244,
+    "start_component_fraction": 0.994648760070889,
+    "start_component_voxels": 316541
+  },
+  "s0243": {
+    "expert_route_length_mm": 3519.3816317643395,
+    "expert_route_voxels": 1763,
+    "segmentation_volume_ml": 726.127875,
+    "segmentation_voxels": 215149,
+    "start_component_fraction": 0.9944317658924745,
+    "start_component_voxels": 213951
+  },
+  "s0244": {
+    "expert_route_length_mm": 6800.610184246307,
+    "expert_route_voxels": 3394,
+    "segmentation_volume_ml": 1159.147125,
+    "segmentation_voxels": 343451,
+    "start_component_fraction": 0.9968350652640405,
+    "start_component_voxels": 342364
+  },
+  "s0245": {
+    "expert_route_length_mm": 1310.3193537425955,
+    "expert_route_voxels": 660,
+    "segmentation_volume_ml": 218.629125,
+    "segmentation_voxels": 64779,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 64779
+  },
+  "s0248": {
+    "expert_route_length_mm": 2770.6748418035404,
+    "expert_route_voxels": 1362,
+    "segmentation_volume_ml": 515.01825,
+    "segmentation_voxels": 152598,
+    "start_component_fraction": 0.9894494030065925,
+    "start_component_voxels": 150988
+  },
+  "s0250": {
+    "expert_route_length_mm": 7100.38167269567,
+    "expert_route_voxels": 3528,
+    "segmentation_volume_ml": 1662.433875,
+    "segmentation_voxels": 492573,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 492573
+  },
+  "s0252": {
+    "expert_route_length_mm": 8797.121145816558,
+    "expert_route_voxels": 5003,
+    "segmentation_volume_ml": 1226.826,
+    "segmentation_voxels": 363504,
+    "start_component_fraction": 0.9992984946520533,
+    "start_component_voxels": 363249
+  },
+  "s0253": {
+    "expert_route_length_mm": 543.2633320767166,
+    "expert_route_voxels": 276,
+    "segmentation_volume_ml": 67.50675,
+    "segmentation_voxels": 20002,
+    "start_component_fraction": 0.994000599940006,
+    "start_component_voxels": 19882
+  },
+  "s0257": {
+    "expert_route_length_mm": 6120.718463993024,
+    "expert_route_voxels": 3161,
+    "segmentation_volume_ml": 664.858125,
+    "segmentation_voxels": 196995,
+    "start_component_fraction": 0.9990355085154445,
+    "start_component_voxels": 196805
+  },
+  "s0260": {
+    "expert_route_length_mm": 4809.314651792975,
+    "expert_route_voxels": 2373,
+    "segmentation_volume_ml": 802.652625,
+    "segmentation_voxels": 237823,
+    "start_component_fraction": 0.9997098682633724,
+    "start_component_voxels": 237754
+  },
+  "s0264": {
+    "expert_route_length_mm": 2237.4283585191433,
+    "expert_route_voxels": 1152,
+    "segmentation_volume_ml": 250.06725,
+    "segmentation_voxels": 74094,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 74094
+  },
+  "s0265": {
+    "expert_route_length_mm": 888.6725333540129,
+    "expert_route_voxels": 439,
+    "segmentation_volume_ml": 181.52775,
+    "segmentation_voxels": 53786,
+    "start_component_fraction": 0.9999070390064329,
+    "start_component_voxels": 53781
+  },
+  "s0271": {
+    "expert_route_length_mm": 876.4695292834726,
+    "expert_route_voxels": 431,
+    "segmentation_volume_ml": 209.179125,
+    "segmentation_voxels": 61979,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 61979
+  },
+  "s0275": {
+    "expert_route_length_mm": 5931.371768528025,
+    "expert_route_voxels": 2949,
+    "segmentation_volume_ml": 1039.084875,
+    "segmentation_voxels": 307877,
+    "start_component_fraction": 0.9993958626334543,
+    "start_component_voxels": 307691
+  },
+  "s0291": {
+    "expert_route_length_mm": 5482.081409693608,
+    "expert_route_voxels": 2735,
+    "segmentation_volume_ml": 952.155,
+    "segmentation_voxels": 282120,
+    "start_component_fraction": 0.9945200623848008,
+    "start_component_voxels": 280574
+  },
+  "s0293": {
+    "expert_route_length_mm": 7178.50967940622,
+    "expert_route_voxels": 3493,
+    "segmentation_volume_ml": 1155.880125,
+    "segmentation_voxels": 342483,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 342483
+  },
+  "s0311": {
+    "expert_route_length_mm": 6840.183098809022,
+    "expert_route_voxels": 3389,
+    "segmentation_volume_ml": 1285.6793521766067,
+    "segmentation_voxels": 380942,
+    "start_component_fraction": 0.9996403651999517,
+    "start_component_voxels": 380805
+  },
+  "s0314": {
+    "expert_route_length_mm": 2280.4417617202535,
+    "expert_route_voxels": 1136,
+    "segmentation_volume_ml": 498.929625,
+    "segmentation_voxels": 147831,
+    "start_component_fraction": 0.9986268103442444,
+    "start_component_voxels": 147628
+  },
+  "s0315": {
+    "expert_route_length_mm": 4381.715423805432,
+    "expert_route_voxels": 2180,
+    "segmentation_volume_ml": 988.62525,
+    "segmentation_voxels": 292926,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 292926
+  },
+  "s0319": {
+    "expert_route_length_mm": 12577.12973297077,
+    "expert_route_voxels": 6679,
+    "segmentation_volume_ml": 1545.2304956077435,
+    "segmentation_voxels": 457846,
+    "start_component_fraction": 0.9987463033421718,
+    "start_component_voxels": 457272
+  },
+  "s0320": {
+    "expert_route_length_mm": 6118.52604238594,
+    "expert_route_voxels": 3060,
+    "segmentation_volume_ml": 800.23275,
+    "segmentation_voxels": 237106,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 237106
+  },
+  "s0325": {
+    "expert_route_length_mm": 5526.0363930672365,
+    "expert_route_voxels": 2822,
+    "segmentation_volume_ml": 904.658625,
+    "segmentation_voxels": 268047,
+    "start_component_fraction": 0.9994777035370662,
+    "start_component_voxels": 267907
+  },
+  "s0327": {
+    "expert_route_length_mm": 4067.2020547195793,
+    "expert_route_voxels": 2009,
+    "segmentation_volume_ml": 657.2475522333384,
+    "segmentation_voxels": 194740,
+    "start_component_fraction": 0.9995481154359659,
+    "start_component_voxels": 194652
+  },
+  "s0328": {
+    "expert_route_length_mm": 5771.824999936347,
+    "expert_route_voxels": 2897,
+    "segmentation_volume_ml": 1086.071625,
+    "segmentation_voxels": 321799,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 321799
+  },
+  "s0329": {
+    "expert_route_length_mm": 7850.444265682118,
+    "expert_route_voxels": 3957,
+    "segmentation_volume_ml": 1487.5785,
+    "segmentation_voxels": 440764,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 440764
+  },
+  "s0334": {
+    "expert_route_length_mm": 8485.544828861606,
+    "expert_route_voxels": 4437,
+    "segmentation_volume_ml": 1120.915125,
+    "segmentation_voxels": 332123,
+    "start_component_fraction": 0.9928249473839511,
+    "start_component_voxels": 329740
+  },
+  "s0339": {
+    "expert_route_length_mm": 5842.821286350094,
+    "expert_route_voxels": 2873,
+    "segmentation_volume_ml": 798.879375,
+    "segmentation_voxels": 236705,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 236705
+  },
+  "s0342": {
+    "expert_route_length_mm": 5826.932025862579,
+    "expert_route_voxels": 2912,
+    "segmentation_volume_ml": 1105.639875,
+    "segmentation_voxels": 327597,
+    "start_component_fraction": 0.9923198319886934,
+    "start_component_voxels": 325081
+  },
+  "s0343": {
+    "expert_route_length_mm": 3956.8983843150545,
+    "expert_route_voxels": 1955,
+    "segmentation_volume_ml": 752.986125,
+    "segmentation_voxels": 223107,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 223107
+  },
+  "s0344": {
+    "expert_route_length_mm": 4965.593213878036,
+    "expert_route_voxels": 2454,
+    "segmentation_volume_ml": 910.875375,
+    "segmentation_voxels": 269889,
+    "start_component_fraction": 0.9999073693259081,
+    "start_component_voxels": 269864
+  },
+  "s0345": {
+    "expert_route_length_mm": 8925.012375124454,
+    "expert_route_voxels": 4455,
+    "segmentation_volume_ml": 1709.636625,
+    "segmentation_voxels": 506559,
+    "start_component_fraction": 0.9999980258962924,
+    "start_component_voxels": 506558
+  },
+  "s0349": {
+    "expert_route_length_mm": 3759.581961516321,
+    "expert_route_voxels": 2178,
+    "segmentation_volume_ml": 380.109375,
+    "segmentation_voxels": 112625,
+    "start_component_fraction": 0.9951698113207548,
+    "start_component_voxels": 112081
+  },
+  "s0350": {
+    "expert_route_length_mm": 5516.407340559463,
+    "expert_route_voxels": 2775,
+    "segmentation_volume_ml": 860.94225,
+    "segmentation_voxels": 255094,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 255094
+  },
+  "s0355": {
+    "expert_route_length_mm": 5947.107703080861,
+    "expert_route_voxels": 2943,
+    "segmentation_volume_ml": 1085.754375,
+    "segmentation_voxels": 321705,
+    "start_component_fraction": 0.9989120467509053,
+    "start_component_voxels": 321355
+  },
+  "s0357": {
+    "expert_route_length_mm": 445.9008993910975,
+    "expert_route_voxels": 224,
+    "segmentation_volume_ml": 142.516125,
+    "segmentation_voxels": 42227,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 42227
+  },
+  "s0358": {
+    "expert_route_length_mm": 4840.510669401969,
+    "expert_route_voxels": 2433,
+    "segmentation_volume_ml": 667.814625,
+    "segmentation_voxels": 197871,
+    "start_component_fraction": 0.9976803068665949,
+    "start_component_voxels": 197412
+  },
+  "s0362": {
+    "expert_route_length_mm": 8885.925031965959,
+    "expert_route_voxels": 4865,
+    "segmentation_volume_ml": 980.913375,
+    "segmentation_voxels": 290641,
+    "start_component_fraction": 0.9951452135108261,
+    "start_component_voxels": 289230
+  },
+  "s0366": {
+    "expert_route_length_mm": 6431.04579165499,
+    "expert_route_voxels": 3338,
+    "segmentation_volume_ml": 791.427375,
+    "segmentation_voxels": 234497,
+    "start_component_fraction": 0.9996204642276874,
+    "start_component_voxels": 234408
+  },
+  "s0369": {
+    "expert_route_length_mm": 6780.89248294968,
+    "expert_route_voxels": 3432,
+    "segmentation_volume_ml": 915.748875,
+    "segmentation_voxels": 271333,
+    "start_component_fraction": 0.9999963144917868,
+    "start_component_voxels": 271332
+  },
+  "s0370": {
+    "expert_route_length_mm": 7913.277028428514,
+    "expert_route_voxels": 3915,
+    "segmentation_volume_ml": 1037.795625,
+    "segmentation_voxels": 307495,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 307495
+  },
+  "s0371": {
+    "expert_route_length_mm": 3069.9485278263196,
+    "expert_route_voxels": 1532,
+    "segmentation_volume_ml": 583.8345,
+    "segmentation_voxels": 172988,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 172988
+  },
+  "s0375": {
+    "expert_route_length_mm": 6095.453251666819,
+    "expert_route_voxels": 3070,
+    "segmentation_volume_ml": 737.75475,
+    "segmentation_voxels": 218594,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 218594
+  },
+  "s0381": {
+    "expert_route_length_mm": 2779.808480978877,
+    "expert_route_voxels": 1394,
+    "segmentation_volume_ml": 340.5915,
+    "segmentation_voxels": 100916,
+    "start_component_fraction": 0.9560228308692378,
+    "start_component_voxels": 96478
+  },
+  "s0383": {
+    "expert_route_length_mm": 7836.742907564214,
+    "expert_route_voxels": 3828,
+    "segmentation_volume_ml": 823.9253154796958,
+    "segmentation_voxels": 244126,
+    "start_component_fraction": 0.9993896594381589,
+    "start_component_voxels": 243977
+  },
+  "s0385": {
+    "expert_route_length_mm": 4443.311022116106,
+    "expert_route_voxels": 2239,
+    "segmentation_volume_ml": 759.871125,
+    "segmentation_voxels": 225147,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 225147
+  },
+  "s0390": {
+    "expert_route_length_mm": 7564.112587305057,
+    "expert_route_voxels": 3779,
+    "segmentation_volume_ml": 1253.451375,
+    "segmentation_voxels": 371393,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 371393
+  },
+  "s0392": {
+    "expert_route_length_mm": 3086.3227770285876,
+    "expert_route_voxels": 1570,
+    "segmentation_volume_ml": 503.917875,
+    "segmentation_voxels": 149309,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 149309
+  },
+  "s0394": {
+    "expert_route_length_mm": 906.8755374245534,
+    "expert_route_voxels": 451,
+    "segmentation_volume_ml": 159.937875,
+    "segmentation_voxels": 47389,
+    "start_component_fraction": 0.9949355335626411,
+    "start_component_voxels": 47149
+  },
+  "s0401": {
+    "expert_route_length_mm": 5109.778286419307,
+    "expert_route_voxels": 2513,
+    "segmentation_volume_ml": 686.849625,
+    "segmentation_voxels": 203511,
+    "start_component_fraction": 0.9776768823306848,
+    "start_component_voxels": 198968
+  },
+  "s0406": {
+    "expert_route_length_mm": 7019.36418677451,
+    "expert_route_voxels": 3470,
+    "segmentation_volume_ml": 1242.918,
+    "segmentation_voxels": 368272,
+    "start_component_fraction": 0.9970809618977278,
+    "start_component_voxels": 367197
+  },
+  "s0408": {
+    "expert_route_length_mm": 7595.169213330359,
+    "expert_route_voxels": 3992,
+    "segmentation_volume_ml": 786.270375,
+    "segmentation_voxels": 232969,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 232969
+  },
+  "s0416": {
+    "expert_route_length_mm": 5031.251470949632,
+    "expert_route_voxels": 2474,
+    "segmentation_volume_ml": 777.276,
+    "segmentation_voxels": 230304,
+    "start_component_fraction": 0.9998393427817146,
+    "start_component_voxels": 230267
+  },
+  "s0430": {
+    "expert_route_length_mm": 489.25014179601493,
+    "expert_route_voxels": 250,
+    "segmentation_volume_ml": 64.297125,
+    "segmentation_voxels": 19051,
+    "start_component_fraction": 0.9998950186341924,
+    "start_component_voxels": 19049
+  },
+  "s0436": {
+    "expert_route_length_mm": 5152.160793391051,
+    "expert_route_voxels": 2707,
+    "segmentation_volume_ml": 810.9213105537593,
+    "segmentation_voxels": 240273,
+    "start_component_fraction": 0.9999084374856934,
+    "start_component_voxels": 240251
+  },
+  "s0440": {
+    "expert_route_length_mm": 4942.582579604709,
+    "expert_route_voxels": 2436,
+    "segmentation_volume_ml": 550.41525,
+    "segmentation_voxels": 163086,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 163086
+  },
+  "s0441": {
+    "expert_route_length_mm": 14701.168049948788,
+    "expert_route_voxels": 8470,
+    "segmentation_volume_ml": 1362.80475,
+    "segmentation_voxels": 403794,
+    "start_component_fraction": 0.9995220335121374,
+    "start_component_voxels": 403601
+  },
+  "s0447": {
+    "expert_route_length_mm": 5750.811598367621,
+    "expert_route_voxels": 2878,
+    "segmentation_volume_ml": 788.734125,
+    "segmentation_voxels": 233699,
+    "start_component_fraction": 0.9999871629745956,
+    "start_component_voxels": 233696
+  },
+  "s0450": {
+    "expert_route_length_mm": 7523.026160697124,
+    "expert_route_voxels": 3754,
+    "segmentation_volume_ml": 1198.047375,
+    "segmentation_voxels": 354977,
+    "start_component_fraction": 0.9999633779089913,
+    "start_component_voxels": 354964
+  },
+  "s0456": {
+    "expert_route_length_mm": 5364.254696185361,
+    "expert_route_voxels": 2708,
+    "segmentation_volume_ml": 913.788,
+    "segmentation_voxels": 270752,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 270752
+  },
+  "s0458": {
+    "expert_route_length_mm": 12825.749921931736,
+    "expert_route_voxels": 7232,
+    "segmentation_volume_ml": 1144.310625,
+    "segmentation_voxels": 339055,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 339055
+  },
+  "s0461": {
+    "expert_route_length_mm": 3695.306655804024,
+    "expert_route_voxels": 1846,
+    "segmentation_volume_ml": 602.751375,
+    "segmentation_voxels": 178593,
+    "start_component_fraction": 0.9999496060875847,
+    "start_component_voxels": 178584
+  },
+  "s0462": {
+    "expert_route_length_mm": 3624.4302467082616,
+    "expert_route_voxels": 1788,
+    "segmentation_volume_ml": 564.1886249999964,
+    "segmentation_voxels": 167167,
+    "start_component_fraction": 0.9661177146207086,
+    "start_component_voxels": 161503
+  },
+  "s0467": {
+    "expert_route_length_mm": 6270.873678339103,
+    "expert_route_voxels": 3141,
+    "segmentation_volume_ml": 1080.00675,
+    "segmentation_voxels": 320002,
+    "start_component_fraction": 0.9953094043162231,
+    "start_component_voxels": 318501
+  },
+  "s0468": {
+    "expert_route_length_mm": 6097.866457557471,
+    "expert_route_voxels": 3047,
+    "segmentation_volume_ml": 1102.9905,
+    "segmentation_voxels": 326812,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 326812
+  },
+  "s0472": {
+    "expert_route_length_mm": 6443.842545829293,
+    "expert_route_voxels": 3203,
+    "segmentation_volume_ml": 899.265375,
+    "segmentation_voxels": 266449,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 266449
+  },
+  "s0476": {
+    "expert_route_length_mm": 9717.561845237058,
+    "expert_route_voxels": 4902,
+    "segmentation_volume_ml": 1321.531875,
+    "segmentation_voxels": 391565,
+    "start_component_fraction": 0.9999846768735714,
+    "start_component_voxels": 391559
+  },
+  "s0480": {
+    "expert_route_length_mm": 5612.373742481194,
+    "expert_route_voxels": 2781,
+    "segmentation_volume_ml": 1446.298875,
+    "segmentation_voxels": 428533,
+    "start_component_fraction": 0.8711814492699512,
+    "start_component_voxels": 373330
+  },
+  "s0483": {
+    "expert_route_length_mm": 3770.1536332286696,
+    "expert_route_voxels": 1877,
+    "segmentation_volume_ml": 714.42,
+    "segmentation_voxels": 211680,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 211680
+  },
+  "s0484": {
+    "expert_route_length_mm": 5434.41141421206,
+    "expert_route_voxels": 2693,
+    "segmentation_volume_ml": 961.223625,
+    "segmentation_voxels": 284807,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 284807
+  },
+  "s0490": {
+    "expert_route_length_mm": 306.7878135268801,
+    "expert_route_voxels": 159,
+    "segmentation_volume_ml": 95.53275,
+    "segmentation_voxels": 28306,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 28306
+  },
+  "s0495": {
+    "expert_route_length_mm": 5671.895971283306,
+    "expert_route_voxels": 2822,
+    "segmentation_volume_ml": 1122.26175,
+    "segmentation_voxels": 332522,
+    "start_component_fraction": 0.9998556486488112,
+    "start_component_voxels": 332474
+  },
+  "s0500": {
+    "expert_route_length_mm": 9335.00946068312,
+    "expert_route_voxels": 4790,
+    "segmentation_volume_ml": 1673.65575,
+    "segmentation_voxels": 495898,
+    "start_component_fraction": 0.9999979834562753,
+    "start_component_voxels": 495897
+  },
+  "s0541": {
+    "expert_route_length_mm": 7904.333938045846,
+    "expert_route_voxels": 3947,
+    "segmentation_volume_ml": 1319.722875,
+    "segmentation_voxels": 391029,
+    "start_component_fraction": 0.9871441760074061,
+    "start_component_voxels": 386002
+  },
+  "s0546": {
+    "expert_route_length_mm": 6792.262410214665,
+    "expert_route_voxels": 3549,
+    "segmentation_volume_ml": 1151.492625,
+    "segmentation_voxels": 341183,
+    "start_component_fraction": 0.994176145939276,
+    "start_component_voxels": 339196
+  },
+  "s0549": {
+    "expert_route_length_mm": 7089.691578578568,
+    "expert_route_voxels": 3566,
+    "segmentation_volume_ml": 1029.8745,
+    "segmentation_voxels": 305148,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 305148
+  },
+  "s0550": {
+    "expert_route_length_mm": 7483.8486550392245,
+    "expert_route_voxels": 3718,
+    "segmentation_volume_ml": 1169.663625,
+    "segmentation_voxels": 346567,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 346567
+  },
+  "s0551": {
+    "expert_route_length_mm": 6079.611068932994,
+    "expert_route_voxels": 3178,
+    "segmentation_volume_ml": 1055.932875,
+    "segmentation_voxels": 312869,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 312869
+  },
+  "s0553": {
+    "expert_route_length_mm": 4770.1321336266965,
+    "expert_route_voxels": 2421,
+    "segmentation_volume_ml": 493.8165,
+    "segmentation_voxels": 146316,
+    "start_component_fraction": 0.9476953989994259,
+    "start_component_voxels": 138663
+  },
+  "s0555": {
+    "expert_route_length_mm": 1863.8479902168149,
+    "expert_route_voxels": 949,
+    "segmentation_volume_ml": 545.896125,
+    "segmentation_voxels": 161747,
+    "start_component_fraction": 0.9993446555422976,
+    "start_component_voxels": 161641
+  },
+  "s0556": {
+    "expert_route_length_mm": 2929.11940382425,
+    "expert_route_voxels": 1488,
+    "segmentation_volume_ml": 761.963625,
+    "segmentation_voxels": 225767,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 225767
+  },
+  "s0561": {
+    "expert_route_length_mm": 6226.7723111175455,
+    "expert_route_voxels": 3071,
+    "segmentation_volume_ml": 870.422625,
+    "segmentation_voxels": 257903,
+    "start_component_fraction": 0.998596371504015,
+    "start_component_voxels": 257541
+  },
+  "s0566": {
+    "expert_route_length_mm": 10015.274862954611,
+    "expert_route_voxels": 5359,
+    "segmentation_volume_ml": 923.8455,
+    "segmentation_voxels": 273732,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 273732
+  },
+  "s0573": {
+    "expert_route_length_mm": 3937.8886198582695,
+    "expert_route_voxels": 1953,
+    "segmentation_volume_ml": 671.992875,
+    "segmentation_voxels": 199109,
+    "start_component_fraction": 0.9989302341933313,
+    "start_component_voxels": 198896
+  },
+  "s0574": {
+    "expert_route_length_mm": 6420.3359835761785,
+    "expert_route_voxels": 3207,
+    "segmentation_volume_ml": 1297.809,
+    "segmentation_voxels": 384536,
+    "start_component_fraction": 0.9862665654191025,
+    "start_component_voxels": 379255
+  },
+  "s0577": {
+    "expert_route_length_mm": 9792.341286206118,
+    "expert_route_voxels": 5018,
+    "segmentation_volume_ml": 1541.63925,
+    "segmentation_voxels": 456782,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 456782
+  },
+  "s0578": {
+    "expert_route_length_mm": 5177.317999510197,
+    "expert_route_voxels": 2613,
+    "segmentation_volume_ml": 972.65475,
+    "segmentation_voxels": 288194,
+    "start_component_fraction": 0.9999757108059154,
+    "start_component_voxels": 288187
+  },
+  "s0581": {
+    "expert_route_length_mm": 4567.9489478644455,
+    "expert_route_voxels": 2286,
+    "segmentation_volume_ml": 756.37125,
+    "segmentation_voxels": 224110,
+    "start_component_fraction": 0.9999955379054929,
+    "start_component_voxels": 224109
+  },
+  "s0583": {
+    "expert_route_length_mm": 5967.492130248509,
+    "expert_route_voxels": 2927,
+    "segmentation_volume_ml": 1088.542125,
+    "segmentation_voxels": 322531,
+    "start_component_fraction": 0.9999937990456731,
+    "start_component_voxels": 322529
+  },
+  "s0584": {
+    "expert_route_length_mm": 4762.338263426596,
+    "expert_route_voxels": 2369,
+    "segmentation_volume_ml": 904.577625,
+    "segmentation_voxels": 268023,
+    "start_component_fraction": 0.9923663267704638,
+    "start_component_voxels": 265977
+  },
+  "s0585": {
+    "expert_route_length_mm": 9615.719863535614,
+    "expert_route_voxels": 4921,
+    "segmentation_volume_ml": 1597.44149999999,
+    "segmentation_voxels": 473316,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 473316
+  },
+  "s0586": {
+    "expert_route_length_mm": 4742.956447340959,
+    "expert_route_voxels": 2376,
+    "segmentation_volume_ml": 1054.27575,
+    "segmentation_voxels": 312378,
+    "start_component_fraction": 0.9917951968448482,
+    "start_component_voxels": 309815
+  },
+  "s0587": {
+    "expert_route_length_mm": 4704.477147798012,
+    "expert_route_voxels": 2340,
+    "segmentation_volume_ml": 878.06025,
+    "segmentation_voxels": 260166,
+    "start_component_fraction": 0.9975246573341636,
+    "start_component_voxels": 259522
+  },
+  "s0589": {
+    "expert_route_length_mm": 4586.898609567683,
+    "expert_route_voxels": 2317,
+    "segmentation_volume_ml": 696.522375,
+    "segmentation_voxels": 206377,
+    "start_component_fraction": 0.9999951544988056,
+    "start_component_voxels": 206376
+  },
+  "s0590": {
+    "expert_route_length_mm": 2584.180319687321,
+    "expert_route_voxels": 1289,
+    "segmentation_volume_ml": 518.990625,
+    "segmentation_voxels": 153775,
+    "start_component_fraction": 0.9783840026012031,
+    "start_component_voxels": 150451
+  },
+  "s0591": {
+    "expert_route_length_mm": 7452.666852108482,
+    "expert_route_voxels": 3723,
+    "segmentation_volume_ml": 1149.042375,
+    "segmentation_voxels": 340457,
+    "start_component_fraction": 0.9963020293311637,
+    "start_component_voxels": 339198
+  },
+  "s0592": {
+    "expert_route_length_mm": 12429.094071183656,
+    "expert_route_voxels": 6768,
+    "segmentation_volume_ml": 1087.644375,
+    "segmentation_voxels": 322265,
+    "start_component_fraction": 0.9942066311886181,
+    "start_component_voxels": 320398
+  },
+  "s0593": {
+    "expert_route_length_mm": 6085.84990885971,
+    "expert_route_voxels": 3028,
+    "segmentation_volume_ml": 1133.794125,
+    "segmentation_voxels": 335939,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 335939
+  },
+  "s0600": {
+    "expert_route_length_mm": 8825.823387681903,
+    "expert_route_voxels": 4740,
+    "segmentation_volume_ml": 968.76,
+    "segmentation_voxels": 287040,
+    "start_component_fraction": 0.9960876532887403,
+    "start_component_voxels": 285917
+  },
+  "s0602": {
+    "expert_route_length_mm": 4367.848104357693,
+    "expert_route_voxels": 2151,
+    "segmentation_volume_ml": 656.285625,
+    "segmentation_voxels": 194455,
+    "start_component_fraction": 0.998693785194518,
+    "start_component_voxels": 194201
+  },
+  "s0603": {
+    "expert_route_length_mm": 5560.124917742214,
+    "expert_route_voxels": 2820,
+    "segmentation_volume_ml": 586.683,
+    "segmentation_voxels": 173832,
+    "start_component_fraction": 0.996260757513001,
+    "start_component_voxels": 173182
+  },
+  "s0613": {
+    "expert_route_length_mm": 5466.183502850539,
+    "expert_route_voxels": 2743,
+    "segmentation_volume_ml": 952.678125,
+    "segmentation_voxels": 282275,
+    "start_component_fraction": 0.9998972633070587,
+    "start_component_voxels": 282246
+  },
+  "s0615": {
+    "expert_route_length_mm": 2666.836824793611,
+    "expert_route_voxels": 1317,
+    "segmentation_volume_ml": 425.89125,
+    "segmentation_voxels": 126190,
+    "start_component_fraction": 0.9998890561851177,
+    "start_component_voxels": 126176
+  },
+  "s0616": {
+    "expert_route_length_mm": 5525.897195806628,
+    "expert_route_voxels": 2759,
+    "segmentation_volume_ml": 795.392999999995,
+    "segmentation_voxels": 235672,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 235672
+  },
+  "s0617": {
+    "expert_route_length_mm": 6859.128193882272,
+    "expert_route_voxels": 3476,
+    "segmentation_volume_ml": 999.88425,
+    "segmentation_voxels": 296262,
+    "start_component_fraction": 0.9991527769339301,
+    "start_component_voxels": 296011
+  },
+  "s0619": {
+    "expert_route_length_mm": 6943.583862024305,
+    "expert_route_voxels": 3413,
+    "segmentation_volume_ml": 1208.185875,
+    "segmentation_voxels": 357981,
+    "start_component_fraction": 0.9971339261022233,
+    "start_component_voxels": 356955
+  },
+  "s0620": {
+    "expert_route_length_mm": 5021.132270072792,
+    "expert_route_voxels": 2498,
+    "segmentation_volume_ml": 822.841875,
+    "segmentation_voxels": 243805,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 243805
+  },
+  "s0621": {
+    "expert_route_length_mm": 9012.537003720554,
+    "expert_route_voxels": 4490,
+    "segmentation_volume_ml": 1377.11475,
+    "segmentation_voxels": 408034,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 408034
+  },
+  "s0624": {
+    "expert_route_length_mm": 9135.411920630122,
+    "expert_route_voxels": 4607,
+    "segmentation_volume_ml": 1142.987443327017,
+    "segmentation_voxels": 338663,
+    "start_component_fraction": 0.9962086203689213,
+    "start_component_voxels": 337379
+  },
+  "s0625": {
+    "expert_route_length_mm": 7084.386191956377,
+    "expert_route_voxels": 3523,
+    "segmentation_volume_ml": 1036.533375,
+    "segmentation_voxels": 307121,
+    "start_component_fraction": 0.9996646272967332,
+    "start_component_voxels": 307018
+  },
+  "s0626": {
+    "expert_route_length_mm": 7172.418018302047,
+    "expert_route_voxels": 3534,
+    "segmentation_volume_ml": 1202.1075,
+    "segmentation_voxels": 356180,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 356180
+  },
+  "s0629": {
+    "expert_route_length_mm": 4831.449307930787,
+    "expert_route_voxels": 2363,
+    "segmentation_volume_ml": 924.436125,
+    "segmentation_voxels": 273907,
+    "start_component_fraction": 0.9950822724501381,
+    "start_component_voxels": 272560
+  },
+  "s0635": {
+    "expert_route_length_mm": 5488.908568809966,
+    "expert_route_voxels": 2721,
+    "segmentation_volume_ml": 949.92075,
+    "segmentation_voxels": 281458,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 281458
+  },
+  "s0636": {
+    "expert_route_length_mm": 5775.571046680091,
+    "expert_route_voxels": 2797,
+    "segmentation_volume_ml": 736.99875,
+    "segmentation_voxels": 218370,
+    "start_component_fraction": 0.9984201126528369,
+    "start_component_voxels": 218025
+  },
+  "s0637": {
+    "expert_route_length_mm": 6170.197118972057,
+    "expert_route_voxels": 3133,
+    "segmentation_volume_ml": 869.963625,
+    "segmentation_voxels": 257767,
+    "start_component_fraction": 0.9983046704969992,
+    "start_component_voxels": 257330
+  },
+  "s0639": {
+    "expert_route_length_mm": 4915.1415305820665,
+    "expert_route_voxels": 2480,
+    "segmentation_volume_ml": 816.075,
+    "segmentation_voxels": 241800,
+    "start_component_fraction": 0.9981555004135649,
+    "start_component_voxels": 241354
+  },
+  "s0644": {
+    "expert_route_length_mm": 6880.662240106574,
+    "expert_route_voxels": 3856,
+    "segmentation_volume_ml": 799.837875,
+    "segmentation_voxels": 236989,
+    "start_component_fraction": 0.9992235926561992,
+    "start_component_voxels": 236805
+  },
+  "s0648": {
+    "expert_route_length_mm": 7161.143156163223,
+    "expert_route_voxels": 3530,
+    "segmentation_volume_ml": 968.4867019684017,
+    "segmentation_voxels": 286959,
+    "start_component_fraction": 0.9985084977296408,
+    "start_component_voxels": 286531
+  },
+  "s0650": {
+    "expert_route_length_mm": 6645.886266798305,
+    "expert_route_voxels": 3336,
+    "segmentation_volume_ml": 1338.51825,
+    "segmentation_voxels": 396598,
+    "start_component_fraction": 0.9999974785551112,
+    "start_component_voxels": 396597
+  },
+  "s0651": {
+    "expert_route_length_mm": 3153.368887091747,
+    "expert_route_voxels": 1562,
+    "segmentation_volume_ml": 487.458,
+    "segmentation_voxels": 144432,
+    "start_component_fraction": 0.9865957682508032,
+    "start_component_voxels": 142496
+  },
+  "s0656": {
+    "expert_route_length_mm": 5963.000386127528,
+    "expert_route_voxels": 3004,
+    "segmentation_volume_ml": 1018.585125,
+    "segmentation_voxels": 301803,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 301803
+  },
+  "s0661": {
+    "expert_route_length_mm": 4545.314215252321,
+    "expert_route_voxels": 2240,
+    "segmentation_volume_ml": 456.073875,
+    "segmentation_voxels": 135133,
+    "start_component_fraction": 0.996507144812888,
+    "start_component_voxels": 134661
+  },
+  "s0662": {
+    "expert_route_length_mm": 6808.9971657889455,
+    "expert_route_voxels": 3407,
+    "segmentation_volume_ml": 1178.519625,
+    "segmentation_voxels": 349191,
+    "start_component_fraction": 0.999988544951044,
+    "start_component_voxels": 349187
+  },
+  "s0663": {
+    "expert_route_length_mm": 4177.777074671332,
+    "expert_route_voxels": 2129,
+    "segmentation_volume_ml": 620.537625,
+    "segmentation_voxels": 183863,
+    "start_component_fraction": 0.9999184175173906,
+    "start_component_voxels": 183848
+  },
+  "s0664": {
+    "expert_route_length_mm": 11723.849846350002,
+    "expert_route_voxels": 6658,
+    "segmentation_volume_ml": 1450.818,
+    "segmentation_voxels": 429872,
+    "start_component_fraction": 0.9879871217478692,
+    "start_component_voxels": 424708
+  },
+  "s0665": {
+    "expert_route_length_mm": 1500.1736193557288,
+    "expert_route_voxels": 726,
+    "segmentation_volume_ml": 286.9425,
+    "segmentation_voxels": 85020,
+    "start_component_fraction": 0.9545518701482004,
+    "start_component_voxels": 81156
+  },
+  "s0667": {
+    "expert_route_length_mm": 5205.7885638910575,
+    "expert_route_voxels": 2579,
+    "segmentation_volume_ml": 887.085,
+    "segmentation_voxels": 262840,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 262840
+  },
+  "s0668": {
+    "expert_route_length_mm": 11544.521286267227,
+    "expert_route_voxels": 6379,
+    "segmentation_volume_ml": 642.866625,
+    "segmentation_voxels": 190479,
+    "start_component_fraction": 0.9927288572493556,
+    "start_component_voxels": 189094
+  },
+  "s0669": {
+    "expert_route_length_mm": 8348.210378291998,
+    "expert_route_voxels": 4505,
+    "segmentation_volume_ml": 1043.296875,
+    "segmentation_voxels": 309125,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 309125
+  },
+  "s0670": {
+    "expert_route_length_mm": 4895.708419208974,
+    "expert_route_voxels": 2410,
+    "segmentation_volume_ml": 638.77275,
+    "segmentation_voxels": 189266,
+    "start_component_fraction": 0.9999841492925301,
+    "start_component_voxels": 189263
+  },
+  "s0677": {
+    "expert_route_length_mm": 6185.759420931401,
+    "expert_route_voxels": 3101,
+    "segmentation_volume_ml": 1075.518,
+    "segmentation_voxels": 318672,
+    "start_component_fraction": 0.981410352964804,
+    "start_component_voxels": 312748
+  },
+  "s0680": {
+    "expert_route_length_mm": 7278.158560922121,
+    "expert_route_voxels": 3626,
+    "segmentation_volume_ml": 1025.42625,
+    "segmentation_voxels": 303830,
+    "start_component_fraction": 0.9999374650297864,
+    "start_component_voxels": 303811
+  },
+  "s0683": {
+    "expert_route_length_mm": 6615.328931340157,
+    "expert_route_voxels": 3347,
+    "segmentation_volume_ml": 1466.535375,
+    "segmentation_voxels": 434529,
+    "start_component_fraction": 0.9999286583864369,
+    "start_component_voxels": 434498
+  },
+  "s0685": {
+    "expert_route_length_mm": 6943.978007641555,
+    "expert_route_voxels": 3446,
+    "segmentation_volume_ml": 1686.0285,
+    "segmentation_voxels": 499564,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 499564
+  },
+  "s0687": {
+    "expert_route_length_mm": 4876.425840178335,
+    "expert_route_voxels": 2401,
+    "segmentation_volume_ml": 659.080125,
+    "segmentation_voxels": 195283,
+    "start_component_fraction": 0.9997132366872692,
+    "start_component_voxels": 195227
+  },
+  "s0692": {
+    "expert_route_length_mm": 6984.154476569686,
+    "expert_route_voxels": 3431,
+    "segmentation_volume_ml": 1560.920625,
+    "segmentation_voxels": 462495,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 462495
+  },
+  "s0694": {
+    "expert_route_length_mm": 6113.006735460233,
+    "expert_route_voxels": 3119,
+    "segmentation_volume_ml": 1036.7595,
+    "segmentation_voxels": 307188,
+    "start_component_fraction": 0.9980598200450539,
+    "start_component_voxels": 306592
+  },
+  "s0699": {
+    "expert_route_length_mm": 7157.764511546475,
+    "expert_route_voxels": 3671,
+    "segmentation_volume_ml": 994.291875,
+    "segmentation_voxels": 294605,
+    "start_component_fraction": 0.9991446173690195,
+    "start_component_voxels": 294353
+  },
+  "s0702": {
+    "expert_route_length_mm": 6630.654773399479,
+    "expert_route_voxels": 3342,
+    "segmentation_volume_ml": 785.318625,
+    "segmentation_voxels": 232687,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 232687
+  },
+  "s0703": {
+    "expert_route_length_mm": 8286.037395159568,
+    "expert_route_voxels": 4360,
+    "segmentation_volume_ml": 867.537,
+    "segmentation_voxels": 257048,
+    "start_component_fraction": 0.9942851140642993,
+    "start_component_voxels": 255579
+  },
+  "s0705": {
+    "expert_route_length_mm": 10262.761696375874,
+    "expert_route_voxels": 5084,
+    "segmentation_volume_ml": 1736.359875,
+    "segmentation_voxels": 514477,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 514477
+  },
+  "s0708": {
+    "expert_route_length_mm": 2416.8574562114245,
+    "expert_route_voxels": 1210,
+    "segmentation_volume_ml": 432.1215,
+    "segmentation_voxels": 128036,
+    "start_component_fraction": 0.9982348714424069,
+    "start_component_voxels": 127810
+  },
+  "s0709": {
+    "expert_route_length_mm": 2966.4609231324084,
+    "expert_route_voxels": 1545,
+    "segmentation_volume_ml": 414.838125,
+    "segmentation_voxels": 122915,
+    "start_component_fraction": 0.999991864296465,
+    "start_component_voxels": 122914
+  },
+  "s0719": {
+    "expert_route_length_mm": 580.2321428598879,
+    "expert_route_voxels": 294,
+    "segmentation_volume_ml": 143.960625,
+    "segmentation_voxels": 42655,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 42655
+  },
+  "s0720": {
+    "expert_route_length_mm": 7290.616737431965,
+    "expert_route_voxels": 3625,
+    "segmentation_volume_ml": 1195.6275,
+    "segmentation_voxels": 354260,
+    "start_component_fraction": 0.9999858860723763,
+    "start_component_voxels": 354255
+  },
+  "s0721": {
+    "expert_route_length_mm": 4247.70885085248,
+    "expert_route_voxels": 2084,
+    "segmentation_volume_ml": 1210.07925,
+    "segmentation_voxels": 358542,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 358542
+  },
+  "s0724": {
+    "expert_route_length_mm": 4164.309124637249,
+    "expert_route_voxels": 2064,
+    "segmentation_volume_ml": 581.954625,
+    "segmentation_voxels": 172431,
+    "start_component_fraction": 0.9893348643805349,
+    "start_component_voxels": 170592
+  },
+  "s0726": {
+    "expert_route_length_mm": 6698.842256434573,
+    "expert_route_voxels": 3352,
+    "segmentation_volume_ml": 809.0685,
+    "segmentation_voxels": 239724,
+    "start_component_fraction": 0.9823797366972018,
+    "start_component_voxels": 235500
+  },
+  "s0728": {
+    "expert_route_length_mm": 5894.26386045303,
+    "expert_route_voxels": 2956,
+    "segmentation_volume_ml": 842.373,
+    "segmentation_voxels": 249592,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 249592
+  },
+  "s0731": {
+    "expert_route_length_mm": 4107.824210764425,
+    "expert_route_voxels": 2055,
+    "segmentation_volume_ml": 936.268875,
+    "segmentation_voxels": 277413,
+    "start_component_fraction": 0.9878953041133617,
+    "start_component_voxels": 274055
+  },
+  "s0732": {
+    "expert_route_length_mm": 2975.7014443528074,
+    "expert_route_voxels": 1520,
+    "segmentation_volume_ml": 729.27675,
+    "segmentation_voxels": 216082,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 216082
+  },
+  "s0733": {
+    "expert_route_length_mm": 6340.150834560597,
+    "expert_route_voxels": 3135,
+    "segmentation_volume_ml": 1086.966,
+    "segmentation_voxels": 322064,
+    "start_component_fraction": 0.999897535893487,
+    "start_component_voxels": 322031
+  },
+  "s0739": {
+    "expert_route_length_mm": 4902.830620068915,
+    "expert_route_voxels": 2454,
+    "segmentation_volume_ml": 932.2695,
+    "segmentation_voxels": 276228,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 276228
+  },
+  "s0746": {
+    "expert_route_length_mm": 16570.55831343418,
+    "expert_route_voxels": 9689,
+    "segmentation_volume_ml": 1288.791,
+    "segmentation_voxels": 381864,
+    "start_component_fraction": 0.999997381266629,
+    "start_component_voxels": 381863
+  },
+  "s0749": {
+    "expert_route_length_mm": 6798.673780230627,
+    "expert_route_voxels": 3344,
+    "segmentation_volume_ml": 1216.188,
+    "segmentation_voxels": 360352,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 360352
+  },
+  "s0752": {
+    "expert_route_length_mm": 2235.1383490512317,
+    "expert_route_voxels": 1111,
+    "segmentation_volume_ml": 397.8855,
+    "segmentation_voxels": 117892,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 117892
+  },
+  "s0754": {
+    "expert_route_length_mm": 7658.151682984118,
+    "expert_route_voxels": 3948,
+    "segmentation_volume_ml": 1085.7611249999932,
+    "segmentation_voxels": 321707,
+    "start_component_fraction": 0.9999875663258804,
+    "start_component_voxels": 321703
+  },
+  "s0760": {
+    "expert_route_length_mm": 9246.169871858878,
+    "expert_route_voxels": 5091,
+    "segmentation_volume_ml": 769.80375,
+    "segmentation_voxels": 228090,
+    "start_component_fraction": 0.9993379806216844,
+    "start_component_voxels": 227939
+  },
+  "s0762": {
+    "expert_route_length_mm": 4209.435477256479,
+    "expert_route_voxels": 2112,
+    "segmentation_volume_ml": 684.487125,
+    "segmentation_voxels": 202811,
+    "start_component_fraction": 0.9993442170296483,
+    "start_component_voxels": 202678
+  },
+  "s0763": {
+    "expert_route_length_mm": 7123.534036742508,
+    "expert_route_voxels": 3564,
+    "segmentation_volume_ml": 884.732625,
+    "segmentation_voxels": 262143,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 262143
+  },
+  "s0764": {
+    "expert_route_length_mm": 7555.241498469588,
+    "expert_route_voxels": 4053,
+    "segmentation_volume_ml": 868.9545,
+    "segmentation_voxels": 257468,
+    "start_component_fraction": 0.9954479780011497,
+    "start_component_voxels": 256296
+  },
+  "s0768": {
+    "expert_route_length_mm": 8693.40286338043,
+    "expert_route_voxels": 4955,
+    "segmentation_volume_ml": 617.7565759051145,
+    "segmentation_voxels": 183039,
+    "start_component_fraction": 0.9998579537694152,
+    "start_component_voxels": 183013
+  },
+  "s0774": {
+    "expert_route_length_mm": 5100.14077037894,
+    "expert_route_voxels": 2514,
+    "segmentation_volume_ml": 882.8730701644421,
+    "segmentation_voxels": 261592,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 261592
+  },
+  "s0777": {
+    "expert_route_length_mm": 7697.78503928761,
+    "expert_route_voxels": 3807,
+    "segmentation_volume_ml": 1476.29925,
+    "segmentation_voxels": 437422,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 437422
+  },
+  "s0790": {
+    "expert_route_length_mm": 2970.603513655005,
+    "expert_route_voxels": 1503,
+    "segmentation_volume_ml": 465.87825,
+    "segmentation_voxels": 138038,
+    "start_component_fraction": 0.9441385705385473,
+    "start_component_voxels": 130327
+  },
+  "s0796": {
+    "expert_route_length_mm": 4442.845480943462,
+    "expert_route_voxels": 2234,
+    "segmentation_volume_ml": 773.6445,
+    "segmentation_voxels": 229228,
+    "start_component_fraction": 0.999899663217408,
+    "start_component_voxels": 229205
+  },
+  "s0797": {
+    "expert_route_length_mm": 5355.020937806264,
+    "expert_route_voxels": 2702,
+    "segmentation_volume_ml": 593.132625,
+    "segmentation_voxels": 175743,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 175743
+  },
+  "s0801": {
+    "expert_route_length_mm": 5233.605601749052,
+    "expert_route_voxels": 2589,
+    "segmentation_volume_ml": 699.330375,
+    "segmentation_voxels": 207209,
+    "start_component_fraction": 0.9799670863717309,
+    "start_component_voxels": 203058
+  },
+  "s0804": {
+    "expert_route_length_mm": 6856.924318362806,
+    "expert_route_voxels": 3511,
+    "segmentation_volume_ml": 849.916125,
+    "segmentation_voxels": 251827,
+    "start_component_fraction": 0.9988801836181188,
+    "start_component_voxels": 251545
+  },
+  "s0807": {
+    "expert_route_length_mm": 8785.42002435473,
+    "expert_route_voxels": 4733,
+    "segmentation_volume_ml": 1793.63025,
+    "segmentation_voxels": 531446,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 531446
+  },
+  "s0812": {
+    "expert_route_length_mm": 5967.551952674792,
+    "expert_route_voxels": 2953,
+    "segmentation_volume_ml": 1078.167375,
+    "segmentation_voxels": 319457,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 319457
+  },
+  "s0830": {
+    "expert_route_length_mm": 6071.317935368106,
+    "expert_route_voxels": 3130,
+    "segmentation_volume_ml": 705.101625,
+    "segmentation_voxels": 208919,
+    "start_component_fraction": 0.999985640367798,
+    "start_component_voxels": 208916
+  },
+  "s0831": {
+    "expert_route_length_mm": 7223.308669056142,
+    "expert_route_voxels": 3670,
+    "segmentation_volume_ml": 1046.8845,
+    "segmentation_voxels": 310188,
+    "start_component_fraction": 0.9999967761486582,
+    "start_component_voxels": 310187
+  },
+  "s0842": {
+    "expert_route_length_mm": 11804.121414538442,
+    "expert_route_voxels": 6602,
+    "segmentation_volume_ml": 1215.43875,
+    "segmentation_voxels": 360130,
+    "start_component_fraction": 0.9986005053730598,
+    "start_component_voxels": 359626
+  },
+  "s0859": {
+    "expert_route_length_mm": 7981.352892340283,
+    "expert_route_voxels": 4160,
+    "segmentation_volume_ml": 806.51025,
+    "segmentation_voxels": 238966,
+    "start_component_fraction": 0.9634424980959635,
+    "start_component_voxels": 230230
+  },
+  "s0860": {
+    "expert_route_length_mm": 6018.11236149582,
+    "expert_route_voxels": 3029,
+    "segmentation_volume_ml": 1105.0220743614504,
+    "segmentation_voxels": 327414,
+    "start_component_fraction": 0.9975657729968785,
+    "start_component_voxels": 326617
+  },
+  "s0863": {
+    "expert_route_length_mm": 5422.2518491508845,
+    "expert_route_voxels": 2788,
+    "segmentation_volume_ml": 537.948,
+    "segmentation_voxels": 159392,
+    "start_component_fraction": 0.9871260791005823,
+    "start_component_voxels": 157340
+  },
+  "s0864": {
+    "expert_route_length_mm": 3759.3792336027373,
+    "expert_route_voxels": 1898,
+    "segmentation_volume_ml": 579.19725,
+    "segmentation_voxels": 171614,
+    "start_component_fraction": 0.9989336534315382,
+    "start_component_voxels": 171431
+  },
+  "s0869": {
+    "expert_route_length_mm": 6819.235065227496,
+    "expert_route_voxels": 3366,
+    "segmentation_volume_ml": 1056.938625,
+    "segmentation_voxels": 313167,
+    "start_component_fraction": 0.9853688287718694,
+    "start_component_voxels": 308585
+  },
+  "s0878": {
+    "expert_route_length_mm": 15591.917099940398,
+    "expert_route_voxels": 8932,
+    "segmentation_volume_ml": 963.511875,
+    "segmentation_voxels": 285485,
+    "start_component_fraction": 0.9999684747009475,
+    "start_component_voxels": 285476
+  },
+  "s0880": {
+    "expert_route_length_mm": 7816.314350792874,
+    "expert_route_voxels": 4006,
+    "segmentation_volume_ml": 990.2925,
+    "segmentation_voxels": 293420,
+    "start_component_fraction": 0.9962408833753663,
+    "start_component_voxels": 292317
+  },
+  "s0884": {
+    "expert_route_length_mm": 7546.261300275348,
+    "expert_route_voxels": 3845,
+    "segmentation_volume_ml": 1979.933625,
+    "segmentation_voxels": 586647,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 586647
+  },
+  "s0885": {
+    "expert_route_length_mm": 7642.27812023292,
+    "expert_route_voxels": 3789,
+    "segmentation_volume_ml": 1451.24325,
+    "segmentation_voxels": 429998,
+    "start_component_fraction": 0.9999930232233638,
+    "start_component_voxels": 429995
+  },
+  "s0892": {
+    "expert_route_length_mm": 1900.5696410521614,
+    "expert_route_voxels": 962,
+    "segmentation_volume_ml": 401.560875,
+    "segmentation_voxels": 118981,
+    "start_component_fraction": 0.9989998403106378,
+    "start_component_voxels": 118862
+  },
+  "s0894": {
+    "expert_route_length_mm": 6311.598666191834,
+    "expert_route_voxels": 3125,
+    "segmentation_volume_ml": 1058.072625,
+    "segmentation_voxels": 313503,
+    "start_component_fraction": 0.996236080675464,
+    "start_component_voxels": 312323
+  },
+  "s0895": {
+    "expert_route_length_mm": 4680.416888831074,
+    "expert_route_voxels": 2341,
+    "segmentation_volume_ml": 655.0605,
+    "segmentation_voxels": 194092,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 194092
+  },
+  "s0896": {
+    "expert_route_length_mm": 3961.9222960432335,
+    "expert_route_voxels": 2033,
+    "segmentation_volume_ml": 441.153,
+    "segmentation_voxels": 130712,
+    "start_component_fraction": 0.9983398616806414,
+    "start_component_voxels": 130495
+  },
+  "s0899": {
+    "expert_route_length_mm": 5842.269316937134,
+    "expert_route_voxels": 2920,
+    "segmentation_volume_ml": 935.2125,
+    "segmentation_voxels": 277100,
+    "start_component_fraction": 0.9999206062793216,
+    "start_component_voxels": 277078
+  },
+  "s0904": {
+    "expert_route_length_mm": 6757.140635515469,
+    "expert_route_voxels": 3353,
+    "segmentation_volume_ml": 1191.4457803123892,
+    "segmentation_voxels": 353021,
+    "start_component_fraction": 0.9993343172219217,
+    "start_component_voxels": 352786
+  },
+  "s0912": {
+    "expert_route_length_mm": 6122.73259476189,
+    "expert_route_voxels": 3046,
+    "segmentation_volume_ml": 964.200375,
+    "segmentation_voxels": 285689,
+    "start_component_fraction": 0.9990969200774269,
+    "start_component_voxels": 285431
+  },
+  "s0913": {
+    "expert_route_length_mm": 6499.084975228387,
+    "expert_route_voxels": 3224,
+    "segmentation_volume_ml": 947.210625,
+    "segmentation_voxels": 280655,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 280655
+  },
+  "s0916": {
+    "expert_route_length_mm": 7126.247990051079,
+    "expert_route_voxels": 3867,
+    "segmentation_volume_ml": 673.079625,
+    "segmentation_voxels": 199431,
+    "start_component_fraction": 0.996555199542699,
+    "start_component_voxels": 198744
+  },
+  "s0918": {
+    "expert_route_length_mm": 6645.736400419441,
+    "expert_route_voxels": 3399,
+    "segmentation_volume_ml": 992.226375,
+    "segmentation_voxels": 293993,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 293993
+  },
+  "s0919": {
+    "expert_route_length_mm": 5237.949549241979,
+    "expert_route_voxels": 2716,
+    "segmentation_volume_ml": 661.9894276101887,
+    "segmentation_voxels": 196145,
+    "start_component_fraction": 0.9970735935150017,
+    "start_component_voxels": 195571
+  },
+  "s0923": {
+    "expert_route_length_mm": 4325.005935588472,
+    "expert_route_voxels": 2168,
+    "segmentation_volume_ml": 860.544,
+    "segmentation_voxels": 254976,
+    "start_component_fraction": 0.9995725087851406,
+    "start_component_voxels": 254867
+  },
+  "s0928": {
+    "expert_route_length_mm": 7810.218734347291,
+    "expert_route_voxels": 3832,
+    "segmentation_volume_ml": 1011.555,
+    "segmentation_voxels": 299720,
+    "start_component_fraction": 0.9993727478980382,
+    "start_component_voxels": 299532
+  },
+  "s0931": {
+    "expert_route_length_mm": 9030.57394208097,
+    "expert_route_voxels": 4429,
+    "segmentation_volume_ml": 1365.919875,
+    "segmentation_voxels": 404717,
+    "start_component_fraction": 0.9996960839302524,
+    "start_component_voxels": 404594
+  },
+  "s0933": {
+    "expert_route_length_mm": 5326.166013664613,
+    "expert_route_voxels": 2745,
+    "segmentation_volume_ml": 725.500125,
+    "segmentation_voxels": 214963,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 214963
+  },
+  "s0937": {
+    "expert_route_length_mm": 5221.507012522732,
+    "expert_route_voxels": 2569,
+    "segmentation_volume_ml": 870.696,
+    "segmentation_voxels": 257984,
+    "start_component_fraction": 0.9975231022078889,
+    "start_component_voxels": 257345
+  },
+  "s0939": {
+    "expert_route_length_mm": 5959.281569994438,
+    "expert_route_voxels": 2995,
+    "segmentation_volume_ml": 1090.83375,
+    "segmentation_voxels": 323210,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 323210
+  },
+  "s0940": {
+    "expert_route_length_mm": 5914.84292076578,
+    "expert_route_voxels": 3003,
+    "segmentation_volume_ml": 940.899375,
+    "segmentation_voxels": 278785,
+    "start_component_fraction": 0.9989848808221389,
+    "start_component_voxels": 278502
+  },
+  "s0945": {
+    "expert_route_length_mm": 13780.092382454899,
+    "expert_route_voxels": 7420,
+    "segmentation_volume_ml": 1894.82625,
+    "segmentation_voxels": 561430,
+    "start_component_fraction": 0.9995226475250699,
+    "start_component_voxels": 561162
+  },
+  "s0950": {
+    "expert_route_length_mm": 5935.179263917099,
+    "expert_route_voxels": 2995,
+    "segmentation_volume_ml": 700.099875,
+    "segmentation_voxels": 207437,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 207437
+  },
+  "s0951": {
+    "expert_route_length_mm": 4335.472994406338,
+    "expert_route_voxels": 2165,
+    "segmentation_volume_ml": 801.160875,
+    "segmentation_voxels": 237381,
+    "start_component_fraction": 0.9988794385397315,
+    "start_component_voxels": 237115
+  },
+  "s0954": {
+    "expert_route_length_mm": 309.19826282197164,
+    "expert_route_voxels": 160,
+    "segmentation_volume_ml": 90.068625,
+    "segmentation_voxels": 26687,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 26687
+  },
+  "s0957": {
+    "expert_route_length_mm": 7511.703852308705,
+    "expert_route_voxels": 4271,
+    "segmentation_volume_ml": 646.1505,
+    "segmentation_voxels": 191452,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 191452
+  },
+  "s0959": {
+    "expert_route_length_mm": 3936.76941898143,
+    "expert_route_voxels": 1983,
+    "segmentation_volume_ml": 610.90875,
+    "segmentation_voxels": 181010,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 181010
+  },
+  "s0961": {
+    "expert_route_length_mm": 6307.713802483531,
+    "expert_route_voxels": 3195,
+    "segmentation_volume_ml": 945.678375,
+    "segmentation_voxels": 280201,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 280201
+  },
+  "s0963": {
+    "expert_route_length_mm": 5965.231956000665,
+    "expert_route_voxels": 3045,
+    "segmentation_volume_ml": 665.452125,
+    "segmentation_voxels": 197171,
+    "start_component_fraction": 0.9845869828727348,
+    "start_component_voxels": 194132
+  },
+  "s0975": {
+    "expert_route_length_mm": 317.7051144698054,
+    "expert_route_voxels": 167,
+    "segmentation_volume_ml": 60.804,
+    "segmentation_voxels": 18016,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 18016
+  },
+  "s0979": {
+    "expert_route_length_mm": 5450.619303412337,
+    "expert_route_voxels": 2786,
+    "segmentation_volume_ml": 1048.622625,
+    "segmentation_voxels": 310703,
+    "start_component_fraction": 0.9726298104620812,
+    "start_component_voxels": 302199
+  },
+  "s0985": {
+    "expert_route_length_mm": 3961.5452228385475,
+    "expert_route_voxels": 2050,
+    "segmentation_volume_ml": 396.52875,
+    "segmentation_voxels": 117490,
+    "start_component_fraction": 0.9871223082815559,
+    "start_component_voxels": 115977
+  },
+  "s0986": {
+    "expert_route_length_mm": 4851.387742606654,
+    "expert_route_voxels": 2423,
+    "segmentation_volume_ml": 675.138375,
+    "segmentation_voxels": 200041,
+    "start_component_fraction": 0.9993951239995801,
+    "start_component_voxels": 199920
+  },
+  "s0991": {
+    "expert_route_length_mm": 5745.832499412861,
+    "expert_route_voxels": 2853,
+    "segmentation_volume_ml": 1164.209625,
+    "segmentation_voxels": 344951,
+    "start_component_fraction": 0.9944339920742367,
+    "start_component_voxels": 343031
+  },
+  "s1012": {
+    "expert_route_length_mm": 8306.594490494943,
+    "expert_route_voxels": 4149,
+    "segmentation_volume_ml": 1160.9865,
+    "segmentation_voxels": 343996,
+    "start_component_fraction": 0.9999186037046942,
+    "start_component_voxels": 343968
+  },
+  "s1016": {
+    "expert_route_length_mm": 4964.843073714404,
+    "expert_route_voxels": 2481,
+    "segmentation_volume_ml": 1127.071125,
+    "segmentation_voxels": 333947,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 333947
+  },
+  "s1022": {
+    "expert_route_length_mm": 8438.936591857306,
+    "expert_route_voxels": 4212,
+    "segmentation_volume_ml": 1163.770875,
+    "segmentation_voxels": 344821,
+    "start_component_fraction": 0.9957369185751448,
+    "start_component_voxels": 343351
+  },
+  "s1024": {
+    "expert_route_length_mm": 8238.5767258789,
+    "expert_route_voxels": 4105,
+    "segmentation_volume_ml": 1428.863625,
+    "segmentation_voxels": 423367,
+    "start_component_fraction": 0.9590851436224364,
+    "start_component_voxels": 406045
+  },
+  "s1031": {
+    "expert_route_length_mm": 6671.734115671878,
+    "expert_route_voxels": 3298,
+    "segmentation_volume_ml": 1315.06875,
+    "segmentation_voxels": 389650,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 389650
+  },
+  "s1037": {
+    "expert_route_length_mm": 8023.368347601257,
+    "expert_route_voxels": 4194,
+    "segmentation_volume_ml": 1322.12925,
+    "segmentation_voxels": 391742,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 391742
+  },
+  "s1038": {
+    "expert_route_length_mm": 4490.852042480661,
+    "expert_route_voxels": 2287,
+    "segmentation_volume_ml": 647.8144264836609,
+    "segmentation_voxels": 191945,
+    "start_component_fraction": 0.9777592539529553,
+    "start_component_voxels": 187676
+  },
+  "s1044": {
+    "expert_route_length_mm": 12238.506434460134,
+    "expert_route_voxels": 6831,
+    "segmentation_volume_ml": 1136.622375,
+    "segmentation_voxels": 336777,
+    "start_component_fraction": 0.999786208678146,
+    "start_component_voxels": 336705
+  },
+  "s1045": {
+    "expert_route_length_mm": 5524.018026629696,
+    "expert_route_voxels": 2777,
+    "segmentation_volume_ml": 916.747875,
+    "segmentation_voxels": 271629,
+    "start_component_fraction": 0.9999963185079649,
+    "start_component_voxels": 271628
+  },
+  "s1046": {
+    "expert_route_length_mm": 6335.049991053844,
+    "expert_route_voxels": 3130,
+    "segmentation_volume_ml": 987.27525,
+    "segmentation_voxels": 292526,
+    "start_component_fraction": 0.999825656522839,
+    "start_component_voxels": 292475
+  },
+  "s1050": {
+    "expert_route_length_mm": 2550.0770656867453,
+    "expert_route_voxels": 1263,
+    "segmentation_volume_ml": 188.092125,
+    "segmentation_voxels": 55731,
+    "start_component_fraction": 0.9666253969962857,
+    "start_component_voxels": 53871
+  },
+  "s1052": {
+    "expert_route_length_mm": 764.9285863096973,
+    "expert_route_voxels": 387,
+    "segmentation_volume_ml": 169.479,
+    "segmentation_voxels": 50216,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 50216
+  },
+  "s1058": {
+    "expert_route_length_mm": 1443.2364326976572,
+    "expert_route_voxels": 708,
+    "segmentation_volume_ml": 214.7175,
+    "segmentation_voxels": 63620,
+    "start_component_fraction": 0.9976736875196479,
+    "start_component_voxels": 63472
+  },
+  "s1061": {
+    "expert_route_length_mm": 8349.370749027625,
+    "expert_route_voxels": 4337,
+    "segmentation_volume_ml": 779.277375,
+    "segmentation_voxels": 230897,
+    "start_component_fraction": 0.9995192661662993,
+    "start_component_voxels": 230786
+  },
+  "s1062": {
+    "expert_route_length_mm": 7038.71246892397,
+    "expert_route_voxels": 3484,
+    "segmentation_volume_ml": 1040.279625,
+    "segmentation_voxels": 308231,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 308231
+  },
+  "s1063": {
+    "expert_route_length_mm": 3253.8030828341734,
+    "expert_route_voxels": 1615,
+    "segmentation_volume_ml": 553.732875,
+    "segmentation_voxels": 164069,
+    "start_component_fraction": 0.977216902644619,
+    "start_component_voxels": 160331
+  },
+  "s1077": {
+    "expert_route_length_mm": 424.5789073641257,
+    "expert_route_voxels": 206,
+    "segmentation_volume_ml": 143.21475,
+    "segmentation_voxels": 42434,
+    "start_component_fraction": 0.9999293019748315,
+    "start_component_voxels": 42431
+  },
+  "s1082": {
+    "expert_route_length_mm": 5155.1296589907815,
+    "expert_route_voxels": 2597,
+    "segmentation_volume_ml": 653.06925,
+    "segmentation_voxels": 193502,
+    "start_component_fraction": 0.9797263077384213,
+    "start_component_voxels": 189579
+  },
+  "s1085": {
+    "expert_route_length_mm": 9099.511895114545,
+    "expert_route_voxels": 4962,
+    "segmentation_volume_ml": 1045.342125,
+    "segmentation_voxels": 309731,
+    "start_component_fraction": 0.9978723472949107,
+    "start_component_voxels": 309072
+  },
+  "s1088": {
+    "expert_route_length_mm": 6483.974578552874,
+    "expert_route_voxels": 3238,
+    "segmentation_volume_ml": 1017.96075,
+    "segmentation_voxels": 301618,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 301618
+  },
+  "s1089": {
+    "expert_route_length_mm": 6130.920445298398,
+    "expert_route_voxels": 3043,
+    "segmentation_volume_ml": 957.045375,
+    "segmentation_voxels": 283569,
+    "start_component_fraction": 0.9974186176909323,
+    "start_component_voxels": 282837
+  },
+  "s1098": {
+    "expert_route_length_mm": 5318.505929785782,
+    "expert_route_voxels": 2655,
+    "segmentation_volume_ml": 568.029375,
+    "segmentation_voxels": 168305,
+    "start_component_fraction": 0.9982115801669588,
+    "start_component_voxels": 168004
+  },
+  "s1100": {
+    "expert_route_length_mm": 1150.5670267053858,
+    "expert_route_voxels": 571,
+    "segmentation_volume_ml": 212.3955,
+    "segmentation_voxels": 62932,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 62932
+  },
+  "s1102": {
+    "expert_route_length_mm": 2040.4321411446376,
+    "expert_route_voxels": 1022,
+    "segmentation_volume_ml": 307.357875,
+    "segmentation_voxels": 91069,
+    "start_component_fraction": 0.955989414619684,
+    "start_component_voxels": 87061
+  },
+  "s1103": {
+    "expert_route_length_mm": 6640.713241049665,
+    "expert_route_voxels": 3287,
+    "segmentation_volume_ml": 1100.9723374974133,
+    "segmentation_voxels": 326214,
+    "start_component_fraction": 0.9998681846885786,
+    "start_component_voxels": 326171
+  },
+  "s1105": {
+    "expert_route_length_mm": 5389.847583907655,
+    "expert_route_voxels": 2694,
+    "segmentation_volume_ml": 639.79875,
+    "segmentation_voxels": 189570,
+    "start_component_fraction": 0.9991718098855304,
+    "start_component_voxels": 189413
+  },
+  "s1109": {
+    "expert_route_length_mm": 2991.7879383675954,
+    "expert_route_voxels": 1508,
+    "segmentation_volume_ml": 439.8705,
+    "segmentation_voxels": 130332,
+    "start_component_fraction": 0.9999693091489427,
+    "start_component_voxels": 130328
+  },
+  "s1120": {
+    "expert_route_length_mm": 2937.7737327568007,
+    "expert_route_voxels": 1483,
+    "segmentation_volume_ml": 528.467625,
+    "segmentation_voxels": 156583,
+    "start_component_fraction": 0.9972730117573427,
+    "start_component_voxels": 156156
+  },
+  "s1121": {
+    "expert_route_length_mm": 4515.411370742803,
+    "expert_route_voxels": 2428,
+    "segmentation_volume_ml": 438.6825,
+    "segmentation_voxels": 129980,
+    "start_component_fraction": 0.9900215417756578,
+    "start_component_voxels": 128683
+  },
+  "s1123": {
+    "expert_route_length_mm": 6142.953597768557,
+    "expert_route_voxels": 3076,
+    "segmentation_volume_ml": 1040.718375,
+    "segmentation_voxels": 308361,
+    "start_component_fraction": 0.9945096818339544,
+    "start_component_voxels": 306668
+  },
+  "s1125": {
+    "expert_route_length_mm": 954.20605495797,
+    "expert_route_voxels": 485,
+    "segmentation_volume_ml": 197.667,
+    "segmentation_voxels": 58568,
+    "start_component_fraction": 0.5362996858352684,
+    "start_component_voxels": 31410
+  },
+  "s1131": {
+    "expert_route_length_mm": 8768.743534026922,
+    "expert_route_voxels": 4711,
+    "segmentation_volume_ml": 1104.72525,
+    "segmentation_voxels": 327326,
+    "start_component_fraction": 0.9998472470870019,
+    "start_component_voxels": 327276
+  },
+  "s1135": {
+    "expert_route_length_mm": 10550.359193797787,
+    "expert_route_voxels": 5233,
+    "segmentation_volume_ml": 1541.035125,
+    "segmentation_voxels": 456603,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 456603
+  },
+  "s1144": {
+    "expert_route_length_mm": 1897.3651941783287,
+    "expert_route_voxels": 1080,
+    "segmentation_volume_ml": 118.546875,
+    "segmentation_voxels": 35125,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 35125
+  },
+  "s1145": {
+    "expert_route_length_mm": 4686.934598372482,
+    "expert_route_voxels": 2341,
+    "segmentation_volume_ml": 577.168875,
+    "segmentation_voxels": 171013,
+    "start_component_fraction": 0.9929712945799443,
+    "start_component_voxels": 169811
+  },
+  "s1149": {
+    "expert_route_length_mm": 9842.181241135033,
+    "expert_route_voxels": 5545,
+    "segmentation_volume_ml": 576.271125,
+    "segmentation_voxels": 170747,
+    "start_component_fraction": 0.9992269263881649,
+    "start_component_voxels": 170615
+  },
+  "s1152": {
+    "expert_route_length_mm": 8098.04881370767,
+    "expert_route_voxels": 4119,
+    "segmentation_volume_ml": 1174.516875,
+    "segmentation_voxels": 348005,
+    "start_component_fraction": 0.9999425295613569,
+    "start_component_voxels": 347985
+  },
+  "s1159": {
+    "expert_route_length_mm": 2816.5942729130247,
+    "expert_route_voxels": 1450,
+    "segmentation_volume_ml": 556.9155,
+    "segmentation_voxels": 165012,
+    "start_component_fraction": 0.9941458802996146,
+    "start_component_voxels": 164046
+  },
+  "s1161": {
+    "expert_route_length_mm": 10247.339617244656,
+    "expert_route_voxels": 5175,
+    "segmentation_volume_ml": 1575.585,
+    "segmentation_voxels": 466840,
+    "start_component_fraction": 0.9990896238539971,
+    "start_component_voxels": 466415
+  },
+  "s1162": {
+    "expert_route_length_mm": 364.97901178061,
+    "expert_route_voxels": 184,
+    "segmentation_volume_ml": 86.531625,
+    "segmentation_voxels": 25639,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 25639
+  },
+  "s1171": {
+    "expert_route_length_mm": 2628.2997425520234,
+    "expert_route_voxels": 1329,
+    "segmentation_volume_ml": 577.722375,
+    "segmentation_voxels": 171177,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 171177
+  },
+  "s1174": {
+    "expert_route_length_mm": 5074.54341277385,
+    "expert_route_voxels": 2517,
+    "segmentation_volume_ml": 752.9624401599169,
+    "segmentation_voxels": 223100,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 223100
+  },
+  "s1183": {
+    "expert_route_length_mm": 13312.61418051905,
+    "expert_route_voxels": 7328,
+    "segmentation_volume_ml": 1584.241875,
+    "segmentation_voxels": 469405,
+    "start_component_fraction": 0.9964763903239207,
+    "start_component_voxels": 467751
+  },
+  "s1189": {
+    "expert_route_length_mm": 2517.656426094053,
+    "expert_route_voxels": 1322,
+    "segmentation_volume_ml": 301.29975,
+    "segmentation_voxels": 89274,
+    "start_component_fraction": 0.9998991867733047,
+    "start_component_voxels": 89265
+  },
+  "s1206": {
+    "expert_route_length_mm": 3638.509659874565,
+    "expert_route_voxels": 1808,
+    "segmentation_volume_ml": 509.952375,
+    "segmentation_voxels": 151097,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 151097
+  },
+  "s1207": {
+    "expert_route_length_mm": 5938.09131059649,
+    "expert_route_voxels": 2938,
+    "segmentation_volume_ml": 902.691,
+    "segmentation_voxels": 267464,
+    "start_component_fraction": 0.9997532378189214,
+    "start_component_voxels": 267398
+  },
+  "s1209": {
+    "expert_route_length_mm": 11031.048643350976,
+    "expert_route_voxels": 5437,
+    "segmentation_volume_ml": 1937.759625,
+    "segmentation_voxels": 574151,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 574151
+  },
+  "s1216": {
+    "expert_route_length_mm": 7286.087154666891,
+    "expert_route_voxels": 3633,
+    "segmentation_volume_ml": 1073.655,
+    "segmentation_voxels": 318120,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 318120
+  },
+  "s1221": {
+    "expert_route_length_mm": 910.9140806043438,
+    "expert_route_voxels": 448,
+    "segmentation_volume_ml": 134.058375,
+    "segmentation_voxels": 39721,
+    "start_component_fraction": 0.8840663628810956,
+    "start_component_voxels": 35116
+  },
+  "s1223": {
+    "expert_route_length_mm": 4139.34398304689,
+    "expert_route_voxels": 2090,
+    "segmentation_volume_ml": 637.2574256446619,
+    "segmentation_voxels": 188817,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 188817
+  },
+  "s1228": {
+    "expert_route_length_mm": 6872.205182367865,
+    "expert_route_voxels": 3365,
+    "segmentation_volume_ml": 1456.207875,
+    "segmentation_voxels": 431469,
+    "start_component_fraction": 0.8062711341950407,
+    "start_component_voxels": 347881
+  },
+  "s1230": {
+    "expert_route_length_mm": 8166.808352459056,
+    "expert_route_voxels": 4050,
+    "segmentation_volume_ml": 1440.68625,
+    "segmentation_voxels": 426870,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 426870
+  },
+  "s1233": {
+    "expert_route_length_mm": 7357.39101131164,
+    "expert_route_voxels": 3758,
+    "segmentation_volume_ml": 890.541,
+    "segmentation_voxels": 263864,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 263864
+  },
+  "s1235": {
+    "expert_route_length_mm": 644.7175697476778,
+    "expert_route_voxels": 321,
+    "segmentation_volume_ml": 135.62775,
+    "segmentation_voxels": 40186,
+    "start_component_fraction": 0.9063355397402081,
+    "start_component_voxels": 36422
+  },
+  "s1236": {
+    "expert_route_length_mm": 6772.738800213427,
+    "expert_route_voxels": 3459,
+    "segmentation_volume_ml": 957.0825,
+    "segmentation_voxels": 283580,
+    "start_component_fraction": 0.9987481486705692,
+    "start_component_voxels": 283225
+  },
+  "s1240": {
+    "expert_route_length_mm": 609.8999514678603,
+    "expert_route_voxels": 314,
+    "segmentation_volume_ml": 196.617375,
+    "segmentation_voxels": 58257,
+    "start_component_fraction": 0.9405736649673001,
+    "start_component_voxels": 54795
+  },
+  "s1244": {
+    "expert_route_length_mm": 8330.230598503502,
+    "expert_route_voxels": 4096,
+    "segmentation_volume_ml": 1423.48725,
+    "segmentation_voxels": 421774,
+    "start_component_fraction": 0.986604200353744,
+    "start_component_voxels": 416124
+  },
+  "s1248": {
+    "expert_route_length_mm": 4886.273641412343,
+    "expert_route_voxels": 2475,
+    "segmentation_volume_ml": 694.429875,
+    "segmentation_voxels": 205757,
+    "start_component_fraction": 0.9911497543218457,
+    "start_component_voxels": 203936
+  },
+  "s1249": {
+    "expert_route_length_mm": 7703.084172818701,
+    "expert_route_voxels": 3993,
+    "segmentation_volume_ml": 788.77125,
+    "segmentation_voxels": 233710,
+    "start_component_fraction": 0.9998288477172564,
+    "start_component_voxels": 233670
+  },
+  "s1251": {
+    "expert_route_length_mm": 4532.789007866783,
+    "expert_route_voxels": 2213,
+    "segmentation_volume_ml": 827.51625,
+    "segmentation_voxels": 245190,
+    "start_component_fraction": 0.9755332599208777,
+    "start_component_voxels": 239191
+  },
+  "s1256": {
+    "expert_route_length_mm": 3777.594458631066,
+    "expert_route_voxels": 1828,
+    "segmentation_volume_ml": 590.290875,
+    "segmentation_voxels": 174901,
+    "start_component_fraction": 0.9999942824798028,
+    "start_component_voxels": 174900
+  },
+  "s1257": {
+    "expert_route_length_mm": 1982.872113233019,
+    "expert_route_voxels": 1118,
+    "segmentation_volume_ml": 98.03025,
+    "segmentation_voxels": 29046,
+    "start_component_fraction": 0.9985540177649246,
+    "start_component_voxels": 29004
+  },
+  "s1262": {
+    "expert_route_length_mm": 2395.1864437673985,
+    "expert_route_voxels": 1236,
+    "segmentation_volume_ml": 526.570875,
+    "segmentation_voxels": 156021,
+    "start_component_fraction": 0.9896039635690067,
+    "start_component_voxels": 154399
+  },
+  "s1264": {
+    "expert_route_length_mm": 822.5097570217121,
+    "expert_route_voxels": 413,
+    "segmentation_volume_ml": 243.590625,
+    "segmentation_voxels": 72175,
+    "start_component_fraction": 0.9505091790786283,
+    "start_component_voxels": 68603
+  },
+  "s1267": {
+    "expert_route_length_mm": 5579.619083056856,
+    "expert_route_voxels": 2781,
+    "segmentation_volume_ml": 1152.019125,
+    "segmentation_voxels": 341339,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 341339
+  },
+  "s1272": {
+    "expert_route_length_mm": 392.4116117711194,
+    "expert_route_voxels": 197,
+    "segmentation_volume_ml": 91.179,
+    "segmentation_voxels": 27016,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 27016
+  },
+  "s1273": {
+    "expert_route_length_mm": 5973.987341360377,
+    "expert_route_voxels": 3007,
+    "segmentation_volume_ml": 1139.565375,
+    "segmentation_voxels": 337649,
+    "start_component_fraction": 0.9999052270256983,
+    "start_component_voxels": 337617
+  },
+  "s1283": {
+    "expert_route_length_mm": 7782.055088198447,
+    "expert_route_voxels": 3818,
+    "segmentation_volume_ml": 1118.269125,
+    "segmentation_voxels": 331339,
+    "start_component_fraction": 0.998702235474846,
+    "start_component_voxels": 330909
+  },
+  "s1285": {
+    "expert_route_length_mm": 1618.6408343869834,
+    "expert_route_voxels": 807,
+    "segmentation_volume_ml": 286.8345,
+    "segmentation_voxels": 84988,
+    "start_component_fraction": 0.9858215277450935,
+    "start_component_voxels": 83783
+  },
+  "s1288": {
+    "expert_route_length_mm": 3102.328737460203,
+    "expert_route_voxels": 1516,
+    "segmentation_volume_ml": 345.893625,
+    "segmentation_voxels": 102487,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 102487
+  },
+  "s1291": {
+    "expert_route_length_mm": 6367.965625573232,
+    "expert_route_voxels": 3281,
+    "segmentation_volume_ml": 745.925625,
+    "segmentation_voxels": 221015,
+    "start_component_fraction": 0.9967830237766667,
+    "start_component_voxels": 220304
+  },
+  "s1296": {
+    "expert_route_length_mm": 1141.2870036821214,
+    "expert_route_voxels": 556,
+    "segmentation_volume_ml": 177.74775,
+    "segmentation_voxels": 52666,
+    "start_component_fraction": 0.9524361067861619,
+    "start_component_voxels": 50161
+  },
+  "s1297": {
+    "expert_route_length_mm": 5343.967967027815,
+    "expert_route_voxels": 2670,
+    "segmentation_volume_ml": 867.688875,
+    "segmentation_voxels": 257093,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 257093
+  },
+  "s1301": {
+    "expert_route_length_mm": 6098.455195152856,
+    "expert_route_voxels": 2988,
+    "segmentation_volume_ml": 894.0645,
+    "segmentation_voxels": 264908,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 264908
+  },
+  "s1304": {
+    "expert_route_length_mm": 9953.3976572385,
+    "expert_route_voxels": 4873,
+    "segmentation_volume_ml": 1470.011625,
+    "segmentation_voxels": 435559,
+    "start_component_fraction": 0.999990816399156,
+    "start_component_voxels": 435555
+  },
+  "s1307": {
+    "expert_route_length_mm": 7705.10303576868,
+    "expert_route_voxels": 3849,
+    "segmentation_volume_ml": 939.090375,
+    "segmentation_voxels": 278249,
+    "start_component_fraction": 0.9999928121933951,
+    "start_component_voxels": 278247
+  },
+  "s1309": {
+    "expert_route_length_mm": 11679.617610513273,
+    "expert_route_voxels": 6465,
+    "segmentation_volume_ml": 1361.65725,
+    "segmentation_voxels": 403454,
+    "start_component_fraction": 0.9990135182697408,
+    "start_component_voxels": 403056
+  },
+  "s1310": {
+    "expert_route_length_mm": 6642.7490880077985,
+    "expert_route_voxels": 3336,
+    "segmentation_volume_ml": 850.2570675723553,
+    "segmentation_voxels": 251928,
+    "start_component_fraction": 0.9997816836556477,
+    "start_component_voxels": 251873
+  },
+  "s1314": {
+    "expert_route_length_mm": 4899.317362381356,
+    "expert_route_voxels": 2482,
+    "segmentation_volume_ml": 698.344875,
+    "segmentation_voxels": 206917,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 206917
+  },
+  "s1319": {
+    "expert_route_length_mm": 5095.474080408054,
+    "expert_route_voxels": 2551,
+    "segmentation_volume_ml": 655.320375,
+    "segmentation_voxels": 194169,
+    "start_component_fraction": 0.999989699694596,
+    "start_component_voxels": 194167
+  },
+  "s1321": {
+    "expert_route_length_mm": 4131.773861767823,
+    "expert_route_voxels": 2063,
+    "segmentation_volume_ml": 573.260625,
+    "segmentation_voxels": 169855,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 169855
+  },
+  "s1322": {
+    "expert_route_length_mm": 4118.195758445767,
+    "expert_route_voxels": 2116,
+    "segmentation_volume_ml": 672.721875,
+    "segmentation_voxels": 199325,
+    "start_component_fraction": 0.999989966135708,
+    "start_component_voxels": 199323
+  },
+  "s1326": {
+    "expert_route_length_mm": 10607.65888961579,
+    "expert_route_voxels": 5294,
+    "segmentation_volume_ml": 1374.141375,
+    "segmentation_voxels": 407153,
+    "start_component_fraction": 0.9999803513666853,
+    "start_component_voxels": 407145
+  },
+  "s1329": {
+    "expert_route_length_mm": 342.0679820636958,
+    "expert_route_voxels": 177,
+    "segmentation_volume_ml": 89.48475,
+    "segmentation_voxels": 26514,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 26514
+  },
+  "s1336": {
+    "expert_route_length_mm": 5824.735372757128,
+    "expert_route_voxels": 2876,
+    "segmentation_volume_ml": 979.91775,
+    "segmentation_voxels": 290346,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 290346
+  },
+  "s1339": {
+    "expert_route_length_mm": 5490.213876050675,
+    "expert_route_voxels": 2796,
+    "segmentation_volume_ml": 925.7389485711158,
+    "segmentation_voxels": 274293,
+    "start_component_fraction": 0.99970469534403,
+    "start_component_voxels": 274212
+  },
+  "s1340": {
+    "expert_route_length_mm": 6012.554543319606,
+    "expert_route_voxels": 3324,
+    "segmentation_volume_ml": 837.145125,
+    "segmentation_voxels": 248043,
+    "start_component_fraction": 0.9996774752764641,
+    "start_component_voxels": 247963
+  },
+  "s1344": {
+    "expert_route_length_mm": 5844.682208864889,
+    "expert_route_voxels": 2873,
+    "segmentation_volume_ml": 806.7194999999949,
+    "segmentation_voxels": 239028,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 239028
+  },
+  "s1347": {
+    "expert_route_length_mm": 7254.5623040829305,
+    "expert_route_voxels": 3594,
+    "segmentation_volume_ml": 1008.838125,
+    "segmentation_voxels": 298915,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 298915
+  },
+  "s1348": {
+    "expert_route_length_mm": 4387.839433337696,
+    "expert_route_voxels": 2180,
+    "segmentation_volume_ml": 739.881,
+    "segmentation_voxels": 219224,
+    "start_component_fraction": 0.9999771922782177,
+    "start_component_voxels": 219219
+  },
+  "s1350": {
+    "expert_route_length_mm": 14946.74586550851,
+    "expert_route_voxels": 8501,
+    "segmentation_volume_ml": 1039.840875,
+    "segmentation_voxels": 308101,
+    "start_component_fraction": 0.9992697199944174,
+    "start_component_voxels": 307876
+  },
+  "s1354": {
+    "expert_route_length_mm": 2039.7575589955259,
+    "expert_route_voxels": 1026,
+    "segmentation_volume_ml": 340.7265,
+    "segmentation_voxels": 100956,
+    "start_component_fraction": 0.9929969491659733,
+    "start_component_voxels": 100249
+  },
+  "s1358": {
+    "expert_route_length_mm": 5037.1732985883355,
+    "expert_route_voxels": 2610,
+    "segmentation_volume_ml": 469.236375,
+    "segmentation_voxels": 139033,
+    "start_component_fraction": 0.9994102119640661,
+    "start_component_voxels": 138951
+  },
+  "s1361": {
+    "expert_route_length_mm": 6239.800953394455,
+    "expert_route_voxels": 3175,
+    "segmentation_volume_ml": 965.70225,
+    "segmentation_voxels": 286134,
+    "start_component_fraction": 0.9993045216576849,
+    "start_component_voxels": 285935
+  },
+  "s1362": {
+    "expert_route_length_mm": 6876.498461446305,
+    "expert_route_voxels": 3396,
+    "segmentation_volume_ml": 1153.9665,
+    "segmentation_voxels": 341916,
+    "start_component_fraction": 0.9998537652522842,
+    "start_component_voxels": 341866
+  },
+  "s1364": {
+    "expert_route_length_mm": 10762.808744624912,
+    "expert_route_voxels": 5761,
+    "segmentation_volume_ml": 1131.222375,
+    "segmentation_voxels": 335177,
+    "start_component_fraction": 0.9998567920829889,
+    "start_component_voxels": 335129
+  },
+  "s1365": {
+    "expert_route_length_mm": 6556.2927756221325,
+    "expert_route_voxels": 3312,
+    "segmentation_volume_ml": 699.451875,
+    "segmentation_voxels": 207245,
+    "start_component_fraction": 0.9983883809018311,
+    "start_component_voxels": 206911
+  },
+  "s1366": {
+    "expert_route_length_mm": 4985.37032409235,
+    "expert_route_voxels": 2488,
+    "segmentation_volume_ml": 754.60275,
+    "segmentation_voxels": 223586,
+    "start_component_fraction": 0.9955677010188473,
+    "start_component_voxels": 222595
+  },
+  "s1367": {
+    "expert_route_length_mm": 8862.187326407366,
+    "expert_route_voxels": 4386,
+    "segmentation_volume_ml": 1283.401125,
+    "segmentation_voxels": 380267,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 380267
+  },
+  "s1368": {
+    "expert_route_length_mm": 7856.697044130127,
+    "expert_route_voxels": 4152,
+    "segmentation_volume_ml": 1218.9015,
+    "segmentation_voxels": 361156,
+    "start_component_fraction": 0.9999944622268493,
+    "start_component_voxels": 361154
+  },
+  "s1369": {
+    "expert_route_length_mm": 7004.133786812472,
+    "expert_route_voxels": 3481,
+    "segmentation_volume_ml": 1101.627,
+    "segmentation_voxels": 326408,
+    "start_component_fraction": 0.999843753829563,
+    "start_component_voxels": 326357
+  },
+  "s1374": {
+    "expert_route_length_mm": 4527.522397112084,
+    "expert_route_voxels": 2232,
+    "segmentation_volume_ml": 683.073,
+    "segmentation_voxels": 202392,
+    "start_component_fraction": 0.9999950590932448,
+    "start_component_voxels": 202391
+  },
+  "s1375": {
+    "expert_route_length_mm": 6941.848886094543,
+    "expert_route_voxels": 3474,
+    "segmentation_volume_ml": 1385.056125,
+    "segmentation_voxels": 410387,
+    "start_component_fraction": 0.9966616876265574,
+    "start_component_voxels": 409017
+  },
+  "s1384": {
+    "expert_route_length_mm": 3350.3701260420876,
+    "expert_route_voxels": 1684,
+    "segmentation_volume_ml": 615.6135,
+    "segmentation_voxels": 182404,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 182404
+  },
+  "s1386": {
+    "expert_route_length_mm": 6718.419064099271,
+    "expert_route_voxels": 3359,
+    "segmentation_volume_ml": 904.00725,
+    "segmentation_voxels": 267854,
+    "start_component_fraction": 0.9994325266749796,
+    "start_component_voxels": 267702
+  },
+  "s1387": {
+    "expert_route_length_mm": 8377.31694700474,
+    "expert_route_voxels": 4119,
+    "segmentation_volume_ml": 1532.91825,
+    "segmentation_voxels": 454198,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 454198
+  },
+  "s1388": {
+    "expert_route_length_mm": 6920.269815081956,
+    "expert_route_voxels": 3400,
+    "segmentation_volume_ml": 805.5585,
+    "segmentation_voxels": 238684,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 238684
+  },
+  "s1389": {
+    "expert_route_length_mm": 345.18989280196183,
+    "expert_route_voxels": 171,
+    "segmentation_volume_ml": 80.26088137856127,
+    "segmentation_voxels": 23781,
+    "start_component_fraction": 0.9995374458601405,
+    "start_component_voxels": 23770
+  },
+  "s1390": {
+    "expert_route_length_mm": 7294.323815155101,
+    "expert_route_voxels": 3600,
+    "segmentation_volume_ml": 1278.824625,
+    "segmentation_voxels": 378911,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 378911
+  },
+  "s1391": {
+    "expert_route_length_mm": 6546.869428705824,
+    "expert_route_voxels": 3238,
+    "segmentation_volume_ml": 1438.56,
+    "segmentation_voxels": 426240,
+    "start_component_fraction": 0.9997513138138138,
+    "start_component_voxels": 426134
+  },
+  "s1394": {
+    "expert_route_length_mm": 7203.915261706485,
+    "expert_route_voxels": 3579,
+    "segmentation_volume_ml": 1419.498,
+    "segmentation_voxels": 420592,
+    "start_component_fraction": 0.9999786015901396,
+    "start_component_voxels": 420583
+  },
+  "s1397": {
+    "expert_route_length_mm": 6614.06281383313,
+    "expert_route_voxels": 3279,
+    "segmentation_volume_ml": 1277.488125,
+    "segmentation_voxels": 378515,
+    "start_component_fraction": 0.9996776878062956,
+    "start_component_voxels": 378393
+  },
+  "s1400": {
+    "expert_route_length_mm": 5436.468179948222,
+    "expert_route_voxels": 2697,
+    "segmentation_volume_ml": 991.5885,
+    "segmentation_voxels": 293804,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 293804
+  },
+  "s1401": {
+    "expert_route_length_mm": 6160.398311105508,
+    "expert_route_voxels": 3269,
+    "segmentation_volume_ml": 694.143,
+    "segmentation_voxels": 205672,
+    "start_component_fraction": 0.9995089268349605,
+    "start_component_voxels": 205571
+  },
+  "s1405": {
+    "expert_route_length_mm": 5425.792861163899,
+    "expert_route_voxels": 2690,
+    "segmentation_volume_ml": 888.188625,
+    "segmentation_voxels": 263167,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 263167
+  },
+  "s1411": {
+    "expert_route_length_mm": 4727.6696524089375,
+    "expert_route_voxels": 2312,
+    "segmentation_volume_ml": 811.70775,
+    "segmentation_voxels": 240506,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 240506
+  },
+  "s1414": {
+    "expert_route_length_mm": 3905.8071597515345,
+    "expert_route_voxels": 1923,
+    "segmentation_volume_ml": 723.677625,
+    "segmentation_voxels": 214423,
+    "start_component_fraction": 0.9405380952603032,
+    "start_component_voxels": 201673
+  },
+  "s1420": {
+    "expert_route_length_mm": 465.476824907033,
+    "expert_route_voxels": 241,
+    "segmentation_volume_ml": 184.156875,
+    "segmentation_voxels": 54565,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 54565
+  },
+  "s1423": {
+    "expert_route_length_mm": 8641.607793519777,
+    "expert_route_voxels": 4722,
+    "segmentation_volume_ml": 1038.531375,
+    "segmentation_voxels": 307713,
+    "start_component_fraction": 0.9943973767764118,
+    "start_component_voxels": 305989
+  },
+  "s1425": {
+    "expert_route_length_mm": 6811.683810380169,
+    "expert_route_voxels": 3813,
+    "segmentation_volume_ml": 1029.594375,
+    "segmentation_voxels": 305065,
+    "start_component_fraction": 0.9999967220100634,
+    "start_component_voxels": 305064
+  },
+  "s1428": {
+    "expert_route_length_mm": 1628.4129123256257,
+    "expert_route_voxels": 816,
+    "segmentation_volume_ml": 286.135875,
+    "segmentation_voxels": 84781,
+    "start_component_fraction": 1.0,
+    "start_component_voxels": 84781
+  }
+}

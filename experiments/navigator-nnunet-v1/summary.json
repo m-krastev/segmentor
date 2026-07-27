@@ -1,0 +1,22 @@
+{
+  "cache_dir": "/home/matey/project/segmentor/results/navigator_nnunet/cache",
+  "created_at": "2026-07-26T13:50:32.069371+00:00",
+  "discovered_cases": 585,
+  "eligible_cases": 468,
+  "generate_expert_path": true,
+  "manifest_sha256": {
+    "test.txt": "06131dd9291e29ceb7e85a4c890b0f4e2a8fe8dee28df14f8e56fe1af0c55245",
+    "train.txt": "bf7a4bbf5e3c5b66e3d9cf02bbf0e99c65af55e34856ccbfc66c62678808e087",
+    "validation.txt": "7473d155ef5da2e2d7008a1318506f149c90e8d3f98db69cf3d4b204e2265bcc"
+  },
+  "nnunet_raw": "/home/matey/project/segmentor/data/nnunet/nnUNet_raw",
+  "rejected_cases": 117,
+  "schema_version": 1,
+  "seed": 42,
+  "split_counts": {
+    "test": 48,
+    "train": 374,
+    "validation": 46
+  },
+  "voxel_size_mm": 1.5
+}
