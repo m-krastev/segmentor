@@ -6,6 +6,7 @@ from tensordict.nn import set_composite_lp_aggregate
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
 from torchrl.envs.utils import ExplorationType
+from torchrl.modules import set_recurrent_mode
 
 from navigator.config import Config
 from navigator.models import create_ppo_modules
@@ -14,6 +15,7 @@ from navigator.pretrain import _behavior_cloning_action
 from navigator.train import (
     deterministic_exploration_type,
     log_tensorboard,
+    recurrent_minibatches,
     validation_rank,
 )
 
@@ -54,6 +56,23 @@ class NavigatorPpoSmokeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "deterministic_action_statistic"):
             Config(deterministic_action_statistic="median")
+
+    def test_categorical_actions_require_recurrent_mode_evaluation(self):
+        with self.assertRaisesRegex(ValueError, "recurrent policy"):
+            Config(
+                action_distribution="categorical",
+                deterministic_action_statistic="mode",
+            )
+        with self.assertRaisesRegex(ValueError, "deterministic mode"):
+            Config(
+                action_distribution="categorical",
+                memory_model="gru",
+            )
+        with self.assertRaisesRegex(ValueError, "deterministic mode"):
+            Config(
+                action_distribution="factorized_categorical",
+                memory_model="gru",
+            )
 
     def test_validation_rank_prioritizes_complete_traversal(self):
         incomplete = {
@@ -204,6 +223,432 @@ class NavigatorPpoSmokeTest(unittest.TestCase):
         self.assertTrue(
             all(
                 parameter.grad is None or torch.isfinite(parameter.grad).all()
+                for parameter in loss_module.parameters()
+            )
+        )
+
+    def test_recurrent_minibatches_preserve_sequence_order(self):
+        rollout = TensorDict(
+            {"step": torch.arange(20)},
+            batch_size=[20],
+        )
+        minibatches = list(
+            recurrent_minibatches(
+                rollout,
+                sequence_length=4,
+                batch_size=8,
+            )
+        )
+
+        self.assertEqual(sum(batch.numel() for batch in minibatches), 20)
+        for batch in minibatches:
+            differences = batch["step"][:, 1:] - batch["step"][:, :-1]
+            self.assertTrue(torch.equal(differences, torch.ones_like(differences)))
+
+    def test_recurrent_actor_critic_share_encoder_and_support_ppo(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        set_composite_lp_aggregate(False).set()
+
+        for memory_model in ("gru", "s5"):
+            with self.subTest(memory_model=memory_model):
+                config = Config(
+                    device=str(device),
+                    patch_size_mm=8,
+                    voxel_size_mm=1.0,
+                    memory_model=memory_model,
+                    memory_hidden_size=16,
+                    s5_state_size=16,
+                    recurrent_sequence_length=4,
+                )
+                policy, value = create_ppo_modules(config, device)
+                shared_parameters = {
+                    id(parameter) for parameter in policy.parameters()
+                } & {id(parameter) for parameter in value.parameters()}
+                self.assertTrue(shared_parameters)
+
+                batch_size = torch.Size([2, 4])
+                current = {
+                    "actor": torch.randn(
+                        *batch_size,
+                        config.observation_channels,
+                        *config.patch_size_vox,
+                        device=device,
+                    ),
+                    "context": torch.randn(
+                        *batch_size,
+                        config.context_features,
+                        device=device,
+                    ),
+                    "is_init": torch.zeros(
+                        *batch_size,
+                        1,
+                        dtype=torch.bool,
+                        device=device,
+                    ),
+                }
+                current["is_init"][:, 0] = True
+                next_data = {
+                    "actor": torch.randn(
+                        *batch_size,
+                        config.observation_channels,
+                        *config.patch_size_vox,
+                        device=device,
+                    ),
+                    "context": torch.randn(
+                        *batch_size,
+                        config.context_features,
+                        device=device,
+                    ),
+                    "is_init": torch.zeros(
+                        *batch_size,
+                        1,
+                        dtype=torch.bool,
+                        device=device,
+                    ),
+                    "reward": torch.randn(*batch_size, 1, device=device),
+                    "done": torch.zeros(
+                        *batch_size,
+                        1,
+                        dtype=torch.bool,
+                        device=device,
+                    ),
+                    "terminated": torch.zeros(
+                        *batch_size,
+                        1,
+                        dtype=torch.bool,
+                        device=device,
+                    ),
+                }
+                if memory_model == "gru":
+                    state_shape = (
+                        *batch_size,
+                        config.memory_num_layers,
+                        config.memory_hidden_size,
+                    )
+                    current["recurrent_state"] = torch.zeros(
+                        state_shape,
+                        device=device,
+                    )
+                    next_data["recurrent_state"] = torch.zeros(
+                        state_shape,
+                        device=device,
+                    )
+                else:
+                    state_shape = (*batch_size, config.s5_state_size, 2)
+                    current["s5_state"] = torch.zeros(state_shape, device=device)
+                    next_data["s5_state"] = torch.zeros(state_shape, device=device)
+
+                rollout = TensorDict(
+                    current
+                    | {
+                        "next": TensorDict(
+                            next_data,
+                            batch_size=batch_size,
+                            device=device,
+                        )
+                    },
+                    batch_size=batch_size,
+                    device=device,
+                )
+                with set_recurrent_mode(True):
+                    with torch.no_grad():
+                        policy(rollout)
+                    advantage = GAE(
+                        gamma=config.gamma,
+                        lmbda=config.gae_lambda,
+                        value_network=value,
+                        average_gae=True,
+                        deactivate_vmap=True,
+                    )
+                    advantage(rollout)
+                    loss_module = ClipPPOLoss(
+                        actor_network=policy,
+                        critic_network=value,
+                        clip_epsilon=config.clip_epsilon,
+                        entropy_coeff=config.ent_coef,
+                        entropy_bonus=True,
+                        critic_coeff=config.vf_coef,
+                        loss_critic_type="smooth_l1",
+                        normalize_advantage=False,
+                    )
+                    losses = loss_module(rollout)
+                    total_loss = (
+                        losses["loss_objective"]
+                        + losses["loss_entropy"]
+                        + losses["loss_critic"]
+                    )
+                total_loss.backward()
+
+                self.assertTrue(torch.isfinite(total_loss))
+                self.assertTrue(
+                    all(
+                        parameter.grad is None
+                        or torch.isfinite(parameter.grad).all()
+                        for parameter in loss_module.parameters()
+                    )
+                )
+
+    def test_categorical_recurrent_policy_supports_ppo_backward(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        set_composite_lp_aggregate(False).set()
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            memory_model="gru",
+            memory_hidden_size=16,
+            recurrent_sequence_length=4,
+            action_distribution="categorical",
+            deterministic_action_statistic="mode",
+        )
+        policy, value = create_ppo_modules(config, device)
+        batch_size = torch.Size([2, 4])
+        state_shape = (
+            *batch_size,
+            config.memory_num_layers,
+            config.memory_hidden_size,
+        )
+        current = {
+            "actor": torch.randn(
+                *batch_size,
+                config.observation_channels,
+                *config.patch_size_vox,
+                device=device,
+            ),
+            "context": torch.randn(
+                *batch_size,
+                config.context_features,
+                device=device,
+            ),
+            "is_init": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "recurrent_state": torch.zeros(state_shape, device=device),
+        }
+        current["is_init"][:, 0] = True
+        next_data = {
+            "actor": torch.randn(
+                *batch_size,
+                config.observation_channels,
+                *config.patch_size_vox,
+                device=device,
+            ),
+            "context": torch.randn(
+                *batch_size,
+                config.context_features,
+                device=device,
+            ),
+            "is_init": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "recurrent_state": torch.zeros(state_shape, device=device),
+            "reward": torch.randn(*batch_size, 1, device=device),
+            "done": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "terminated": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+        }
+        rollout = TensorDict(
+            current
+            | {
+                "next": TensorDict(
+                    next_data,
+                    batch_size=batch_size,
+                    device=device,
+                )
+            },
+            batch_size=batch_size,
+            device=device,
+        )
+        with set_recurrent_mode(True):
+            with torch.no_grad():
+                policy(rollout)
+            GAE(
+                gamma=config.gamma,
+                lmbda=config.gae_lambda,
+                value_network=value,
+                average_gae=True,
+                deactivate_vmap=True,
+            )(rollout)
+            loss_module = ClipPPOLoss(
+                actor_network=policy,
+                critic_network=value,
+                clip_epsilon=config.clip_epsilon,
+                entropy_coeff=config.ent_coef,
+                entropy_bonus=True,
+                critic_coeff=config.vf_coef,
+                loss_critic_type="smooth_l1",
+                normalize_advantage=False,
+            )
+            losses = loss_module(rollout)
+            total_loss = (
+                losses["loss_objective"]
+                + losses["loss_entropy"]
+                + losses["loss_critic"]
+            )
+        total_loss.backward()
+
+        self.assertEqual(rollout["action"].shape, batch_size)
+        self.assertEqual(rollout["action"].dtype, torch.int64)
+        self.assertEqual(
+            rollout["logits"].shape,
+            torch.Size([*batch_size, config.categorical_action_count]),
+        )
+        self.assertTrue(torch.isfinite(total_loss))
+        self.assertTrue(
+            all(
+                parameter.grad is None
+                or torch.isfinite(parameter.grad).all()
+                for parameter in loss_module.parameters()
+            )
+        )
+
+    def test_factorized_categorical_recurrent_policy_supports_ppo_backward(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        set_composite_lp_aggregate(False).set()
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            memory_model="gru",
+            memory_hidden_size=16,
+            recurrent_sequence_length=4,
+            action_distribution="factorized_categorical",
+            deterministic_action_statistic="mode",
+        )
+        policy, value = create_ppo_modules(config, device)
+        batch_size = torch.Size([2, 4])
+        state_shape = (
+            *batch_size,
+            config.memory_num_layers,
+            config.memory_hidden_size,
+        )
+        current = {
+            "actor": torch.randn(
+                *batch_size,
+                config.observation_channels,
+                *config.patch_size_vox,
+                device=device,
+            ),
+            "context": torch.randn(
+                *batch_size,
+                config.context_features,
+                device=device,
+            ),
+            "is_init": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "recurrent_state": torch.zeros(state_shape, device=device),
+        }
+        current["is_init"][:, 0] = True
+        next_data = {
+            "actor": torch.randn(
+                *batch_size,
+                config.observation_channels,
+                *config.patch_size_vox,
+                device=device,
+            ),
+            "context": torch.randn(
+                *batch_size,
+                config.context_features,
+                device=device,
+            ),
+            "is_init": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "recurrent_state": torch.zeros(state_shape, device=device),
+            "reward": torch.randn(*batch_size, 1, device=device),
+            "done": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "terminated": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+        }
+        rollout = TensorDict(
+            current
+            | {
+                "next": TensorDict(
+                    next_data,
+                    batch_size=batch_size,
+                    device=device,
+                )
+            },
+            batch_size=batch_size,
+            device=device,
+        )
+        with set_recurrent_mode(True):
+            with torch.no_grad():
+                policy(rollout)
+            GAE(
+                gamma=config.gamma,
+                lmbda=config.gae_lambda,
+                value_network=value,
+                average_gae=True,
+                deactivate_vmap=True,
+            )(rollout)
+            loss_module = ClipPPOLoss(
+                actor_network=policy,
+                critic_network=value,
+                clip_epsilon=config.clip_epsilon,
+                entropy_coeff=config.ent_coef,
+                entropy_bonus=True,
+                critic_coeff=config.vf_coef,
+                loss_critic_type="smooth_l1",
+                normalize_advantage=False,
+            )
+            losses = loss_module(rollout)
+            total_loss = (
+                losses["loss_objective"]
+                + losses["loss_entropy"]
+                + losses["loss_critic"]
+            )
+        total_loss.backward()
+
+        self.assertEqual(rollout["action"].shape, torch.Size([*batch_size, 3]))
+        self.assertEqual(rollout["action"].dtype, torch.int64)
+        self.assertEqual(
+            rollout["logits"].shape,
+            torch.Size(
+                [
+                    *batch_size,
+                    3,
+                    config.factorized_axis_action_count,
+                ]
+            ),
+        )
+        self.assertEqual(rollout["action_log_prob"].shape, batch_size)
+        self.assertTrue(torch.isfinite(total_loss))
+        self.assertTrue(
+            all(
+                parameter.grad is None
+                or torch.isfinite(parameter.grad).all()
                 for parameter in loss_module.parameters()
             )
         )

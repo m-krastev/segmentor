@@ -16,6 +16,7 @@ try:
 except ImportError:
     from torchrl.collectors import Collector as SyncDataCollector
 from torchrl.envs.utils import ExplorationType, set_exploration_type
+from torchrl.modules import set_recurrent_mode
 from torchrl.objectives import (
     ClipPPOLoss,
     SoftUpdate,
@@ -33,7 +34,10 @@ except ImportError:
 
 # Your project components
 from .config import Config
-from .dataset import SmallBowelDataset  # Keep for creating the iterator
+from .dataset import (
+    SmallBowelDataset,
+    load_nnunet_evaluation_target,
+)
 
 # Use the TorchRL environment wrapper and factory function
 from .environment import make_sb_env
@@ -123,6 +127,31 @@ def deterministic_exploration_type(config: Config) -> ExplorationType:
     )
 
 
+def recurrent_minibatches(batch_data, sequence_length: int, batch_size: int):
+    """Yield shuffled contiguous sequence minibatches.
+
+    Recurrent state stored at the first transition of each chunk initializes
+    the memory model. Transitions within a chunk are never shuffled.
+    """
+
+    total_steps = batch_data.numel()
+    full_sequences = total_steps // sequence_length
+    sequences_per_batch = max(1, batch_size // sequence_length)
+
+    if full_sequences:
+        sequence_data = batch_data[: full_sequences * sequence_length].reshape(
+            full_sequences,
+            sequence_length,
+        )
+        order = torch.randperm(full_sequences, device=batch_data.device)
+        for start in range(0, full_sequences, sequences_per_batch):
+            yield sequence_data[order[start : start + sequences_per_batch]]
+
+    tail_start = full_sequences * sequence_length
+    if tail_start < total_steps:
+        yield batch_data[tail_start:].unsqueeze(0)
+
+
 # --- Validation Loop (Adaptation Needed) ---
 def validation_loop_torchrl(
     actor_module,  # Pass the trained policy module
@@ -158,7 +187,9 @@ def validation_loop_torchrl(
         1,
         check_env=False,
         shuffle=False,
+        policy=actor_module,
     )
+    tracking_env = val_env.base_env if config.memory_model != "none" else val_env
 
     num_val_subjects = len(val_dataset)
 
@@ -191,12 +222,27 @@ def validation_loop_torchrl(
                     reward = rollout["next", "reward"].mean().item()
                     total_reward = rollout["next", "info", "total_reward"].sum().item()
                     step_count = rollout["action"].shape[1]
-                    path = val_env.get_tracking_history()
+                    path = tracking_env.get_tracking_history()
+                    if config.annotation_free:
+                        evaluation_target = load_nnunet_evaluation_target(
+                            config.nnunet_raw_dir,
+                            config.nnunet_cache_dir,
+                            tracking_env._current_subject_data["id"],
+                        )
+                        target_mask = evaluation_target["segmentation"]
+                        evaluation_goal = evaluation_target["goal"]
+                        evaluation_spacing = evaluation_target["spacing"]
+                    else:
+                        target_mask = tracking_env.seg.numpy(force=True)
+                        evaluation_goal = tracking_env.goal
+                        evaluation_spacing = tuple(
+                            float(value) for value in tracking_env.spacing
+                        )
                     independent_metrics = compute_path_metrics(
-                        val_env.seg.numpy(force=True),
+                        target_mask,
                         path,
-                        val_env.goal,
-                        tuple(float(value) for value in val_env.spacing),
+                        evaluation_goal,
+                        evaluation_spacing,
                         config.cumulative_path_radius_mm,
                         config.endpoint_tolerance_mm,
                         config.success_coverage_threshold,
@@ -207,7 +253,7 @@ def validation_loop_torchrl(
                     endpoint_reached = float(independent_metrics.endpoint_reached)
 
                     paths.append(path)
-                    path_masks.append(val_env.get_tracking_mask())
+                    path_masks.append(tracking_env.get_tracking_mask())
                     intermediate_results.append(
                         (
                             reward,
@@ -246,11 +292,11 @@ def validation_loop_torchrl(
             path_mask = path_masks[best_run]
 
             # Save the best path and mask
-            case_id = val_env._current_subject_data["id"]
+            case_id = tracking_env._current_subject_data["id"]
             if config.validation_save_paths:
-                val_env.tracking_path_history = path
-                val_env.cumulative_path_mask = path_mask
-                val_env.save_path(save_path / case_id)
+                tracking_env.tracking_path_history = path
+                tracking_env.cumulative_path_mask = path_mask
+                tracking_env.save_path(save_path / case_id)
 
             val_results["case"].append(case_id)
             val_results["reward"].append(reward)
@@ -343,8 +389,10 @@ def _train_torchrl(
     batch_size = getattr(config, "batch_size", 32)
 
     print(
-        f"Total trainable parameters: {sum(p.numel() for p in policy_module.parameters()) + sum(p.numel() for p in value_module.parameters())}"
+        "Total unique trainable parameters: "
+        f"{sum(p.numel() for p in {id(p): p for p in [*policy_module.parameters(), *value_module.parameters()]}.values())}"
     )
+    recurrent_policy = config.memory_model != "none"
 
     # --- Loss Function ---
     # loss_module = KLPENPPOLoss(
@@ -361,6 +409,9 @@ def _train_torchrl(
             # GAE standardizes once over the full rollout. Renormalizing each
             # temporal minibatch changes advantage signs and destabilizes PPO.
             normalize_advantage=False,
+            # Optionally prevent a much larger critic gradient from dominating
+            # the shared visual encoder and recurrent memory.
+            separate_losses=config.separate_actor_critic_losses,
         )
         if not qnets
         else TD3Loss(
@@ -380,7 +431,17 @@ def _train_torchrl(
         # policy_module.parameters(),
         loss_module.parameters(),
         lr=config.learning_rate,
+        # Recurrent dynamics are sensitive to decay on transition and time
+        # constants. Keep the GRU/S5 comparison matched and decay-free.
+        weight_decay=0.0 if recurrent_policy else 0.01,
     )
+    policy_parameters = list(policy_module.parameters())
+    policy_parameter_ids = {id(parameter) for parameter in policy_parameters}
+    value_only_parameters = [
+        parameter
+        for parameter in value_module.parameters()
+        if id(parameter) not in policy_parameter_ids
+    ]
 
     amp_dtype = torch.bfloat16 if config.amp_dtype == "bf16" else torch.float16
     scaler = torch.GradScaler(enabled=config.amp and amp_dtype == torch.float16)
@@ -445,6 +506,7 @@ def _train_torchrl(
             num_episodes_per_sample=config.num_episodes_per_sample,
             num_steps_per_sample=config.num_steps_per_sample,
             check_env=False,
+            policy=policy_module,
         )
 
     collector = SyncDataCollector(
@@ -478,7 +540,12 @@ def _train_torchrl(
         lmbda=config.gae_lambda,
         value_network=value_module,  # Pass the value module instance
         average_gae=True,  # Standardize GAE
+        # Native recurrent modules reset on data-dependent ``is_init`` flags,
+        # which cannot be evaluated inside functorch vmap.
+        deactivate_vmap=recurrent_policy,
     )
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
 
     # --- Training Loop ---
     pbar = tqdm(total=total_timesteps, desc="Training", unit="steps", initial=collected_frames)
@@ -493,24 +560,38 @@ def _train_torchrl(
         with (
             torch.no_grad(),
             torch.autocast(device.type, amp_dtype, enabled=config.amp),
+            set_recurrent_mode(recurrent_policy),
         ):
             if not qnets:
                 adv_module(batch_data)
 
-        # 2. Flatten for PPO minibatches
+        # Keep the collector order for recurrent PPO. A separate flattened
+        # view is sufficient for scalar logging after the update.
         batch_data = batch_data.reshape(-1)
         current_frames_flat = batch_data.numel()
 
         # --- PPO Update Phase ---
         actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
         for _ in range(config.update_epochs):
-            # 3. Shuffle data for i.i.d. minibatches
-            perm = torch.randperm(current_frames_flat, device=device)
-            batch_data_shuffled = batch_data[perm]
+            if recurrent_policy:
+                minibatches = recurrent_minibatches(
+                    batch_data,
+                    config.recurrent_sequence_length,
+                    batch_size,
+                )
+            else:
+                perm = torch.randperm(current_frames_flat, device=device)
+                batch_data_shuffled = batch_data[perm]
+                minibatches = (
+                    batch_data_shuffled[j : j + batch_size]
+                    for j in range(0, current_frames_flat, batch_size)
+                )
 
-            for j in range(0, current_frames_flat, batch_size):
-                minibatch = batch_data_shuffled[j : j + batch_size]
-                with torch.autocast(device.type, amp_dtype, enabled=config.amp):
+            for minibatch in minibatches:
+                with (
+                    torch.autocast(device.type, amp_dtype, enabled=config.amp),
+                    set_recurrent_mode(recurrent_policy),
+                ):
                     loss_dict = loss_module(minibatch)
 
                     if qnets:
@@ -526,9 +607,21 @@ def _train_torchrl(
                 optimizer.zero_grad()
                 scaler.scale(total_loss).backward()
                 scaler.unscale_(optimizer)
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    loss_module.parameters(), config.max_grad_norm
-                )
+                if config.separate_actor_critic_losses:
+                    actor_grad_norm = torch.nn.utils.clip_grad_norm_(
+                        policy_parameters,
+                        config.max_grad_norm,
+                    )
+                    critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+                        value_only_parameters,
+                        config.max_grad_norm,
+                    )
+                    grad_norm = actor_grad_norm
+                else:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        loss_module.parameters(), config.max_grad_norm
+                    )
+                    actor_grad_norm = critic_grad_norm = grad_norm
                 scaler.step(optimizer)
                 scaler.update()
 
@@ -580,12 +673,32 @@ def _train_torchrl(
         ep_len = completed_mean("final_length", as_float=True)
         wall_gradient = completed_mean("final_wall_gradient", as_float=True)
         total_reward = completed_mean("total_reward")
-        action = ((batch_data["action"] * 2 - 1) * config.max_step_vox).round()
+        if config.annotation_free:
+            # GT metrics do not exist inside the training environment. They
+            # are computed only by the post-rollout validation evaluator.
+            final_coverage = missing_episode_stat
+            success_rate = missing_episode_stat
+        if config.action_distribution == "categorical":
+            displacement_table = torch.as_tensor(
+                config.action_displacements,
+                dtype=torch.float32,
+                device=device,
+            )
+            action = displacement_table[batch_data["action"].long().reshape(-1)]
+        elif config.action_distribution == "factorized_categorical":
+            action = (
+                batch_data["action"].long().reshape(-1, 3)
+                - config.max_step_vox
+            ).float()
+        else:
+            action = ((batch_data["action"] * 2 - 1) * config.max_step_vox).round()
         if completed_episode:
             max_gdt_achieved = batch_data["next", "info", "max_gdt_achieved"][idx]
             max_std, max_mean = torch.std_mean(max_gdt_achieved, unbiased=False)
             max_gdt_value = max_gdt_achieved.max()
         else:
+            max_std = max_mean = max_gdt_value = missing_episode_stat
+        if config.annotation_free:
             max_std = max_mean = max_gdt_value = missing_episode_stat
         log_data = {
             "losses/policy_loss": avg_actor_loss,
@@ -593,8 +706,8 @@ def _train_torchrl(
             "losses/entropy": avg_entropy_loss,
             "losses/kl_div": avg_kldiv,
             "losses/grad_norm": grad_norm,
-            "losses/alpha": batch_data["alpha"].mean(),
-            "losses/beta": batch_data["beta"].mean(),
+            "losses/actor_grad_norm": actor_grad_norm,
+            "losses/critic_grad_norm": critic_grad_norm,
             "train/reward": avg_reward,
             "train/max_reward": max_reward,
             "train/step_count": step_count,
@@ -620,6 +733,44 @@ def _train_torchrl(
             "charts/action_1_mode": action[:, 1].cpu().mode()[0],
             "charts/action_2_mode": action[:, 2].cpu().mode()[0],
         }
+        if config.action_distribution == "beta":
+            log_data.update(
+                {
+                    "losses/alpha": batch_data["alpha"].mean(),
+                    "losses/beta": batch_data["beta"].mean(),
+                }
+            )
+        elif config.action_distribution == "categorical":
+            action_probabilities = batch_data["logits"].softmax(dim=-1)
+            log_data.update(
+                {
+                    "policy/max_action_probability": (
+                        action_probabilities.max(dim=-1).values.mean()
+                    ),
+                    "policy/logit_std": batch_data["logits"].std(dim=-1).mean(),
+                }
+            )
+        else:
+            axis_probabilities = batch_data["logits"].softmax(dim=-1)
+            log_data.update(
+                {
+                    "policy/max_action_probability": (
+                        axis_probabilities.max(dim=-1).values.prod(dim=-1).mean()
+                    ),
+                    "policy/logit_std": batch_data["logits"].std(dim=-1).mean(),
+                }
+            )
+        if device.type == "cuda":
+            log_data.update(
+                {
+                    "system/cuda_peak_allocated_mb": (
+                        torch.cuda.max_memory_allocated(device) / 2**20
+                    ),
+                    "system/cuda_peak_reserved_mb": (
+                        torch.cuda.max_memory_reserved(device) / 2**20
+                    ),
+                }
+            )
 
         pbar.set_postfix(
             {
@@ -649,27 +800,36 @@ def _train_torchrl(
             log_tensorboard(tensorboard_writer, val_metrics, step=collected_frames)
 
             # Checkpointing logic (save based on validation metric)
-            current_metric = val_metrics.get(config.metric_to_optimize, float("-inf"))
-            current_rank = validation_rank(val_metrics)
-            if current_rank > best_val_rank:
-                best_val_metric = current_metric
-                best_val_rank = current_rank
+            if config.annotation_free:
                 print(
-                    f"  New best validation rank: {best_val_rank} "
-                    f"({config.metric_to_optimize}={best_val_metric:.4f})"
+                    "  Annotation-free protocol: validation labels are "
+                    "report-only and cannot select a checkpoint."
                 )
-                save_checkpoint(
-                    policy_module,
-                    value_module,
-                    optimizer,
-                    scheduler,
-                    collected_frames,
-                    num_updates,
-                    config,
-                    True,
-                    best_val_metric,
-                    best_val_rank=best_val_rank,
+            else:
+                current_metric = val_metrics.get(
+                    config.metric_to_optimize,
+                    float("-inf"),
                 )
+                current_rank = validation_rank(val_metrics)
+                if current_rank > best_val_rank:
+                    best_val_metric = current_metric
+                    best_val_rank = current_rank
+                    print(
+                        f"  New best validation rank: {best_val_rank} "
+                        f"({config.metric_to_optimize}={best_val_metric:.4f})"
+                    )
+                    save_checkpoint(
+                        policy_module,
+                        value_module,
+                        optimizer,
+                        scheduler,
+                        collected_frames,
+                        num_updates,
+                        config,
+                        True,
+                        best_val_metric,
+                        best_val_rank=best_val_rank,
+                    )
 
         # Regular checkpoint saving
         if num_updates % config.save_freq == 0:
@@ -690,6 +850,12 @@ def _train_torchrl(
     pbar.close()
     collector.shutdown()
     print("Training finished.")
+    if device.type == "cuda":
+        print(
+            "Peak CUDA memory: "
+            f"{torch.cuda.max_memory_allocated(device) / 2**20:.1f} MiB allocated, "
+            f"{torch.cuda.max_memory_reserved(device) / 2**20:.1f} MiB reserved"
+        )
 
     final_model_path = os.path.join(config.checkpoint_dir, "final_model_torchrl.pth")
     save_checkpoint(

@@ -64,3 +64,27 @@ def gdt_progress_reward(delta: float, maximum_delta: float, scale: float) -> flo
     if abs(delta) > maximum_delta:
         return -float(scale)
     return float(scale) * float(delta) / float(maximum_delta)
+
+
+def target_recovery_potential_reward(
+    previous_distance_mm: float,
+    next_distance_mm: float,
+    maximum_step_mm: float,
+    scale: float,
+) -> float:
+    """Return a signed distance-to-target potential difference.
+
+    A leave/re-enter excursion telescopes to zero. This supplies an off-target
+    recovery gradient without changing which action the environment executes.
+    """
+    if previous_distance_mm < 0 or next_distance_mm < 0:
+        raise ValueError("target distances must be non-negative")
+    if maximum_step_mm <= 0:
+        raise ValueError("maximum_step_mm must be positive")
+    if scale < 0:
+        raise ValueError("scale must be non-negative")
+    return (
+        float(scale)
+        * (float(previous_distance_mm) - float(next_distance_mm))
+        / float(maximum_step_mm)
+    )

@@ -13,10 +13,394 @@ from navigator.pretrain import (
     _monotonic_expert_action,
     _resynchronize_path_index,
 )
-from navigator.utils import compute_gdt
+from navigator.utils import compute_gdt, get_patch
 
 
 class NavigatorEnvironmentSmokeTest(unittest.TestCase):
+    @staticmethod
+    def _annotation_free_config(device: torch.device, **overrides):
+        values = {
+            "device": str(device),
+            "patch_size_mm": 8,
+            "voxel_size_mm": 1.0,
+            "max_step_displacement_mm": 2,
+            "cumulative_path_radius_mm": 1,
+            "max_episode_steps": 4,
+            "annotation_free": True,
+            "use_immediate_gdt_reward": False,
+            "terminate_on_success": False,
+            "coverage_reward_scale": 0,
+            "gdt_reward_scale": 0,
+            "r_final": 0,
+            "r_val1": 0,
+        }
+        values.update(overrides)
+        return Config(**values)
+
+    def test_annotation_free_configuration_rejects_privileged_defaults(self):
+        with self.assertRaisesRegex(ValueError, "privileged options"):
+            Config(annotation_free=True)
+
+    def test_multichannel_patch_matches_independent_channel_extraction(self):
+        volume = torch.arange(3 * 7 * 8 * 9, dtype=torch.float32).reshape(3, 7, 8, 9)
+        for center in ((3, 4, 4), (0, 0, 0), (6, 7, 8)):
+            actual = get_patch(volume, center, (6, 5, 4), pad_value=-7)
+            expected = torch.stack(
+                [
+                    get_patch(channel, center, (6, 5, 4), pad_value=-7)
+                    for channel in volume
+                ]
+            )
+            torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+    def test_annotation_free_transitions_are_invariant_to_labels_and_endpoint(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = self._annotation_free_config(device)
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        image = np.random.default_rng(42).normal(size=shape).astype(np.float32)
+        wall_map = np.random.default_rng(7).uniform(size=shape).astype(np.float32)
+
+        first = self._make_subject(
+            shape,
+            start,
+            (8, 8, 12),
+            np.zeros(shape, dtype=np.uint8),
+        )
+        second = self._make_subject(
+            shape,
+            start,
+            (2, 13, 4),
+            np.random.default_rng(19).integers(0, 2, size=shape, dtype=np.uint8),
+        )
+        for subject in (first, second):
+            subject["image"] = image.copy()
+            subject["wall_map"] = wall_map.copy()
+        second["gdt_start"] = np.full(shape, -1234, dtype=np.float32)
+        second["gdt_end"] = np.full(shape, 9876, dtype=np.float32)
+        second["gt_path"] = np.asarray([(1, 1, 1), (14, 14, 14)])
+
+        environments = [
+            SmallBowelEnv(
+                config=config,
+                dataset_iterator=iter([subject]),
+                num_episodes_per_sample=1,
+                device=device,
+            )
+            for subject in (first, second)
+        ]
+        try:
+            resets = [environment._reset() for environment in environments]
+            torch.testing.assert_close(resets[0]["actor"], resets[1]["actor"])
+            torch.testing.assert_close(resets[0]["context"], resets[1]["context"])
+            self.assertEqual(
+                resets[0]["actor"].shape,
+                torch.Size([1, 6, *config.patch_size_vox]),
+            )
+            self.assertEqual(resets[0]["context"].shape, torch.Size([1, 7]))
+            self.assertIsNone(environments[0].seg)
+            self.assertIsNone(environments[1].seg)
+
+            actions = [
+                torch.tensor([[0.5, 0.5, 1.0]], device=device),
+                torch.tensor([[0.5, 1.0, 0.5]], device=device),
+                torch.tensor([[0.5, 0.5, 0.0]], device=device),
+            ]
+            for action in actions:
+                transitions = [
+                    environment._step(
+                        TensorDict(
+                            {"action": action.clone()},
+                            batch_size=torch.Size([1]),
+                            device=device,
+                        )
+                    )
+                    for environment in environments
+                ]
+                for key in ("actor", "context", "reward", "done", "terminated"):
+                    torch.testing.assert_close(transitions[0][key], transitions[1][key])
+                self.assertEqual(
+                    environments[0].current_pos_vox,
+                    environments[1].current_pos_vox,
+                )
+        finally:
+            for environment in environments:
+                environment.close()
+
+    def test_annotation_free_action_projection_does_not_read_segmentation(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = self._annotation_free_config(device)
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[start] = 1
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter(
+                [self._make_subject(shape, start, (8, 8, 9), segmentation)]
+            ),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            environment._reset()
+            transition = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(environment.current_pos_vox, (8, 8, 10))
+            self.assertFalse(transition["done"].item())
+        finally:
+            environment.close()
+
+    def test_reward_supervision_changes_reward_but_not_policy_state_or_dynamics(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=4,
+            reward_supervised=True,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        image = np.random.default_rng(23).normal(size=shape).astype(np.float32)
+        wall_map = np.zeros(shape, dtype=np.float32)
+
+        first = self._make_subject(
+            shape,
+            start,
+            (8, 8, 12),
+            np.ones(shape, dtype=np.uint8),
+        )
+        second_segmentation = np.zeros(shape, dtype=np.uint8)
+        second_segmentation[start] = 1
+        second = self._make_subject(
+            shape,
+            start,
+            (2, 2, 2),
+            second_segmentation,
+        )
+        # Match real mask-constrained GDTs: the requested next position is
+        # finite in the first subject and infinite in the second. An infinite
+        # supervised potential may change reward, but must not reject movement.
+        second["gdt_end"].fill(np.inf)
+        second["gdt_end"][start] = 12.0
+        second["gdt_end"][second["end_coord"]] = 0.0
+        for subject in (first, second):
+            subject["image"] = image.copy()
+            subject["wall_map"] = wall_map.copy()
+
+        environments = [
+            SmallBowelEnv(
+                config=config,
+                dataset_iterator=iter([subject]),
+                num_episodes_per_sample=1,
+                device=device,
+            )
+            for subject in (first, second)
+        ]
+        try:
+            resets = [environment._reset() for environment in environments]
+            torch.testing.assert_close(resets[0]["actor"], resets[1]["actor"])
+            torch.testing.assert_close(resets[0]["context"], resets[1]["context"])
+            action = torch.tensor([[0.5, 0.5, 1.0]], device=device)
+            transitions = [
+                environment._step(
+                    TensorDict(
+                        {"action": action.clone()},
+                        batch_size=torch.Size([1]),
+                        device=device,
+                    )
+                )
+                for environment in environments
+            ]
+            torch.testing.assert_close(
+                transitions[0]["actor"],
+                transitions[1]["actor"],
+            )
+            torch.testing.assert_close(
+                transitions[0]["context"],
+                transitions[1]["context"],
+            )
+            self.assertEqual(
+                environments[0].current_pos_vox,
+                environments[1].current_pos_vox,
+            )
+            self.assertEqual(environments[0].current_pos_vox, (8, 8, 10))
+            self.assertNotEqual(
+                transitions[0]["reward"].item(),
+                transitions[1]["reward"].item(),
+            )
+        finally:
+            for environment in environments:
+                environment.close()
+
+    def test_recovery_reward_guides_return_without_profitable_round_trip(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=4,
+            reward_supervised=True,
+            target_recovery_reward_scale=1.0,
+            coverage_reward_scale=0.0,
+            r_final=0.0,
+            terminate_on_success=False,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[start] = 1
+        subject = self._make_subject(shape, start, start, segmentation)
+        subject["gdt_start"].fill(np.inf)
+        subject["gdt_end"].fill(np.inf)
+        subject["gdt_start"][start] = 0.0
+        subject["gdt_end"][start] = 0.0
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([subject]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            leave = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(environment.current_pos_vox, (8, 8, 10))
+            recover = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.5, 0.5, 0.0]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(environment.current_pos_vox, start)
+            self.assertLess(leave["reward"].item(), 0.0)
+            self.assertGreater(recover["reward"].item(), 0.0)
+            self.assertLess(
+                leave["reward"].item() + recover["reward"].item(),
+                0.0,
+            )
+        finally:
+            environment.close()
+
+    def test_outside_penalty_covers_entire_action_segment(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=4,
+            reward_supervised=True,
+            target_recovery_reward_scale=1.0,
+            coverage_reward_scale=0.0,
+            terminate_on_success=False,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        end = (8, 8, 12)
+        intact = np.ones(shape, dtype=np.uint8)
+        gap = intact.copy()
+        gap[8, 8, 9] = 0
+        environments = [
+            SmallBowelEnv(
+                config=config,
+                dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+                num_episodes_per_sample=1,
+                device=device,
+            )
+            for segmentation in (intact, gap)
+        ]
+
+        try:
+            for environment in environments:
+                environment._reset()
+            action = TensorDict(
+                {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                batch_size=torch.Size([1]),
+                device=device,
+            )
+            intact_transition = environments[0]._step(action.clone())
+            gap_transition = environments[1]._step(action.clone())
+            self.assertEqual(environments[0].current_pos_vox, (8, 8, 10))
+            self.assertEqual(environments[1].current_pos_vox, (8, 8, 10))
+            self.assertAlmostEqual(
+                intact_transition["reward"].item()
+                - gap_transition["reward"].item(),
+                config.r_val1,
+                places=5,
+            )
+        finally:
+            for environment in environments:
+                environment.close()
+
+    def test_recovery_target_excludes_disconnected_label_islands(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=4,
+            reward_supervised=True,
+            target_recovery_reward_scale=1.0,
+            coverage_reward_scale=0.0,
+            terminate_on_success=False,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        disconnected_island = (8, 8, 10)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[start] = 1
+        segmentation[disconnected_island] = 1
+        subject = self._make_subject(shape, start, start, segmentation)
+        subject["gdt_start"].fill(np.inf)
+        subject["gdt_end"].fill(np.inf)
+        subject["gdt_start"][start] = 0.0
+        subject["gdt_end"][start] = 0.0
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([subject]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            self.assertGreater(
+                environment.target_distance_map[disconnected_island],
+                0.0,
+            )
+            transition = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(environment.current_pos_vox, disconnected_island)
+            self.assertLess(transition["reward"].item(), 0.0)
+        finally:
+            environment.close()
+
     def test_repeat_loader_restarts_without_itertools_cycle(self):
         iterator = repeat_loader([1, 2, 3])
         self.assertEqual([next(iterator) for _ in range(8)], [1, 2, 3, 1, 2, 3, 1, 2])
@@ -24,6 +408,10 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
     def test_gdt_reward_scale_must_be_non_negative(self):
         with self.assertRaisesRegex(ValueError, "gdt_reward_scale"):
             Config(gdt_reward_scale=-1)
+
+    def test_target_recovery_reward_scale_must_be_non_negative(self):
+        with self.assertRaisesRegex(ValueError, "target_recovery_reward_scale"):
+            Config(target_recovery_reward_scale=-1)
 
     @staticmethod
     def _make_subject(shape, start, end, segmentation):
@@ -106,6 +494,62 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
                     environment.cumulative_path_mask.bool().cpu(),
                     torch.from_numpy(independent),
                 )
+            )
+        finally:
+            environment.close()
+
+    def test_cached_path_geometry_matches_independent_physical_tube(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=2,
+            allowed_area_radius_mm=0,
+            max_episode_steps=8,
+        )
+        shape = (20, 20, 20)
+        start = (5, 5, 5)
+        end = (5, 5, 15)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            action = TensorDict(
+                {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                batch_size=torch.Size([1]),
+                device=device,
+            )
+            environment._step(action)
+            cache_size = len(environment._dilated_line_offsets)
+            environment._step(action)
+            self.assertEqual(len(environment._dilated_line_offsets), cache_size)
+            independent = physical_path_tube(
+                shape,
+                environment.get_tracking_history(),
+                spacing_mm=(1.0, 1.0, 1.0),
+                radius_mm=2,
+            )
+            self.assertTrue(
+                torch.equal(
+                    environment.cumulative_path_mask.bool().cpu(),
+                    torch.from_numpy(independent),
+                )
+            )
+            self.assertEqual(
+                environment.path_voxels,
+                int(environment.cumulative_path_mask.sum().item()),
+            )
+            self.assertEqual(
+                environment.path_target_intersection,
+                environment.path_voxels,
             )
         finally:
             environment.close()
@@ -392,6 +836,116 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
                 environment._project_action_to_allowed_displacement(full_forward),
                 (0, 0, 4),
             )
+        finally:
+            environment.close()
+
+    def test_categorical_action_executes_the_selected_integer_displacement(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=4,
+            cumulative_path_radius_mm=1,
+            allowed_area_radius_mm=0,
+            max_episode_steps=8,
+            reward_supervised=True,
+            memory_model="gru",
+            action_distribution="categorical",
+            deterministic_action_statistic="mode",
+        )
+        shape = (16, 16, 16)
+        start = (4, 4, 4)
+        end = (4, 4, 12)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            selected = (1, -2, 4)
+            action_index = config.action_displacements.index(selected)
+            transition = environment._step(
+                TensorDict(
+                    {
+                        "action": torch.tensor(
+                            [action_index],
+                            dtype=torch.long,
+                            device=device,
+                        )
+                    },
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(
+                environment.current_pos_vox,
+                tuple(
+                    coordinate + delta
+                    for coordinate, delta in zip(start, selected)
+                ),
+            )
+            self.assertFalse(transition["done"].item())
+        finally:
+            environment.close()
+
+    def test_factorized_categorical_action_executes_exact_integer_displacement(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=4,
+            cumulative_path_radius_mm=1,
+            allowed_area_radius_mm=0,
+            max_episode_steps=8,
+            reward_supervised=True,
+            memory_model="gru",
+            action_distribution="factorized_categorical",
+            deterministic_action_statistic="mode",
+        )
+        shape = (16, 16, 16)
+        start = (4, 4, 4)
+        end = (4, 4, 12)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            selected = (1, -2, 4)
+            axis_indices = [
+                delta + config.max_step_vox for delta in selected
+            ]
+            transition = environment._step(
+                TensorDict(
+                    {
+                        "action": torch.tensor(
+                            [axis_indices],
+                            dtype=torch.long,
+                            device=device,
+                        )
+                    },
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(
+                environment.current_pos_vox,
+                tuple(
+                    coordinate + delta
+                    for coordinate, delta in zip(start, selected)
+                ),
+            )
+            self.assertFalse(transition["done"].item())
         finally:
             environment.close()
 

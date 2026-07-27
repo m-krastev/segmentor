@@ -4,6 +4,7 @@ Configuration classes and argument parsing for Navigator.
 
 import argparse
 from dataclasses import dataclass, field
+from itertools import product
 from typing import Tuple, Optional, Union
 import math
 import torch
@@ -30,6 +31,10 @@ class Config:
     nnunet_case_ids_file: Optional[str] = None
     nnunet_train_case_ids_file: Optional[str] = None
     nnunet_val_case_ids_file: Optional[str] = None
+    # Directory containing one externally supplied native-XYZ seed coordinate
+    # per case as <case_id>.txt. Annotation-free mode deliberately refuses to
+    # derive seeds from organ labels or the GT path.
+    nnunet_seed_dir: Optional[str] = None
     nnunet_generate_expert_path: bool = False
     amp: bool = False
     amp_dtype: str = "bf16"
@@ -56,6 +61,14 @@ class Config:
     use_immediate_gdt_reward: bool = True
     max_episode_steps: int = 2048
     terminate_on_success: bool = True
+    # Enforce that labels/endpoints cannot affect policy observations,
+    # transitions, rewards, or termination. A single external start seed is
+    # still required because a path tracker is undefined without one.
+    annotation_free: bool = False
+    # Training-only GT potentials with image-only policy inputs and
+    # bounds-only action dynamics. This is deployable without labels but is
+    # not annotation-free training.
+    reward_supervised: bool = False
     observe_goal_distance: bool = False
     coverage_gated_goal_planner: bool = False
     # A 9 mm radius corresponds to an 18 mm diameter at the 1.5 mm nnU-Net
@@ -68,6 +81,7 @@ class Config:
     allowed_area_radius_mm: float = 0.0
     # wall_map_sigmas: Tuple[int, ...] = (1, 3)
     wall_map_sigmas: Tuple[int, ...] = (1,)
+    navigation_filter_scales_mm: Tuple[float, ...] = (3.0, 6.0, 9.0)
 
     # --- Reward Hyperparameters ---
     # Keep dense penalties on the same scale as one step of GDT progress. Large
@@ -80,9 +94,15 @@ class Config:
     # Total return available for monotonic mask-constrained progress to the
     # requested endpoint. This is a telescoping potential, not a per-step bonus.
     gdt_reward_scale: float = 1.0
+    # Reward-only potential for recovering after an unconstrained action leaves
+    # the supervised target. Zero preserves legacy behavior.
+    target_recovery_reward_scale: float = 0.0
     success_coverage_threshold: float = 0.55
     step_penalty: float = 0.01
     wall_penalty_scale: float = 0.1
+    # Image/self-state-only objectives used by annotation-free training.
+    intrinsic_novelty_reward_scale: float = 0.05
+    curvature_penalty_scale: float = 0.02
     # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
     r_val3: float = 0.1
@@ -99,6 +119,19 @@ class Config:
     behavior_cloning_batch_size: int = 64
     behavior_cloning_max_policy_probability: float = 1.0
     behavior_cloning_action_statistic: str = "mean"
+    # Recurrent policies share one visual encoder between actor and critic.
+    # "s5" is a dependency-free diagonal S5-style state-space baseline.
+    memory_model: str = "none"
+    memory_hidden_size: int = 256
+    memory_num_layers: int = 1
+    s5_state_size: int = 256
+    recurrent_sequence_length: int = 64
+    recurrent_backend: str = "pad"
+    # "beta" reproduces the original continuous policy. "categorical"
+    # assigns one joint category to each nonzero integer displacement.
+    # "factorized_categorical" models the three exact integer coordinates
+    # with independent categorical factors, avoiding a 728-way output head.
+    action_distribution: str = "beta"
     # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 10_000_000
@@ -114,6 +147,9 @@ class Config:
     ent_coef: float = 0.003
     # Value function coefficient (higher values encourage accurate value estimates)
     vf_coef: float = 0.5
+    # When enabled, critic gradients update only the value head; the shared
+    # visual encoder and memory receive policy gradients exclusively.
+    separate_actor_critic_losses: bool = False
     num_workers: int = 1
 
     max_grad_norm: float = 0.5
@@ -133,9 +169,17 @@ class Config:
     allowed_area_radius_vox: int = field(init=False)
     gdt_max_increase_theta: float = field(init=False)
     observation_channels: int = field(init=False, default=5)
-    # time, geodesic progress, Dice coverage, normalized position (3),
-    # previous direction (3), and goal direction (3)
+    # Legacy: time, geodesic progress, Dice coverage, normalized position (3),
+    # previous direction (3), and goal direction (3). Annotation-free mode
+    # derives a seven-value context in __post_init__.
     context_features: int = field(init=False, default=12)
+    clean_policy_inputs: bool = field(init=False, default=False)
+    action_displacements: tuple[tuple[int, int, int], ...] = field(
+        init=False,
+        default=(),
+    )
+    categorical_action_count: int = field(init=False, default=0)
+    factorized_axis_action_count: int = field(init=False, default=0)
 
     def __post_init__(self):
         def mm_to_vox(dist_mm: float, voxel_dim_mm: float) -> int:
@@ -158,8 +202,20 @@ class Config:
             raise ValueError("coverage_reward_scale must be non-negative")
         if self.gdt_reward_scale < 0:
             raise ValueError("gdt_reward_scale must be non-negative")
+        if self.target_recovery_reward_scale < 0:
+            raise ValueError("target_recovery_reward_scale must be non-negative")
         if self.step_penalty < 0:
             raise ValueError("step_penalty must be non-negative")
+        if self.intrinsic_novelty_reward_scale < 0:
+            raise ValueError("intrinsic_novelty_reward_scale must be non-negative")
+        if self.curvature_penalty_scale < 0:
+            raise ValueError("curvature_penalty_scale must be non-negative")
+        if not self.navigation_filter_scales_mm or any(
+            scale <= 0 for scale in self.navigation_filter_scales_mm
+        ):
+            raise ValueError(
+                "navigation_filter_scales_mm must contain positive values"
+            )
         if self.behavior_cloning_epochs < 0:
             raise ValueError("behavior_cloning_epochs must be non-negative")
         if self.behavior_cloning_learning_rate <= 0:
@@ -176,10 +232,109 @@ class Config:
             raise ValueError(
                 "deterministic_action_statistic must be either 'mean' or 'mode'"
             )
+        if self.memory_model not in {"none", "gru", "s5"}:
+            raise ValueError("memory_model must be one of: none, gru, s5")
+        if self.memory_hidden_size < 1:
+            raise ValueError("memory_hidden_size must be positive")
+        if self.memory_num_layers < 1:
+            raise ValueError("memory_num_layers must be positive")
+        if self.s5_state_size < 1:
+            raise ValueError("s5_state_size must be positive")
+        if self.recurrent_sequence_length < 1:
+            raise ValueError("recurrent_sequence_length must be positive")
+        if self.recurrent_backend not in {"auto", "pad", "scan", "triton"}:
+            raise ValueError(
+                "recurrent_backend must be one of: auto, pad, scan, triton"
+            )
+        if self.action_distribution not in {
+            "beta",
+            "categorical",
+            "factorized_categorical",
+        }:
+            raise ValueError(
+                "action_distribution must be one of: beta, categorical, "
+                "factorized_categorical"
+            )
+        if self.action_distribution != "beta":
+            if self.memory_model == "none":
+                raise ValueError(
+                    "categorical actions currently require a recurrent policy"
+                )
+            if self.deterministic_action_statistic != "mode":
+                raise ValueError(
+                    "categorical actions require deterministic mode evaluation"
+                )
+            if self.behavior_cloning_epochs:
+                raise ValueError(
+                    "categorical actions do not yet support behavior cloning"
+                )
+        if self.memory_model != "none" and self.td3:
+            raise ValueError("Recurrent memory baselines currently support PPO only")
+        if self.annotation_free and self.reward_supervised:
+            raise ValueError(
+                "annotation_free and reward_supervised are mutually exclusive"
+            )
+        if self.annotation_free:
+            incompatible = {
+                "observe_goal_distance": self.observe_goal_distance,
+                "coverage_gated_goal_planner": self.coverage_gated_goal_planner,
+                "use_immediate_gdt_reward": self.use_immediate_gdt_reward,
+                "terminate_on_success": self.terminate_on_success,
+                "coverage_reward_scale": self.coverage_reward_scale != 0,
+                "gdt_reward_scale": self.gdt_reward_scale != 0,
+                "target_recovery_reward_scale": (
+                    self.target_recovery_reward_scale != 0
+                ),
+                "r_final": self.r_final != 0,
+                "r_val1": self.r_val1 != 0,
+                "goal_action_prior": self.goal_action_prior != 0,
+                "behavior_cloning_epochs": self.behavior_cloning_epochs != 0,
+                "nnunet_generate_expert_path": self.nnunet_generate_expert_path,
+            }
+            enabled = [name for name, value in incompatible.items() if value]
+            if enabled:
+                raise ValueError(
+                    "annotation_free mode forbids privileged options: "
+                    + ", ".join(enabled)
+                )
+            if self.nnunet_raw_dir and not self.nnunet_seed_dir:
+                raise ValueError(
+                    "annotation_free nnU-Net training requires --nnunet-seed-dir "
+                    "with externally supplied seed points"
+                )
+        if self.reward_supervised:
+            incompatible = {
+                "observe_goal_distance": self.observe_goal_distance,
+                "coverage_gated_goal_planner": self.coverage_gated_goal_planner,
+                "goal_action_prior": self.goal_action_prior != 0,
+                "behavior_cloning_epochs": self.behavior_cloning_epochs != 0,
+                "nnunet_generate_expert_path": self.nnunet_generate_expert_path,
+            }
+            enabled = [name for name, value in incompatible.items() if value]
+            if enabled:
+                raise ValueError(
+                    "reward_supervised mode forbids privileged policy options: "
+                    + ", ".join(enabled)
+                )
+            if self.nnunet_raw_dir and not self.nnunet_seed_dir:
+                raise ValueError(
+                    "reward_supervised nnU-Net training requires "
+                    "--nnunet-seed-dir with externally supplied seed points"
+                )
 
         self.checkpoint_dir = self.checkpoint_dir + "/" + self.data_dir
         self.gdt_cell_length = self.voxel_size_mm
         self.max_step_vox = mm_to_vox(self.max_step_displacement_mm, self.voxel_size_mm)
+        self.action_displacements = tuple(
+            displacement
+            for displacement in product(
+                range(-self.max_step_vox, self.max_step_vox + 1),
+                repeat=3,
+            )
+            if any(displacement)
+        )
+        self.categorical_action_count = len(self.action_displacements)
+        self.factorized_axis_action_count = 2 * self.max_step_vox + 1
         patch_vox_dim = mm_to_vox(self.patch_size_mm, self.voxel_size_mm)
         self.patch_size_vox = (patch_vox_dim,) * 3
         self.cumulative_path_radius_vox = mm_to_vox(
@@ -187,7 +342,17 @@ class Config:
         )
         self.endpoint_tolerance_vox = self.endpoint_tolerance_mm / self.voxel_size_mm
         self.allowed_area_radius_vox = mm_to_vox(self.allowed_area_radius_mm, self.voxel_size_mm)
-        self.observation_channels = 5 + int(self.observe_goal_distance)
+        self.clean_policy_inputs = self.annotation_free or self.reward_supervised
+        if self.clean_policy_inputs:
+            # Current CT, four physically scaled image-filter responses, and
+            # the agent's own cumulative path. A recurrent policy already
+            # retains the previous encoded CT patch.
+            self.observation_channels = 6
+            # Time, normalized position (3), and previous direction (3).
+            self.context_features = 7
+        else:
+            self.observation_channels = 5 + int(self.observe_goal_distance)
+            self.context_features = 12
         if self.max_step_vox < 1:
             raise ValueError("max_step_displacement_mm must span at least one voxel")
         if patch_vox_dim < 8:
@@ -220,6 +385,10 @@ def parse_args() -> Config:
             "gdt_max_increase_theta",
             "observation_channels",
             "context_features",
+            "clean_policy_inputs",
+            "action_displacements",
+            "categorical_action_count",
+            "factorized_axis_action_count",
         ]:
             continue
 
@@ -231,6 +400,18 @@ def parse_args() -> Config:
                 nargs="+",
                 default=default_config.wall_map_sigmas,
                 help=f"{field_name} (default: {default_config.wall_map_sigmas})",
+            )
+            continue
+        if field_name == "navigation_filter_scales_mm":
+            parser.add_argument(
+                f"--{field_name.replace('_', '-')}",
+                type=float,
+                nargs="+",
+                default=default_config.navigation_filter_scales_mm,
+                help=(
+                    f"{field_name} "
+                    f"(default: {default_config.navigation_filter_scales_mm})"
+                ),
             )
             continue
 

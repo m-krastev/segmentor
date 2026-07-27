@@ -7,14 +7,31 @@ import torch
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from tensordict.nn import InteractionType
 from tensordict.nn.utils import biased_softplus
-from torchrl.modules import ProbabilisticActor, ValueOperator
-from torchrl.data import Bounded
-from torch.distributions import Beta, Independent
+from torchrl.modules import (
+    ActorValueOperator,
+    GRUModule,
+    ProbabilisticActor,
+    ValueOperator,
+)
+from torchrl.data import Bounded, Categorical as CategoricalSpec
+from torch.distributions import Beta, Categorical, Independent
 from .actor import ActorNetwork
 from .critic import CriticNetwork, StateActionValueNetwork
+from .memory import (
+    NavigatorVisualEncoder,
+    RecurrentBetaHead,
+    RecurrentCategoricalHead,
+    RecurrentFactorizedCategoricalHead,
+    S5TensorDictModule,
+)
 from ..config import Config
 
-__all__ = ["ActorNetwork", "CriticNetwork", "create_ppo_modules"]
+__all__ = [
+    "ActorNetwork",
+    "CriticNetwork",
+    "NavigatorVisualEncoder",
+    "create_ppo_modules",
+]
 
 # Define action spec constants
 ACTION_LOW = 0.0
@@ -71,6 +88,14 @@ class IndependentBeta(Independent):
     def log_prob(self, value: torch.Tensor):
         return super().log_prob(((value - self.min) / self.scale).clamp(self.eps, 1.0 - self.eps))
 
+
+class IndependentCategorical(Independent):
+    """A three-axis categorical distribution with a joint scalar log-probability."""
+
+    def __init__(self, logits: torch.Tensor):
+        super().__init__(Categorical(logits=logits), 1)
+
+
 # --- TorchRL Modules ---
 def create_ppo_modules(
     config: Config,
@@ -82,6 +107,19 @@ def create_ppo_modules(
     """Creates the PPO actor and critic modules compatible with TorchRL."""
     in_channels_actor = in_channels_actor or config.observation_channels
     in_channels_critic = in_channels_critic or config.observation_channels
+
+    if config.memory_model != "none":
+        if qnets:
+            raise ValueError("Recurrent memory baselines currently support PPO only")
+        if in_channels_actor != in_channels_critic:
+            raise ValueError(
+                "A shared recurrent encoder requires matching actor/critic channels"
+            )
+        return _create_recurrent_ppo_modules(
+            config,
+            device,
+            input_channels=in_channels_actor,
+        )
 
     # Actor Network Base
     actor_cnn_base = ActorNetwork(
@@ -152,4 +190,124 @@ def create_ppo_modules(
         out_keys=["state_action_value" if qnets else "state_value"],  # Standard output key for value estimates
     ).to(device)
 
+    return policy_module, value_module
+
+
+def _create_recurrent_ppo_modules(
+    config: Config,
+    device: torch.device,
+    input_channels: int,
+):
+    """Create a shared-encoder recurrent actor and critic."""
+
+    encoder = TensorDictModule(
+        NavigatorVisualEncoder(
+            input_channels=input_channels,
+            context_features=config.context_features,
+            output_features=config.memory_hidden_size,
+        ),
+        in_keys=["actor", "context"],
+        out_keys=["memory_input"],
+    )
+
+    if config.memory_model == "gru":
+        memory = GRUModule(
+            input_size=config.memory_hidden_size,
+            hidden_size=config.memory_hidden_size,
+            num_layers=config.memory_num_layers,
+            in_keys=["memory_input", "recurrent_state", "is_init"],
+            out_keys=["features", ("next", "recurrent_state")],
+            recurrent_backend=config.recurrent_backend,
+            recurrent_compute_dtype=torch.float32,
+            default_recurrent_mode=False,
+            device=device,
+        )
+    elif config.memory_model == "s5":
+        if config.memory_num_layers != 1:
+            raise ValueError(
+                "The dependency-free S5 baseline currently supports one layer"
+            )
+        memory = S5TensorDictModule(
+            input_size=config.memory_hidden_size,
+            hidden_size=config.memory_hidden_size,
+            state_size=config.s5_state_size,
+        )
+    else:
+        raise ValueError(f"Unsupported memory model: {config.memory_model}")
+
+    common = TensorDictSequential(encoder, memory)
+    if config.action_distribution == "beta":
+        parameter_module = TensorDictModule(
+            RecurrentBetaHead(
+                input_features=config.memory_hidden_size,
+                context_features=config.context_features,
+                goal_action_prior=config.goal_action_prior,
+            ),
+            in_keys=["features", "context"],
+            out_keys=["alpha", "beta"],
+        )
+        action_spec = Bounded(
+            low=0,
+            high=1,
+            shape=torch.Size([ACTION_DIM]),
+            dtype=torch.float32,
+            device=device,
+        )
+        distribution_class = IndependentBeta
+        distribution_in_keys = ["alpha", "beta"]
+    elif config.action_distribution == "categorical":
+        parameter_module = TensorDictModule(
+            RecurrentCategoricalHead(
+                input_features=config.memory_hidden_size,
+                action_displacements=config.action_displacements,
+            ),
+            in_keys=["features"],
+            out_keys=["logits"],
+        )
+        action_spec = CategoricalSpec(
+            n=config.categorical_action_count,
+            shape=torch.Size([]),
+            dtype=torch.int64,
+            device=device,
+        )
+        distribution_class = Categorical
+        distribution_in_keys = ["logits"]
+    else:
+        parameter_module = TensorDictModule(
+            RecurrentFactorizedCategoricalHead(
+                input_features=config.memory_hidden_size,
+                axis_action_count=config.factorized_axis_action_count,
+            ),
+            in_keys=["features"],
+            out_keys=["logits"],
+        )
+        action_spec = Bounded(
+            low=0,
+            high=config.factorized_axis_action_count - 1,
+            shape=torch.Size([ACTION_DIM]),
+            dtype=torch.int64,
+            device=device,
+        )
+        distribution_class = IndependentCategorical
+        distribution_in_keys = ["logits"]
+    policy_head = ProbabilisticActor(
+        module=parameter_module,
+        spec=action_spec,
+        in_keys=distribution_in_keys,
+        out_keys=["action"],
+        distribution_class=distribution_class,
+        return_log_prob=True,
+        default_interaction_type=InteractionType.RANDOM,
+    )
+    value_head = ValueOperator(
+        module=torch.nn.Linear(config.memory_hidden_size, 1),
+        in_keys=["features"],
+        out_keys=["state_value"],
+    )
+
+    actor_value = ActorValueOperator(common, policy_head, value_head).to(device)
+    policy_module = actor_value.get_policy_operator()
+    value_module = actor_value.get_value_operator()
+    policy_module.memory_model = config.memory_model
+    value_module.memory_model = config.memory_model
     return policy_module, value_module

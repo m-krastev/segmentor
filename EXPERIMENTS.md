@@ -1048,3 +1048,482 @@ command or service, acceptance metrics, and outcome here.
 - Per the resource constraint, do not run the full 41-case validation cohort
   yet. The fixed three cases were shortest/median/longest by expert-route
   length and are an iteration smoke set, not a final generalization estimate.
+
+## 2026-07-27 — M1: shared-encoder recurrent PPO feasibility
+
+- Goal: establish executable GRU and state-space memory baselines before
+  changing the observation and reward to the annotation-free formulation.
+- Implementation:
+  - one shared 3-D visual encoder feeding separate Beta actor and scalar critic
+    heads through TorchRL's actor-value operator;
+  - native TorchRL GRU with recurrent state registered in the environment;
+  - dependency-free diagonal S5-style MIMO state-space recurrence with stable
+    complex diagonal dynamics and bilinear discretization;
+  - contiguous PPO sequence minibatches instead of shuffled transitions;
+  - recurrent GAE with `vmap` disabled because reset flags introduce
+    data-dependent control flow;
+  - configurable memory width, S5 state size, sequence length, and backend.
+- CUDA model and PPO-backward tests pass for both GRU and S5 configurations,
+  including verification that actor and critic truly share parameters.
+- End-to-end collector/training smoke on RTX 5070 Ti, three fixed cases used
+  only to provide real environment tensors:
+  - GRU: 64 frames, sequence 16, hidden 64, `62.1` final steps/s;
+  - S5-style: same settings, `62.4` final steps/s;
+  - both completed collection, GAE, PPO update, and checkpoint saving without
+    OOM or recurrent-state errors.
+- Matched production-capacity smoke with hidden/state width 256, sequence
+  length 64, and a 256-frame PPO batch:
+  - GRU: `154.9` final steps/s, `1.44 GiB` peak CUDA allocated and
+    `2.25 GiB` reserved;
+  - S5-style: `139.7` final steps/s, `1.56 GiB` peak CUDA allocated and
+    `3.35 GiB` reserved;
+  - each model has 602,967 unique trainable parameters and leaves substantial
+    headroom on the 15.5 GiB GPU.
+- Decision: use GRU as the primary recurrent baseline. It is faster, uses less
+  CUDA memory, and relies on TorchRL's native recurrent module. Keep the
+  dependency-free S5-style implementation as the state-space ablation; its
+  sequential complex scan is deliberately correctness-oriented rather than a
+  fused high-throughput implementation.
+- Interpretation boundary: this is an execution/correctness result, not a
+  learning result. The current environment still exposes segmentation-derived
+  channels and rewards. No long recurrent training should be interpreted as an
+  annotation-free result until those inputs and objectives are replaced.
+
+## 2026-07-27 — M2: GRU PPO to 500k frames
+
+- Goal: test whether the primary recurrent baseline begins learning useful
+  closed-loop traversal by approximately 500k environment frames.
+- Initialization: from scratch; no behavior cloning and no feed-forward
+  checkpoint transfer.
+- Configuration:
+  - shared encoder plus one-layer GRU, hidden width 256;
+  - recurrent sequence length 64;
+  - 1,024 frames per collector batch, PPO minibatch 256, four update epochs;
+  - learning rate `5e-5`, BF16 AMP;
+  - 500,000 requested frames (the collector may finish the final complete
+    batch slightly above this);
+  - immutable v2 preflight training manifest with 330 connected,
+    physically plausible subjects;
+  - the fixed three-case v2 validation smoke manifest, keeping validation
+    within the requested resource limit;
+  - intermediate checkpoints approximately every 50k frames and one
+    validation at the final approximately-500k boundary.
+- Planned service: `navigator-gru-nnunet-500k-v1.service`.
+- Checkpoints and TensorBoard events:
+  `/home/matey/project/segmentor/checkpoints/navigator-gru-nnunet-500k-v1`
+  (inside the directory already watched by `navigator-tensorboard.service`).
+- Interpretation boundary: the current environment still uses
+  segmentation-derived observations/rewards. This experiment assesses the
+  recurrent PPO implementation, not the future annotation-free formulation.
+- Launch note: an initial broad-dataset launch was rejected before its first
+  PPO update when `s0628` was found to have disconnected anatomical
+  endpoints. This confirmed that raw file completeness is not sufficient for
+  training eligibility. The corrected launch uses the immutable v2 manifests.
+- Result: **invalid for the annotation-free research question and stopped**.
+  The service was terminated at 345,088 collected frames, before held-out
+  validation. The last resumable checkpoint is 301,056 frames.
+- Contamination audit:
+  - the policy directly observed the GT small-bowel segmentation patch,
+    current GT Dice, segmentation-derived geodesic progress, and goal
+    direction;
+  - action projection was constrained by the GT segmentation;
+  - reward used GT coverage, segmentation-derived GDT, and an
+    out-of-segmentation penalty;
+  - termination used GT Dice and a label-derived endpoint.
+- Training Dice from this run is not publishable evidence and must not be
+  compared with annotation-free methods. Retain its checkpoints only as
+  explicitly labeled privileged-debug artifacts.
+
+## 2026-07-27 — M3: enforceable annotation-free environment
+
+- Goal: make privileged-data access structurally impossible in the policy
+  training path rather than relying on convention or zero reward weights.
+- Contract:
+  - policy dataset loader accepts CT, an image-derived Meijering cache, and one
+    externally supplied start seed only;
+  - no segmentation, endpoint, GDT, local peaks, or expert path is loaded into
+    the training environment;
+  - four spatial channels: previous CT patch, current CT patch,
+    image-derived wall response, and agent-owned cumulative path;
+  - seven context values: elapsed-time fraction, normalized position, and
+    previous direction;
+  - action projection is image-bounds-only;
+  - training reward uses only agent-owned novelty, fixed step cost,
+    image-derived wall response, and curvature;
+  - episodes terminate only at the fixed horizon;
+  - GT Dice/endpoint metrics are loaded by a separate evaluator only after a
+    held-out rollout is complete;
+  - held-out labels are report-only and cannot select a checkpoint or alter
+    optimization; annotation-free runs save fixed-step checkpoints only.
+- Configuration fails closed when annotation-free mode is combined with goal
+  channels, coverage/GDT reward, endpoint termination, behavior cloning,
+  expert path generation, or any other privileged option.
+- Leakage regression: two environments with identical CT/seed but adversarially
+  different masks, endpoints, GDTs, and expert paths produce identical
+  observations, contexts, rewards, positions, and termination.
+- Loader regression: annotation-free nnU-Net loading succeeds when label
+  directories do not exist.
+- Verification:
+  - focused suite: 28 tests plus two subtests passed;
+  - full suite: 55 tests plus two subtests passed;
+  - 64-frame GRU CUDA smoke completed at 112 final steps/s with 914.6 MiB peak
+    allocated and 1,316 MiB reserved.
+- The CUDA smoke used label-derived seed coordinates as explicitly
+  non-scientific temporary fixtures. A long clean run is blocked until an
+  operator-supplied or image-derived seed manifest with honest provenance is
+  available.
+- Reward-quality warning: sigma-1 Meijering responses overlap heavily between
+  bowel and background on the three audited cases. Passing the leakage gate
+  does not establish that this intrinsic objective identifies bowel, and a
+  long run must not be launched merely because the implementation executes.
+
+## 2026-07-27 — M4: inference-clean policy with reward supervision
+
+- Motivation:
+  - remove the redundant previous-CT channel now that the policy has GRU
+    memory and explicit previous direction;
+  - replace the single sigma-1 Meijering response with a compact physically
+    scaled filter bank;
+  - separate policy observability from reward supervision.
+- Policy inputs:
+  - current CT patch;
+  - dark-ridge and bright-ridge multiscale Meijering responses;
+  - multiscale Gaussian band-pass magnitude;
+  - smoothed gradient magnitude;
+  - the agent-owned cumulative path mask.
+- Filter scales are `3`, `6`, and `9 mm`, converted to voxels from image
+  spacing. Full-volume filter maps are versioned and cached before reuse.
+- Context remains seven non-label values: time, normalized position, and
+  previous direction. There is no segmentation patch, Dice/progress scalar,
+  goal direction, or goal-distance patch.
+- Added an explicit reward-supervised/inference-clean protocol:
+  - signed Dice-potential difference and signed GDT-potential difference are
+    available during training;
+  - GT can change reward and terminal scoring but cannot change policy inputs
+    or bounds-only action dynamics;
+  - behavior cloning, goal priors/channels, the hybrid planner, and expert
+    paths are prohibited;
+  - deployment requires CT, cached image filters, path history, and one start
+    seed, but no mask or endpoint.
+- This is a supervised-RL baseline, **not annotation-free training**. It must
+  be named accordingly in every result.
+- Separation regression: adversarially changing masks/GDT/endpoints changes
+  reward while leaving observations, context, executed position, and action
+  projection unchanged.
+- Full suite: 56 tests plus two subtests passed.
+- CUDA smoke, GRU hidden 64, 64 frames:
+  - cold filter caches: 6.7 final steps/s;
+  - warm filter caches: 59.9 final steps/s;
+  - peak CUDA memory: 2,449 MiB allocated, 3,618 MiB reserved.
+- Three-case filter audit against balanced negatives within 30 mm of the bowel
+  mask, reported as polarity-independent AUC:
+  - `s0120`: CT 0.733, dark Meijering 0.686, bright Meijering 0.590,
+    band-pass 0.526, gradient 0.614;
+  - `s0224`: CT 0.534, dark Meijering 0.585, bright Meijering 0.559,
+    band-pass 0.671, gradient 0.711;
+  - `s1389`: CT 0.678, dark Meijering 0.797, bright Meijering 0.742,
+    band-pass 0.720, gradient 0.608.
+- Interpretation: the filters are complementary across subjects rather than a
+  reliable handcrafted bowel segmenter. They are appropriate policy features,
+  but not yet a defensible standalone intrinsic reward.
+
+## 2026-07-27 — M5: reward-step profiling and long GRU launch
+
+- Goal: remove environment/reward overhead without changing observations,
+  action projection, path geometry, Dice, GDT, or reward values, then start
+  the first long reward-supervised/inference-clean GRU run.
+- Profile protocol:
+  - real warm-cache case `s0120` on the RTX 5070 Ti;
+  - reward-supervised clean-policy environment, 24 mm patch, 6 mm maximum
+    displacement, and 9 mm path radius;
+  - 256 random environment steps after warm-up, synchronized CUDA wall time;
+  - the profiler is preserved as `scripts/profile_navigator_steps.py`.
+- Baseline environment-only result: `1,179.1` steps/s, or `0.848 ms/step`.
+  The largest measured components were path-tube dilation/uniquing
+  (`0.234 ms/attempted step`), state patch construction (`0.152 ms/step`),
+  reward calculation (`0.129 ms/step`), and action projection
+  (`0.094 ms/step`). This excludes policy inference and PPO optimization.
+- Accuracy-neutral changes:
+  - extract all four static filter patches in one multichannel slice rather
+    than four independent slices;
+  - bypass line rasterization and all-ones mask indexing for clean-policy
+    bounds-only action validation;
+  - cache the exact unique dilated relative geometry of each short rasterized
+    line and translate/clip it per step;
+  - retain Dice coverage as a Python scalar rather than allocating and then
+    synchronizing a one-value CUDA tensor.
+- Steady-state result after the finite line-geometry cache warmed:
+  `1,590.3` steps/s, or `0.629 ms/step`, a `34.9%` environment-step throughput
+  increase. Reward calculation itself fell to `0.117 ms/step`; path updates
+  fell to `0.212 ms` per accepted movement. The first few hundred diverse
+  movements populate the cache, so cold improvement is smaller.
+- Equivalence gates:
+  - batched multichannel patch extraction is byte-exact against independent
+    per-channel extraction, including volume boundaries;
+  - cached path construction matches an independent physical-tube
+    implementation exactly and preserves path/Dice counters;
+  - clean-policy adversarial label-invariance and reward-separation tests
+    continue to pass;
+  - full suite: 58 tests, 18 warnings, and two subtests passed.
+- Seed provenance for this supervised protocol is frozen by
+  `scripts/export_navigator_reward_seeds.py`. It exports the first anatomical
+  endpoint from each preflight cache in native XYZ order and records explicitly
+  that these are label-derived training/validation seeds. They must never be
+  described as operator-supplied or annotation-free.
+- Planned long run:
+  - service `navigator-gru-reward-supervised-3m-v1.service`;
+  - from-scratch shared-encoder GRU PPO, hidden width 256, recurrent sequences
+    of 64, BF16 AMP;
+  - 3,000,000 requested frames, checkpoints approximately every 50k frames,
+    three-case validation approximately every 500k frames;
+  - immutable v2 330-case training manifest and three-case validation smoke
+    manifest;
+  - exact Dice-potential and GDT-potential reward supervision, with no GT
+    policy inputs or GT action projection.
+- Launch:
+  - active since `2026-07-27 22:24 EEST` after correcting the configured
+    `uv` path to `/usr/bin/uv`;
+  - TensorBoard run:
+    `/home/matey/project/segmentor/checkpoints/navigator-gru-reward-supervised-3m-v1/nnunet-actual/tensorboard/20260727-222409-906639`;
+  - first 6,144 frames completed at roughly `340–360` end-to-end training
+    steps/s, including PPO updates and cold filter-cache work;
+  - observed total GPU use was about `10.4 GiB / 15.9 GiB`, with no OOM;
+  - early completed-episode training Dice values are not validation results
+    and ranged around `0.5–0.7`; reward remained negative and endpoint-plus-
+    Dice traversal success is the decisive metric.
+
+### M5 final result
+
+- The run was stopped deliberately at `1,254,400` frames because its two
+  fixed three-case validations were bit-for-bit identical:
+  - frames `500,736` and `1,001,472`;
+  - mean Dice `0.0115325672`;
+  - traversal and endpoint success `0/3`;
+  - mean endpoint distance `185.7095 mm`;
+  - all trajectories exhausted the `2,048`-step horizon.
+- A separate exact Beta-mode evaluation of checkpoint `1,254,400` was also
+  unsuccessful: mean Dice `0.0080688884`, traversal and endpoint success
+  `0/3`, and mean endpoint distance `176.1807 mm`.
+- Training-only Dice near `0.156` at roughly one million frames was therefore
+  not predictive of held-out traversal. Seven training episodes were logged as
+  successes among 493 completed-episode records, with none after frame
+  `534,528`.
+- Conclusion: neither more frames nor switching deterministic evaluation from
+  the Beta mean to the paper-style Beta mode fixed the stalled clean-policy
+  run.
+
+## 2026-07-27 — M6: exact discrete displacement PPO
+
+- Motivation: the continuous Beta policy emits a real-valued 3-D action, but
+  the environment rounds/projects it to one integer voxel displacement. Many
+  distinct action densities therefore induce the same transition, producing a
+  discontinuous and highly redundant optimization problem. This is not an
+  invalid score-function estimator, but it needlessly separates PPO likelihood
+  from the behaviorally meaningful move probability.
+- Added an opt-in categorical recurrent actor:
+  - one category for every nonzero integer displacement in
+    `[-max_step_vox, max_step_vox]^3`;
+  - `728` categories for the current four-voxel maximum;
+  - the sampled category maps directly to its exact displacement;
+  - the initial bias assigns equal total probability to each Chebyshev
+    step-length shell, preventing the larger number of long-move categories
+    from dominating the initial policy;
+  - deterministic evaluation uses categorical mode/argmax;
+  - the original Beta policy remains the default for compatibility.
+- Verification:
+  - focused remote suite: 33 tests, 18 warnings, and two subtests passed;
+  - full remote suite: 61 tests, 18 warnings, and two subtests passed;
+  - 256-frame real-data CUDA smoke completed end to end at `206–270`
+    steps/s with `1,098.4 MiB` peak allocated and `2,264 MiB` reserved.
+- Controlled real-data ablation `navigator-gru-categorical-gdt1-102k-v1`:
+  - same seed, 330-case training manifest, held-out cases `s1389`, `s0224`,
+    and `s0120`, GRU-256, 64-step recurrent sequences, BF16, and reward
+    protocol as M5;
+  - only the action distribution changed from Beta to categorical;
+  - `102,400` frames completed in `5m04s`, with `5,051.8 MiB` peak CUDA
+    allocated and `6,722 MiB` reserved;
+  - at frames `25,600` and `51,200`: mean Dice `0.0148802710`, endpoint
+    distance `175.5833 mm`, success `0/3`;
+  - at frames `76,800` and `102,400`: mean Dice `0.0115325672`, endpoint
+    distance `185.7095 mm`, success `0/3`;
+  - top categorical action probability rose from `0.0139` to `0.0509`, while
+    deterministic behavior converged to a generic one-voxel direction.
+- Interpretation: exact move likelihoods produce a small early improvement but
+  do not by themselves solve the credit-assignment problem. The final policy
+  collapses to the same poor held-out trajectory as M5.
+- Follow-up `navigator-gru-categorical-gdt5-102k-v1` changes only normalized
+  geodesic-progress reward scale from `1` to `5`; it was launched after the
+  GDT-1 run completed.
+- Operational fix: the nnU-Net wrapper now chooses categorical mode by default
+  when `NAVIGATOR_ACTION_DISTRIBUTION=categorical`, while preserving Beta mean
+  as the default for Beta policies.
+
+### M6 follow-up: reward scale and factorized exact actions
+
+- `navigator-gru-categorical-gdt5-102k-v1` completed the same `102,400`-frame
+  protocol in `5m08s`. Increasing only the normalized GDT potential from 1× to
+  5× did not help:
+  - Dice by checkpoint: `0.014880`, `0.009124`, `0.008069`, `0.008272`;
+  - endpoint distance: `175.58`, `176.09`, `176.18`, `175.88 mm`;
+  - traversal success remained `0/3`;
+  - final top-action probability was `0.0535`.
+- The preserved exact first-step audit
+  `scripts/audit_navigator_reward_landscape.py` evaluated all 728 moves at the
+  three held-out start seeds:
+  - `s0120`: 169 positive-reward moves, best reward `0.0709`;
+  - `s0224`: 227 positive-reward moves, best reward `0.1834`;
+  - `s1389`: 298 positive-reward moves, best reward `2.2656`;
+  - the initial shell-balanced expected rewards were nevertheless
+    `-0.5613`, `-0.6362`, and `-0.3202`.
+- This rules out an absent local reward gradient. It also exposed a categorical
+  design problem: equal *total* mass per Chebyshev step-length shell makes each
+  individual one-voxel move roughly 15 times more likely than each four-voxel
+  move, so categorical mode is structurally biased toward short steps.
+- Added `factorized_categorical`, which emits three nine-way categorical
+  coordinates for the current `[-4,4]` displacement range:
+  - only 27 logits instead of 728;
+  - exact integer actions and an exact scalar joint log probability obtained by
+    summing the three factor log probabilities;
+  - no continuous rounding and no shell-count bias;
+  - one zero-displacement combination remains and receives the existing
+    explicit zero-movement penalty.
+- Verification:
+  - focused suite: 35 tests, 18 warnings, and two subtests passed;
+  - full suite: 63 tests, 18 warnings, and two subtests passed;
+  - real-data 256-frame CUDA collection plus PPO backward/update completed in
+    `10.9s`, with `2,062.2 MiB` allocated and `2,948 MiB` reserved.
+- Matched run `navigator-gru-factorized-gdt1-102k-v1` was launched with the
+  original GDT-1 reward to isolate the action-factorization change.
+
+### M6 critical audit correction: hidden GT-constrained dynamics
+
+- The first factorized run peaked at mean held-out Dice `0.017573` at frame
+  `25,600`, then declined to `0.010209` by frame `76,800`; success stayed
+  `0/3`. A 10× lower critic coefficient briefly reduced endpoint distance to
+  `165.05 mm` but likewise collapsed and never traversed a case.
+- Investigation of the repeated deterministic trajectories found a protocol
+  violation in `_calculate_reward`: when a clean-policy action landed outside
+  the supervised mask, the mask-constrained GDT was infinite. The function
+  returned an empty rasterized segment, and `_step` interpreted that as a
+  rejected move. Thus labels did not appear in the observation or explicit
+  action projector, but they still silently constrained the transition.
+- This explains the suspiciously high training Dice and repeated validation
+  paths: the agent was often pinned at the seed or forced to remain inside the
+  target. **All reward-supervised results before this correction are invalid as
+  evidence for an inference-clean policy.**
+- Fix:
+  - an infinite supervised GDT now adds the configured negative reward;
+  - the bounds-valid line segment is still returned and the action executes;
+  - the last finite GDT potential is retained so returning to the target cannot
+    create a leave/re-enter reward cycle;
+  - target Dice and out-of-target penalties remain reward terms only.
+- The adversarial separation regression now uses two masks for the same image
+  and action where the next GDT is finite in one case and infinite in the
+  other. It asserts identical policy observations and the exact same executed
+  destination `(8,8,10)`, while requiring different rewards. This specific
+  case failed before the fix.
+- Actor/critic optimization cleanup:
+  - added optional `separate_actor_critic_losses`;
+  - when enabled, critic gradients update only the value head, while the shared
+    encoder/GRU receives actor gradients;
+  - actor/shared and critic-only parameter sets are clipped separately, so a
+    large value-head norm cannot rescale the actor gradient;
+  - exposed entropy coefficient, value coefficient, and maximum gradient norm
+    through the systemd training wrapper.
+- Verification after the dynamics fix:
+  - focused suite: 35 tests, 18 warnings, and two subtests passed;
+  - full suite: 63 tests, 18 warnings, and two subtests passed.
+- The invalid separated-loss run was stopped immediately. Replacement
+  `navigator-gru-factorized-clean-dynamics-102k-v1` starts from scratch with
+  exact factorized actions, truly bounds-only transitions, actor/critic loss
+  routing and clipping separated, and the original GDT-1 reward.
+
+## 2026-07-28 — M7: off-target Euclidean recovery reward
+
+- The first honest clean-dynamics diagnostic was stopped after its
+  `25,600`-frame validation:
+  - mean Dice `0.0193954`;
+  - mean endpoint distance `478.317 mm`;
+  - traversal and endpoint success `0/3`;
+  - validation trajectories used all `2,048` steps and finished with returns
+    around `-2,700`.
+- Unlike the invalid pre-fix runs, the agent now genuinely wandered hundreds
+  of millimetres from the seed. This validated the bounds-only transition fix
+  but exposed a reward-support problem: GDT is infinite outside the target, so
+  the old flat failure penalty supplied no direction back toward the bowel.
+- Added a reward-only Euclidean distance-to-target potential:
+  `scale * (distance_t - distance_t+1) / max_3d_step`. The distance transform
+  is zero inside the mask and uses the volume's physical voxel spacing. Thus:
+  - moving farther from the target is negative;
+  - moving toward it is positive;
+  - a leave/return excursion contributes zero potential reward;
+  - the executed action remains determined solely by the image bounds.
+- The maximum-step normalizer is the true diagonal 3-D displacement
+  (`10.392 mm` for the current four-voxel, 1.5-mm setup), not the 6-mm
+  per-axis/Chebyshev limit.
+- Every executed rasterized segment that touches background also pays the
+  fixed `r_val1` penalty. Checking the whole segment prevents a long discrete
+  move from crossing background and landing on a nearby loop without cost.
+  Consequently, a leave/return cycle is strictly negative after fixed costs
+  even though the directional potential itself telescopes to zero.
+- When Euclidean recovery is enabled, it replaces the non-directional
+  `r_val2` penalty for infinite GDT. The legacy flat penalty remains when the
+  recovery map is disabled.
+- Recovery is computed against the start/goal-connected GDT support
+  intersected with the bowel mask, not the union of every labeled component.
+  This prevents a disconnected annotation island from becoming a zero-distance
+  refuge with infinite goal GDT. Cached maps are versioned as
+  `target_distance_connected_edt_v2.nii`. CuCIM computes them on the GPU when
+  available; annotation-free mode rejects any nonzero recovery scale because
+  this reward requires labels during training.
+- Regression and integration gates:
+  - same image/action with finite versus infinite supervised GDT executes the
+    identical transition;
+  - leaving is negative, returning is directionally positive, and their
+    combined reward is negative;
+  - an interior-to-interior action crossing one background voxel is penalized;
+  - full remote suite: 69 tests, 18 warnings, and two subtests passed.
+- A 256-frame real-case CUDA smoke completed in `9.737s`, generated three
+  prefetched EDT caches, and used `645.6 MiB` peak allocated / `776.0 MiB`
+  peak reserved CUDA memory.
+- Preliminary ablation
+  `navigator-gru-factorized-recovery1-102k-v1` was stopped before its first
+  validation after the disconnected-component loophole above was found.
+  Replacement `navigator-gru-factorized-recovery1-102k-v2` is launched from
+  scratch:
+  GRU-256, exact factorized categorical actions, separated actor/critic
+  gradient routing, recovery scale 1, GDT scale 1, the immutable 330-case
+  training manifest, and only the same three held-out validation cases. Its
+  connected-map 256-frame CUDA smoke completed in `9.614s` with `646.2 MiB`
+  allocated / `776.0 MiB` reserved. The full run's TensorBoard directory is
+  `/home/matey/project/segmentor/checkpoints/navigator-gru-factorized-recovery1-102k-v2/nnunet-actual/tensorboard/20260728-002643-914233`.
+- The v2 run reached its first validation trigger but failed during the second
+  held-out case with a real CUDA OOM: trainer `4.40 GiB`, training-prefetch
+  worker `5.48 GiB`, validation-prefetch worker `3.89 GiB`, followed by a
+  requested `1.09 GiB` patch allocation. The workers had already copied their
+  results to NumPy but CuPy retained the temporary EDT/filter allocations in
+  its caching pools.
+- Added an accuracy-neutral worker cleanup after each subject is fully
+  materialized: both CuPy device and pinned-memory pools are explicitly
+  released. The failed v2 checkpoint is not continued; the corrected run is
+  restarted from scratch after a validation-inclusive memory gate.
+- Validation-inclusive gate `navigator-recovery-memory-gate-v3`:
+  - full suite before launch: 70 tests, 18 warnings, and two subtests passed;
+  - completed 25,600 frames plus all three held-out 2,048-step rollouts in
+    `1m54s` wall time without OOM;
+  - peak trainer CUDA memory was `4,976.1 MiB` allocated / `5,680 MiB`
+    reserved, while the completed CuPy workers retained no visible CUDA
+    allocation;
+  - mean Dice `0.0277485`, mean endpoint distance `451.465 mm`, endpoint and
+    traversal success `0/3`;
+  - per-case Dice for `s1389`, `s0224`, and `s0120`: `0.010745`,
+    `0.056525`, and `0.015975`;
+  - per-case endpoint distance: `149.226`, `840.200`, and `364.969 mm`.
+- Relative to the matched honest no-recovery diagnostic at 25,600 frames,
+  recovery improved mean Dice from `0.0193954` to `0.0277485` and endpoint
+  distance from `478.317` to `451.465 mm`. This is encouraging but remains far
+  below the 0.40 Dice and complete-traversal research target.
+- Full from-scratch run
+  `navigator-gru-factorized-recovery1-102k-v3` was launched only after this
+  gate passed, with validations/checkpoints every 25,600 frames and no more
+  than the fixed three validation cases.

@@ -4,6 +4,7 @@ from navigator.rewards import (
     coverage_potential_reward,
     gdt_progress_reward,
     is_path_success,
+    target_recovery_potential_reward,
     terminal_path_reward,
 )
 
@@ -57,6 +58,27 @@ class GdtProgressRewardTests(unittest.TestCase):
 
     def test_implausible_jump_is_penalized(self):
         self.assertEqual(gdt_progress_reward(11.0, 10.0, 6.0), -6.0)
+
+
+class TargetRecoveryPotentialRewardTests(unittest.TestCase):
+    def test_moving_away_is_negative_and_recovery_is_positive(self):
+        away = target_recovery_potential_reward(0.0, 3.0, 6.0, 1.0)
+        recovery = target_recovery_potential_reward(3.0, 0.0, 6.0, 1.0)
+        self.assertLess(away, 0.0)
+        self.assertGreater(recovery, 0.0)
+
+    def test_round_trip_cannot_create_recovery_reward(self):
+        away = target_recovery_potential_reward(0.0, 3.0, 6.0, 1.0)
+        recovery = target_recovery_potential_reward(3.0, 0.0, 6.0, 1.0)
+        self.assertAlmostEqual(away + recovery, 0.0)
+
+    def test_distance_and_scale_must_be_valid(self):
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            target_recovery_potential_reward(-1.0, 0.0, 6.0, 1.0)
+        with self.assertRaisesRegex(ValueError, "positive"):
+            target_recovery_potential_reward(0.0, 1.0, 0.0, 1.0)
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            target_recovery_potential_reward(0.0, 1.0, 6.0, -1.0)
 
 
 if __name__ == "__main__":

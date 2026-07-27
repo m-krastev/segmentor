@@ -13,8 +13,10 @@ from typing import Dict, List, Any
 from .utils import (
     find_start_end,
     compute_wall_map,
+    compute_navigation_filter_bank,
     compute_gdt,
     distance_transform_edt,
+    release_gpu_preprocessing_memory,
 )
 
 from .config import Config
@@ -43,6 +45,9 @@ CACHE_FILES = {
     # cross forbidden background, are never silently reused.
     "gdt_start": "gdt_start_mcp26_v1.nii",
     "gdt_end": "gdt_end_mcp26_v1.nii",
+    # Distance to the endpoint-connected GDT support, not to the union of all
+    # labels: disconnected annotation islands must remain off-target.
+    "target_distance": "target_distance_connected_edt_v2.nii",
     "local_peaks": "local_peaks.npy",
     "expert_path": "expert_path_skeleton_tree_v2.npy",
 }
@@ -68,6 +73,124 @@ def normalize_coordinate_rows(
             f"Coordinate array contains {coordinates.size} values, expected a multiple of 3"
         )
     return coordinates.reshape(-1, 3)
+
+
+def load_annotation_free_subject_data(
+    *,
+    case_id: str,
+    image_path: Path,
+    patient_dir: Path,
+    seed_path: Path,
+    config: Config,
+) -> dict[str, Any]:
+    """Load only image-derived policy data plus one external start seed.
+
+    This function deliberately has no segmentation, endpoint, GDT, or expert
+    path arguments. Keeping this loader structurally separate makes accidental
+    label access in annotation-free training auditable.
+    """
+
+    print(f"Loading annotation-free subject {case_id}", flush=True)
+    image_nii: nib.nifti1.Nifti1Image = nib.load(image_path)
+    image = image_nii.get_fdata(dtype=np.float32)
+    spacing = tuple(float(value) for value in image_nii.header.get_zooms()[:3])
+    expected_spacing = (config.voxel_size_mm,) * 3
+    if not np.allclose(spacing, expected_spacing, atol=1e-3):
+        raise ValueError(
+            f"NIfTI spacing {spacing} for {case_id} does not match configured "
+            f"isotropic spacing {expected_spacing}."
+        )
+
+    seed_xyz = np.loadtxt(seed_path, dtype=int)
+    if np.asarray(seed_xyz).size != 3:
+        raise ValueError(
+            f"External seed for {case_id} must contain exactly three native-XYZ "
+            f"voxel coordinates: {seed_path}"
+        )
+    seed_xyz = np.asarray(seed_xyz, dtype=int).reshape(3)
+    if np.any(seed_xyz < 0) or np.any(seed_xyz >= np.asarray(image.shape)):
+        raise ValueError(f"External seed for {case_id} is outside the image: {seed_xyz}")
+
+    cache_dir = patient_dir / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    image_features = load_or_compute_navigation_filter_bank(
+        image,
+        image_nii.affine,
+        cache_dir,
+        config,
+    )
+    release_gpu_preprocessing_memory()
+
+    # The environment uses ZYX tensor order.
+    return {
+        "id": case_id,
+        "image": np.transpose(image, (2, 1, 0)),
+        "image_features": np.transpose(image_features, (0, 3, 2, 1)),
+        # The first filter remains the intrinsic image-energy response.
+        "wall_map": np.transpose(image_features[0], (2, 1, 0)),
+        "image_affine": image_nii.affine,
+        "spacing": spacing[::-1],
+        "start_coord": tuple(int(value) for value in seed_xyz[::-1]),
+    }
+
+
+def load_or_compute_navigation_filter_bank(
+    image: np.ndarray,
+    affine: np.ndarray,
+    cache_dir: Path,
+    config: Config,
+) -> np.ndarray:
+    """Return the versioned four-channel image-only navigation filter bank."""
+
+    scales_key = "-".join(f"{scale:g}" for scale in config.navigation_filter_scales_mm)
+    cache_path = cache_dir / f"navigation_filters-v1-mm-{scales_key}.nii"
+    if cache_path.exists():
+        cached = nib.load(cache_path).get_fdata(dtype=np.float32)
+        if cached.ndim != 4 or cached.shape[-1] != 4:
+            raise ValueError(f"Invalid navigation-filter cache shape: {cache_path}")
+        return np.moveaxis(cached, -1, 0)
+
+    features = compute_navigation_filter_bank(
+        image,
+        spacing_mm=config.voxel_size_mm,
+        scales_mm=config.navigation_filter_scales_mm,
+    )
+    nib.save(
+        nib.Nifti1Image(np.moveaxis(features, 0, -1), affine),
+        cache_path,
+    )
+    return features
+
+
+def load_nnunet_evaluation_target(
+    nnunet_raw: str | Path,
+    cache_dir: str | Path,
+    case_id: str,
+) -> dict[str, Any]:
+    """Load held-out labels only after an annotation-free rollout finishes."""
+
+    nnunet_raw = Path(nnunet_raw)
+    segmentation_path = (
+        nnunet_raw / "Dataset018_small_bowel" / "labelsTr" / f"{case_id}.nii.gz"
+    )
+    start_end_path = Path(cache_dir) / case_id / "cache" / CACHE_FILES["start_end"]
+    if not segmentation_path.is_file():
+        raise FileNotFoundError(f"Evaluation target missing: {segmentation_path}")
+    if not start_end_path.is_file():
+        raise FileNotFoundError(f"Evaluation endpoint cache missing: {start_end_path}")
+
+    segmentation_nii = nib.load(segmentation_path)
+    segmentation = np.asanyarray(segmentation_nii.dataobj) > 0
+    start_end = np.loadtxt(start_end_path, dtype=int).reshape(-1, 3)
+    if len(start_end) != 2:
+        raise ValueError(f"Expected one start/end pair in {start_end_path}")
+    return {
+        "segmentation": np.transpose(segmentation, (2, 1, 0)),
+        "goal": tuple(int(value) for value in start_end[1][::-1]),
+        "spacing": tuple(
+            float(value) for value in segmentation_nii.header.get_zooms()[:3][::-1]
+        ),
+    }
 
 
 class SmallBowelDataset(Dataset):
@@ -193,6 +316,15 @@ class NNUNetActualDataset(Dataset):
         self.nnunet_raw = Path(nnunet_raw)
         self.cache_dir = Path(cache_dir)
         self.config = config
+        self.seed_dir = (
+            Path(config.nnunet_seed_dir)
+            if config.clean_policy_inputs and config.nnunet_seed_dir
+            else None
+        )
+        if config.clean_policy_inputs and self.seed_dir is None:
+            raise ValueError(
+                "Image-only nnU-Net policy loading requires an external seed directory"
+            )
 
         if not self.nnunet_raw.is_dir():
             raise FileNotFoundError(f"nnU-Net raw directory not found: {self.nnunet_raw}")
@@ -213,6 +345,16 @@ class NNUNetActualDataset(Dataset):
         return self.nnunet_raw / dataset / folder / f"{case_id}{suffix}"
 
     def _discover_complete_case_ids(self) -> list[str]:
+        if self.config.annotation_free:
+            directory = self.nnunet_raw / "Dataset018_small_bowel" / "imagesTr"
+            suffix = "_0000.nii.gz"
+            if not directory.is_dir():
+                raise FileNotFoundError(f"nnU-Net image directory not found: {directory}")
+            return sorted(
+                path.name[: -len(suffix)]
+                for path in directory.glob(f"*{suffix}")
+                if path.name.endswith(suffix)
+            )
         case_sets = []
         for dataset, folder, suffix in NNUNET_CASE_FILES:
             directory = self.nnunet_raw / dataset / folder
@@ -230,10 +372,23 @@ class NNUNetActualDataset(Dataset):
     def _validate_cases(self) -> None:
         missing = []
         for case_id in self.case_ids:
-            for dataset, folder, _ in NNUNET_CASE_FILES:
-                path = self._case_path(dataset, folder, case_id)
-                if not path.is_file():
-                    missing.append(str(path))
+            if self.config.annotation_free:
+                image_path = self._case_path(
+                    "Dataset018_small_bowel", "imagesTr", case_id
+                )
+                seed_path = self.seed_dir / f"{case_id}.txt"
+                for path in (image_path, seed_path):
+                    if not path.is_file():
+                        missing.append(str(path))
+            else:
+                for dataset, folder, _ in NNUNET_CASE_FILES:
+                    path = self._case_path(dataset, folder, case_id)
+                    if not path.is_file():
+                        missing.append(str(path))
+                if self.config.reward_supervised:
+                    seed_path = self.seed_dir / f"{case_id}.txt"
+                    if not seed_path.is_file():
+                        missing.append(str(seed_path))
         if missing:
             raise FileNotFoundError(
                 "Missing nnU-Net files:\n" + "\n".join(f"- {path}" for path in missing)
@@ -246,6 +401,16 @@ class NNUNetActualDataset(Dataset):
         case_id = self.case_ids[index]
         patient_dir = self.cache_dir / case_id
         patient_dir.mkdir(parents=True, exist_ok=True)
+        if self.config.annotation_free:
+            return load_annotation_free_subject_data(
+                case_id=case_id,
+                image_path=self._case_path(
+                    "Dataset018_small_bowel", "imagesTr", case_id
+                ),
+                patient_dir=patient_dir,
+                seed_path=self.seed_dir / f"{case_id}.txt",
+                config=self.config,
+            )
         data = load_subject_data(
             {
                 "id": case_id,
@@ -258,7 +423,7 @@ class NNUNetActualDataset(Dataset):
             },
             self.config,
         )
-        return {
+        result = {
             "id": data["id"],
             "image": data["image"],
             "seg": data["seg"],
@@ -267,6 +432,7 @@ class NNUNetActualDataset(Dataset):
             "wall_map": data["wall_map"],
             "gdt_start": data["gdt_start"],
             "gdt_end": data["gdt_end"],
+            "target_distance": data.get("target_distance"),
             "image_affine": data["image_affine"],
             "spacing": data["spacing"],
             "start_coord": data["start_coord"],
@@ -274,6 +440,33 @@ class NNUNetActualDataset(Dataset):
             "local_peaks": data["local_peaks"],
             "gt_path": data.get("gt_path"),
         }
+        if self.config.reward_supervised:
+            native_image = np.transpose(data["image"], (2, 1, 0))
+            native_features = load_or_compute_navigation_filter_bank(
+                native_image,
+                data["image_affine"],
+                patient_dir / "cache",
+                self.config,
+            )
+            seed_xyz = np.asarray(
+                np.loadtxt(self.seed_dir / f"{case_id}.txt", dtype=int),
+                dtype=int,
+            )
+            if seed_xyz.size != 3:
+                raise ValueError(
+                    f"External seed for {case_id} must contain exactly three values"
+                )
+            seed_zyx = tuple(int(value) for value in seed_xyz.reshape(3)[::-1])
+            if not result["seg"][seed_zyx]:
+                raise ValueError(
+                    f"External seed for {case_id} is outside the reward-supervision mask"
+                )
+            result["start_coord"] = seed_zyx
+            result["image_features"] = np.transpose(
+                native_features,
+                (0, 3, 2, 1),
+            )
+        return result
 
 
 def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> Dict[str, Any]:
@@ -428,6 +621,28 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
             "small-bowel segmentation; full end-to-end traversal is impossible."
         )
 
+    if config.target_recovery_reward_scale:
+        target_distance_cache_path = cache_dir / CACHE_FILES["target_distance"]
+        if target_distance_cache_path.exists():
+            target_distance_np = nib.load(target_distance_cache_path).get_fdata(
+                dtype=np.float32
+            )
+        else:
+            connected_target = (
+                (result["seg"] != 0)
+                & np.isfinite(result["gdt_start"])
+                & np.isfinite(result["gdt_end"])
+            )
+            target_distance_np = distance_transform_edt(
+                ~connected_target,
+                sampling=result["spacing"],
+            ).astype(np.float32)
+            nib.save(
+                nib.Nifti1Image(target_distance_np, result["image_affine"]),
+                target_distance_cache_path,
+            )
+        result["target_distance"] = target_distance_np
+
     local_peaks_cache_path = cache_dir / CACHE_FILES["local_peaks"]
     if local_peaks_cache_path.exists():
         local_peaks_np = np.loadtxt(local_peaks_cache_path, dtype=int)
@@ -476,6 +691,11 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         result["wall_map"] = np.transpose(result["wall_map"], (2, 1, 0))
         result["gdt_start"] = np.transpose(result["gdt_start"], (2, 1, 0))
         result["gdt_end"] = np.transpose(result["gdt_end"], (2, 1, 0))
+        if result.get("target_distance") is not None:
+            result["target_distance"] = np.transpose(
+                result["target_distance"],
+                (2, 1, 0),
+            )
         result["local_peaks"] = np.fliplr(result["local_peaks"])
         # path.npy is native XYZ on disk. Keep the conversion next to the
         # volume transposes so the path and every spatial tensor enter the
@@ -483,6 +703,7 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         if result.get("gt_path") is not None:
             result["gt_path"] = np.fliplr(result["gt_path"])
 
+    release_gpu_preprocessing_memory()
     return result
 
 

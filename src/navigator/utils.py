@@ -12,7 +12,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import (
+    binary_dilation,
+    gaussian_filter,
+    gaussian_gradient_magnitude,
+)
 from skimage.draw import disk
 from skimage.filters import meijering
 from skimage.graph import MCP_Geometric
@@ -206,6 +210,15 @@ try:
             image = cupy.asarray(image, dtype=cupy.float32)
         return _label2rgb(labels, image, **kwargs).get()
 
+    def release_gpu_preprocessing_memory():
+        """Release completed CuPy preprocessing allocations back to CUDA.
+
+        Dataset workers return NumPy arrays, so retaining their temporary GPU
+        pools only competes with the trainer and validation processes.
+        """
+        cupy.get_default_memory_pool().free_all_blocks()
+        cupy.get_default_pinned_memory_pool().free_all_blocks()
+
     # Significantly slower than skimage's implementation
     # from cucim.skimage.feature import peak_local_max as _peak_local_max
     # def peak_local_max(image, **kwargs):
@@ -230,6 +243,10 @@ except ImportError:
         logging.warning(
             "EDT not installed. Please install it to enable fast distance transform: `pip install edt`."
         )
+
+    def release_gpu_preprocessing_memory():
+        """CPU preprocessing has no CUDA allocation pool to release."""
+        return None
 
 
 def seed_everything(seed: int = 42):
@@ -272,7 +289,7 @@ def get_patch(
     Extract a 3D patch from a volume centered at a specific voxel.
 
     Args:
-        volume: The source 3D volume
+        volume: The source volume, optionally with leading channel dimensions
         center_vox: Center coordinates (z, y, x)
         patch_size_vox: Size of the patch (z, y, x)
         pad_value: Value used for padding if patch extends beyond volume bounds
@@ -283,38 +300,44 @@ def get_patch(
     center_z, center_y, center_x = center_vox
     pz, py, px = patch_size_vox
     h_pz, h_py, h_px = pz // 2, py // 2, px // 2
-    pad_z = max(0, h_pz - center_z) + max(0, center_z + (pz - h_pz) - volume.shape[0])
-    pad_y = max(0, h_py - center_y) + max(0, center_y + (py - h_py) - volume.shape[1])
-    pad_x = max(0, h_px - center_x) + max(0, center_x + (px - h_px) - volume.shape[2])
+    depth, height, width = volume.shape[-3:]
+    pad_z = max(0, h_pz - center_z) + max(0, center_z + (pz - h_pz) - depth)
+    pad_y = max(0, h_py - center_y) + max(0, center_y + (py - h_py) - height)
+    pad_x = max(0, h_px - center_x) + max(0, center_x + (px - h_px) - width)
     padded_volume = volume
     if pad_z > 0 or pad_y > 0 or pad_x > 0:
         padding = (
             max(0, h_px - center_x),
-            max(0, center_x + (px - h_px) - volume.shape[2]),
+            max(0, center_x + (px - h_px) - width),
             max(0, h_py - center_y),
-            max(0, center_y + (py - h_py) - volume.shape[1]),
+            max(0, center_y + (py - h_py) - height),
             max(0, h_pz - center_z),
-            max(0, center_z + (pz - h_pz) - volume.shape[0]),
+            max(0, center_z + (pz - h_pz) - depth),
         )
-        padded_volume = (
-            F.pad(volume.unsqueeze(0).unsqueeze(0), padding, mode="constant", value=pad_value)
-            .squeeze(0)
-            .squeeze(0)
-        )
+        padded_volume = F.pad(volume, padding, mode="constant", value=pad_value)
         center_z += max(0, h_pz - center_z)
         center_y += max(0, h_py - center_y)
         center_x += max(0, h_px - center_x)
     start_z, start_y, start_x = center_z - h_pz, center_y - h_py, center_x - h_px
     end_z, end_y, end_x = start_z + pz, start_y + py, start_x + px
-    patch = padded_volume[start_z:end_z, start_y:end_y, start_x:end_x]
-    if patch.shape != tuple(patch_size_vox):
-        target_shape = tuple(patch_size_vox)
+    patch = padded_volume[
+        ...,
+        start_z:end_z,
+        start_y:end_y,
+        start_x:end_x,
+    ]
+    target_shape = (*volume.shape[:-3], *patch_size_vox)
+    if patch.shape != target_shape:
         new_patch = torch.full(target_shape, pad_value, dtype=patch.dtype, device=patch.device)
-        src_shape = patch.shape
-        copy_z = min(src_shape[0], target_shape[0])
-        copy_y = min(src_shape[1], target_shape[1])
-        copy_x = min(src_shape[2], target_shape[2])
-        new_patch[:copy_z, :copy_y, :copy_x] = patch[:copy_z, :copy_y, :copy_x]
+        copy_z = min(patch.shape[-3], target_shape[-3])
+        copy_y = min(patch.shape[-2], target_shape[-2])
+        copy_x = min(patch.shape[-1], target_shape[-1])
+        new_patch[..., :copy_z, :copy_y, :copy_x] = patch[
+            ...,
+            :copy_z,
+            :copy_y,
+            :copy_x,
+        ]
         patch = new_patch
     return patch
 
@@ -380,6 +403,75 @@ def compute_wall_map(
     """
     wall_map = meijering(image, sigmas=sigmas, black_ridges=black_ridges, mode="constant", **kwargs)
     return wall_map
+
+
+def _robust_unit_scale(image: np.ndarray, percentile: float = 99.5) -> np.ndarray:
+    """Scale a non-negative response robustly to [0, 1]."""
+
+    image = np.nan_to_num(
+        np.asarray(image, dtype=np.float32),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    )
+    image = np.maximum(image, 0.0)
+    scale = float(np.percentile(image, percentile))
+    if scale <= np.finfo(np.float32).eps:
+        return np.zeros_like(image, dtype=np.float32)
+    return np.clip(image / scale, 0.0, 1.0).astype(np.float32)
+
+
+def compute_navigation_filter_bank(
+    image: np.ndarray,
+    *,
+    spacing_mm: float,
+    scales_mm: tuple[float, ...] = (3.0, 6.0, 9.0),
+) -> np.ndarray:
+    """Compute compact multiscale CT features without anatomical labels.
+
+    The outputs are dark-ridge tubularity, bright-ridge tubularity,
+    bowel-scale band-pass magnitude, and smoothed gradient magnitude. Filter
+    scales are specified in physical millimetres and converted to voxels.
+    """
+
+    if spacing_mm <= 0:
+        raise ValueError("spacing_mm must be positive")
+    if not scales_mm or any(scale <= 0 for scale in scales_mm):
+        raise ValueError("scales_mm must contain positive values")
+
+    image = np.asarray(image, dtype=np.float32)
+    sigmas = tuple(max(0.5, float(scale) / spacing_mm) for scale in scales_mm)
+    dark_tubes = compute_wall_map(
+        image,
+        sigmas=sigmas,
+        black_ridges=True,
+    )
+    bright_tubes = compute_wall_map(
+        image,
+        sigmas=sigmas,
+        black_ridges=False,
+    )
+
+    inner_sigma = sigmas[0]
+    outer_sigma = sigmas[-1]
+    band_pass = np.abs(
+        gaussian_filter(image, sigma=inner_sigma, mode="nearest")
+        - gaussian_filter(image, sigma=outer_sigma, mode="nearest")
+    )
+    gradient = gaussian_gradient_magnitude(
+        image,
+        sigma=inner_sigma,
+        mode="nearest",
+    )
+    return np.stack(
+        [
+            _robust_unit_scale(dark_tubes),
+            _robust_unit_scale(bright_tubes),
+            _robust_unit_scale(band_pass),
+            _robust_unit_scale(gradient),
+        ],
+        axis=0,
+    )
 
 
 def draw_path_sphere(

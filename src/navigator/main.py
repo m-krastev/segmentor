@@ -166,15 +166,49 @@ def main():
 
     # Init the lazy modules
     with torch.no_grad():
-        dummy_input = TensorDict(
-            {
-                "actor": torch.zeros(1, in_act, *config.patch_size_vox, device=config.device),
-                "context": torch.zeros(1, config.context_features, device=config.device),
-                "action": torch.zeros(1, 3, device=config.device),
-            },
-        )
-        policy_module(dummy_input)
-        value_module(dummy_input)
+        dummy_data = {
+            "actor": torch.zeros(
+                1, in_act, *config.patch_size_vox, device=config.device
+            ),
+            "context": torch.zeros(
+                1, config.context_features, device=config.device
+            ),
+            "action": (
+                torch.zeros(1, dtype=torch.long, device=config.device)
+                if config.action_distribution == "categorical"
+                else torch.zeros(
+                    1,
+                    3,
+                    dtype=(
+                        torch.long
+                        if config.action_distribution == "factorized_categorical"
+                        else torch.float32
+                    ),
+                    device=config.device,
+                )
+            ),
+        }
+        if config.memory_model != "none":
+            dummy_data["is_init"] = torch.ones(
+                1, 1, dtype=torch.bool, device=config.device
+            )
+            if config.memory_model == "gru":
+                dummy_data["recurrent_state"] = torch.zeros(
+                    1,
+                    config.memory_num_layers,
+                    config.memory_hidden_size,
+                    device=config.device,
+                )
+            else:
+                dummy_data["s5_state"] = torch.zeros(
+                    1,
+                    config.s5_state_size,
+                    2,
+                    device=config.device,
+                )
+        dummy_input = TensorDict(dummy_data, batch_size=[1], device=config.device)
+        policy_module(dummy_input.clone())
+        value_module(dummy_input.clone())
         print(f"Policy: {policy_module}")
 
     # Keep the TensorDict wrappers eager. Compiling these top-level modules
@@ -210,6 +244,11 @@ def main():
             value_module.load_state_dict(data["value_module_state_dict"])
 
         if config.behavior_cloning_epochs:
+            if config.memory_model != "none":
+                raise ValueError(
+                    "Behavior cloning is not yet sequence-aware; recurrent "
+                    "baselines must use --behavior-cloning-epochs 0."
+                )
             pretrain_behavior_cloning(policy_module, config, train_set, config.device)
             pretraining_checkpoint = os.path.join(
                 config.checkpoint_dir,
