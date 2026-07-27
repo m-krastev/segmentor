@@ -6,13 +6,21 @@ import torch
 from tensordict import TensorDict
 
 from navigator.config import Config
-from navigator.environment import SmallBowelEnv
+from navigator.environment import SmallBowelEnv, repeat_loader
 from navigator.metrics import physical_path_tube
-from navigator.pretrain import _geodesic_expert_action, _monotonic_expert_action
+from navigator.pretrain import (
+    _geodesic_expert_action,
+    _monotonic_expert_action,
+    _resynchronize_path_index,
+)
 from navigator.utils import compute_gdt
 
 
 class NavigatorEnvironmentSmokeTest(unittest.TestCase):
+    def test_repeat_loader_restarts_without_itertools_cycle(self):
+        iterator = repeat_loader([1, 2, 3])
+        self.assertEqual([next(iterator) for _ in range(8)], [1, 2, 3, 1, 2, 3, 1, 2])
+
     def test_gdt_reward_scale_must_be_non_negative(self):
         with self.assertRaisesRegex(ValueError, "gdt_reward_scale"):
             Config(gdt_reward_scale=-1)
@@ -101,6 +109,84 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             )
         finally:
             environment.close()
+
+    def test_goal_distance_channel_is_endpoint_directed_and_opt_in(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            allowed_area_radius_mm=0,
+            observe_goal_distance=True,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        end = (8, 8, 12)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            initial = environment._reset()
+            goal_distance = initial["actor"][0, -1]
+            center = tuple(size // 2 for size in config.patch_size_vox)
+            self.assertEqual(config.observation_channels, 6)
+            self.assertGreater(goal_distance[center[0], center[1], center[2] + 1].item(), 0)
+            self.assertLess(goal_distance[center[0], center[1], center[2] - 1].item(), 0)
+        finally:
+            environment.close()
+
+        self.assertEqual(Config().observation_channels, 5)
+
+    def test_coverage_gate_latches_mask_constrained_goal_planner(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=4,
+            cumulative_path_radius_mm=1,
+            allowed_area_radius_mm=0,
+            success_coverage_threshold=0.4,
+            coverage_gated_goal_planner=True,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 4)
+        end = (8, 8, 12)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            environment.current_coverage = config.success_coverage_threshold
+            transition = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.0, 0.5, 0.5]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertTrue(environment._goal_planner_active)
+            self.assertEqual(environment.current_pos_vox, (8, 8, 8))
+            self.assertLess(
+                transition["info", "max_gdt_achieved"].item(),
+                float("inf"),
+            )
+        finally:
+            environment.close()
+
+        self.assertFalse(Config().coverage_gated_goal_planner)
 
     def test_nine_mm_radius_and_three_mm_endpoint_are_independent(self):
         config = Config(
@@ -271,6 +357,44 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             finally:
                 environment.close()
 
+    def test_action_magnitude_controls_step_length(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=4,
+            cumulative_path_radius_mm=1,
+            allowed_area_radius_mm=0,
+            max_episode_steps=8,
+        )
+        shape = (16, 16, 16)
+        start = (4, 4, 4)
+        end = (4, 4, 12)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[4, 4, 4:13] = 1
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            one_voxel_forward = torch.tensor([0.5, 0.5, 0.625], device=device)
+            self.assertEqual(
+                environment._project_action_to_allowed_displacement(one_voxel_forward),
+                (0, 0, 1),
+            )
+            full_forward = torch.tensor([0.5, 0.5, 1.0], device=device)
+            self.assertEqual(
+                environment._project_action_to_allowed_displacement(full_forward),
+                (0, 0, 4),
+            )
+        finally:
+            environment.close()
+
     def test_geodesic_expert_reduces_mask_constrained_goal_distance(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(
@@ -324,8 +448,19 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
 
         action, path_index = _monotonic_expert_action(environment, path_index=1)
 
-        self.assertEqual(path_index, 1)
-        torch.testing.assert_close(action, torch.tensor([0.5, 0.5, 1.0]))
+        self.assertEqual(path_index, 2)
+        torch.testing.assert_close(action, torch.tensor([0.5, 0.5, 0.625]))
+
+    def test_policy_rollout_cursor_only_rejoins_local_future_route(self):
+        route = np.asarray([(4, 4, z) for z in range(24)], dtype=int)
+        route[20] = route[3]
+        environment = SimpleNamespace(
+            gt_path_voxels=route,
+            current_pos_vox=(4, 4, 3),
+            config=SimpleNamespace(max_step_vox=4),
+        )
+
+        self.assertEqual(_resynchronize_path_index(environment, path_index=0), 3)
 
     def test_endpoint_alone_does_not_end_episode(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+export NAVIGATOR_DIAGNOSTIC_UNIT="${NAVIGATOR_DIAGNOSTIC_UNIT:-navigator-g1-dagger-bc3-100k-v1}"
+export NAVIGATOR_CHECKPOINT_DIR="${NAVIGATOR_CHECKPOINT_DIR:-checkpoints/navigator-g1-dagger-bc3-100k-v1}"
+export NAVIGATOR_VALIDATION_OUTPUT_DIR="${NAVIGATOR_VALIDATION_OUTPUT_DIR:-results/navigator_nnunet/g1-dagger-bc3-100k-v1-validation}"
+export NAVIGATOR_TOTAL_TIMESTEPS="${NAVIGATOR_TOTAL_TIMESTEPS:-100000}"
+export NAVIGATOR_BEHAVIOR_CLONING_EPOCHS="${NAVIGATOR_BEHAVIOR_CLONING_EPOCHS:-3}"
+export NAVIGATOR_BC_MAX_POLICY_PROBABILITY="${NAVIGATOR_BC_MAX_POLICY_PROBABILITY:-0.5}"
+
+exec "$SCRIPT_DIR/run_navigator_g1_diagnostic.sh"

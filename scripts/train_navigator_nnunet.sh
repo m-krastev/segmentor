@@ -23,7 +23,12 @@ TRAIN_CASE_IDS_FILE="${NAVIGATOR_NNUNET_TRAIN_CASE_IDS_FILE:-}"
 VAL_CASE_IDS_FILE="${NAVIGATOR_NNUNET_VAL_CASE_IDS_FILE:-}"
 GENERATE_EXPERT_PATH="${NAVIGATOR_GENERATE_EXPERT_PATH:-0}"
 BEHAVIOR_CLONING_EPOCHS="${NAVIGATOR_BEHAVIOR_CLONING_EPOCHS:-0}"
+BC_BATCH_SIZE="${NAVIGATOR_BC_BATCH_SIZE:-64}"
 BC_MAX_POLICY_PROBABILITY="${NAVIGATOR_BC_MAX_POLICY_PROBABILITY:-1}"
+BC_ACTION_STATISTIC="${NAVIGATOR_BC_ACTION_STATISTIC:-mean}"
+PATCH_SIZE_MM="${NAVIGATOR_PATCH_SIZE_MM:-24}"
+OBSERVE_GOAL_DISTANCE="${NAVIGATOR_OBSERVE_GOAL_DISTANCE:-0}"
+COVERAGE_GATED_GOAL_PLANNER="${NAVIGATOR_COVERAGE_GATED_GOAL_PLANNER:-0}"
 PATH_RADIUS_MM="${NAVIGATOR_PATH_RADIUS_MM:-9}"
 ENDPOINT_TOLERANCE_MM="${NAVIGATOR_ENDPOINT_TOLERANCE_MM:-3}"
 MAX_EPISODE_STEPS="${NAVIGATOR_MAX_EPISODE_STEPS:-2048}"
@@ -31,6 +36,8 @@ FRAMES_PER_BATCH="${NAVIGATOR_FRAMES_PER_BATCH:-1024}"
 GDT_REWARD_SCALE="${NAVIGATOR_GDT_REWARD_SCALE:-1}"
 TRAIN_VAL_SPLIT="${NAVIGATOR_TRAIN_VAL_SPLIT:-0.9}"
 LOAD_FROM_CHECKPOINT="${NAVIGATOR_LOAD_FROM_CHECKPOINT:-}"
+EVAL_ONLY="${NAVIGATOR_EVAL_ONLY:-0}"
+DETERMINISTIC_ACTION_STATISTIC="${NAVIGATOR_DETERMINISTIC_ACTION_STATISTIC:-mean}"
 
 CASE_ARGS=()
 if [[ -n "$CASE_IDS_FILE" ]]; then
@@ -61,6 +68,21 @@ if [[ -n "$LOAD_FROM_CHECKPOINT" ]]; then
   LOAD_ARGS=(--load-from-checkpoint "$LOAD_FROM_CHECKPOINT")
 fi
 
+EVAL_ARGS=()
+if [[ "$EVAL_ONLY" == "1" || "$EVAL_ONLY" == "true" ]]; then
+  EVAL_ARGS=(--eval-only)
+fi
+
+GOAL_DISTANCE_ARGS=(--no-observe-goal-distance)
+if [[ "$OBSERVE_GOAL_DISTANCE" == "1" || "$OBSERVE_GOAL_DISTANCE" == "true" ]]; then
+  GOAL_DISTANCE_ARGS=(--observe-goal-distance)
+fi
+
+GOAL_PLANNER_ARGS=(--no-coverage-gated-goal-planner)
+if [[ "$COVERAGE_GATED_GOAL_PLANNER" == "1" || "$COVERAGE_GATED_GOAL_PLANNER" == "true" ]]; then
+  GOAL_PLANNER_ARGS=(--coverage-gated-goal-planner)
+fi
+
 VALIDATION_ARGS=()
 if [[ -n "$VALIDATION_OUTPUT_DIR" ]]; then
   VALIDATION_ARGS=(--validation-output-dir "$VALIDATION_OUTPUT_DIR")
@@ -85,16 +107,20 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   "${CASE_ARGS[@]}" \
   "${EXPERT_ARGS[@]}" \
   "${LOAD_ARGS[@]}" \
+  "${EVAL_ARGS[@]}" \
+  "${GOAL_DISTANCE_ARGS[@]}" \
+  "${GOAL_PLANNER_ARGS[@]}" \
   "${VALIDATION_ARGS[@]}" \
   --device cuda \
   --amp \
   --amp-dtype bf16 \
   --no-track-wandb \
   --track-tensorboard \
+  --deterministic-action-statistic "$DETERMINISTIC_ACTION_STATISTIC" \
   --train-val-split "$TRAIN_VAL_SPLIT" \
   --shuffle-dataset \
   --voxel-size-mm 1.5 \
-  --patch-size-mm 24 \
+  --patch-size-mm "$PATCH_SIZE_MM" \
   --max-step-displacement-mm 6 \
   --cumulative-path-radius-mm "$PATH_RADIUS_MM" \
   --endpoint-tolerance-mm "$ENDPOINT_TOLERANCE_MM" \
@@ -114,7 +140,9 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --ent-coef 0.003 \
   --vf-coef 0.5 \
   --behavior-cloning-epochs "$BEHAVIOR_CLONING_EPOCHS" \
+  --behavior-cloning-batch-size "$BC_BATCH_SIZE" \
   --behavior-cloning-max-policy-probability "$BC_MAX_POLICY_PROBABILITY" \
+  --behavior-cloning-action-statistic "$BC_ACTION_STATISTIC" \
   --num-episodes-per-sample 2 \
   --num-steps-per-sample 2048 \
   --num-workers 1 \

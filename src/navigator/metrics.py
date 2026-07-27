@@ -18,6 +18,12 @@ class PathMetrics:
     target_intersection: int
 
 
+def _physical_boundary_tolerance(value: float) -> float:
+    """Return a float32-scale tolerance for physical threshold comparisons."""
+
+    return 8 * np.finfo(np.float32).eps * max(1.0, abs(float(value)))
+
+
 def rasterize_path(
     shape: tuple[int, int, int],
     history: np.ndarray,
@@ -56,7 +62,7 @@ def physical_path_tube(
     if radius_mm == 0:
         return centerline
     distance_to_path = distance_transform_edt(~centerline, sampling=spacing)
-    return distance_to_path <= float(radius_mm) + np.finfo(np.float32).eps
+    return distance_to_path <= float(radius_mm) + _physical_boundary_tolerance(radius_mm)
 
 
 def compute_path_metrics(
@@ -90,7 +96,11 @@ def compute_path_metrics(
     goal_array = np.asarray(goal, dtype=np.float64)
     spacing_array = np.asarray(spacing_mm, dtype=np.float64)
     endpoint_distance_mm = dist(final * spacing_array, goal_array * spacing_array)
-    endpoint_reached = endpoint_distance_mm <= endpoint_tolerance_mm
+    endpoint_reached = (
+        endpoint_distance_mm
+        <= endpoint_tolerance_mm
+        + _physical_boundary_tolerance(endpoint_tolerance_mm)
+    )
 
     return PathMetrics(
         dice=dice,

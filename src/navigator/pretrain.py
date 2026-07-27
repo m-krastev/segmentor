@@ -48,41 +48,102 @@ def _geodesic_expert_action(env) -> torch.Tensor:
 def _monotonic_expert_action(env, path_index: int) -> tuple[torch.Tensor, int]:
     """Return an action toward the next centerline waypoint.
 
-    ``path_index`` is a monotonic segment cursor, not a nearest-point lookup.
-    The phantom paths are sparse (adjacent waypoints can be more than one
-    action apart), so the expert keeps aiming at the next waypoint until it is
-    within one action radius, then advances. This also prevents jumps between
-    spatially adjacent bowel loops.
+    ``path_index`` is a monotonic route cursor, not a nearest-point lookup.
+    Only a bounded number of contiguous future waypoints may be skipped, and
+    only when the exact straight displacement is traversable. This prevents
+    the cursor from jumping to a spatially close but topologically later bowel
+    loop. Sparse phantom waypoints remain supported by repeatedly moving
+    toward the next waypoint without advancing the cursor.
     """
     path = env.gt_path_voxels
     if path is None or len(path) < 2:
         raise ValueError("Behavior cloning requires a non-empty ground-truth path.")
 
     current = np.asarray(env.current_pos_vox)
-    # Keep the final waypoint as an actionable target. Advancing the cursor all
-    # the way to the end before stepping used to emit a neutral action instead
-    # of actually reaching the endpoint.
-    while path_index < len(path) - 2:
-        next_distance = float(np.linalg.norm(path[path_index + 1] - current))
-        if next_distance > env.config.max_step_vox:
-            break
-        path_index += 1
     if path_index >= len(path) - 1:
         return torch.full((3,), 0.5, dtype=env.dtype, device=env.device), path_index
 
-    target_index = path_index + 1
+    target_index = None
+    # A dense 26-connected route can advance by at most max_step_vox ordered
+    # waypoints per action. Restricting lookahead by route order, rather than
+    # Euclidean proximity, is what prevents cross-loop cursor jumps.
+    final_candidate = min(
+        len(path) - 1,
+        path_index + env.config.max_step_vox,
+    )
+    for candidate_index in range(final_candidate, path_index, -1):
+        candidate_displacement = np.asarray(path[candidate_index]) - current
+        if not np.any(candidate_displacement):
+            target_index = candidate_index
+            break
+        if float(np.max(np.abs(candidate_displacement))) > env.config.max_step_vox:
+            continue
+        is_traversable = getattr(env, "_is_allowed_displacement", None)
+        if is_traversable is None or is_traversable(
+            tuple(candidate_displacement.astype(int).tolist())
+        ):
+            target_index = candidate_index
+            break
+
+    if target_index is None:
+        # Sparse paths may place the next waypoint beyond one action. Move
+        # toward it, but retain the cursor until a later call can execute the
+        # exact final displacement.
+        target_index = path_index + 1
+        next_path_index = path_index
+    else:
+        next_path_index = target_index
+
     displacement = path[target_index] - current
-    # The environment treats action magnitude as irrelevant and normalizes the
-    # largest component before projection. Encode a canonical full-range
-    # direction so behavioral cloning does not waste capacity fitting arbitrary
-    # waypoint distances.
-    displacement = displacement / max(float(np.max(np.abs(displacement))), 1.0)
+    # Encode both direction and requested length. Long waypoint deltas are
+    # capped to the action radius while the final short displacement remains
+    # short, preventing deterministic endpoint oscillation.
+    largest_component = max(float(np.max(np.abs(displacement))), 1.0)
+    if largest_component > env.config.max_step_vox:
+        displacement = displacement * (env.config.max_step_vox / largest_component)
     action = torch.as_tensor(
-        (displacement + 1.0) / 2.0,
+        (displacement / env.config.max_step_vox + 1.0) / 2.0,
         dtype=env.dtype,
         device=env.device,
     ).clamp(0.0, 1.0)
-    return action, path_index
+    return action, next_path_index
+
+
+def _resynchronize_path_index(env, path_index: int) -> int:
+    """Advance a route cursor locally after a learned-policy rollout step."""
+
+    path = env.gt_path_voxels
+    if path is None or len(path) < 2:
+        return path_index
+    current = np.asarray(env.current_pos_vox)
+    first = min(max(int(path_index), 0), len(path) - 1)
+    # One action spans at most max_step_vox in each axis. A modestly larger
+    # ordered window lets an off-route policy step rejoin the demonstration
+    # without matching a distant, spatially touching bowel loop.
+    final = min(len(path) - 1, first + 4 * env.config.max_step_vox)
+    candidates = np.arange(first, final + 1)
+    distances = np.linalg.norm(np.asarray(path)[candidates] - current, axis=1)
+    best_offset = min(
+        range(len(candidates)),
+        key=lambda offset: (float(distances[offset]), -int(candidates[offset])),
+    )
+    best_index = int(candidates[best_offset])
+    maximum_rejoin_distance = env.config.max_step_vox * np.sqrt(3.0)
+    if float(distances[best_offset]) <= maximum_rejoin_distance:
+        return best_index
+    return first
+
+
+def _behavior_cloning_action(distribution, statistic: str) -> torch.Tensor:
+    """Return the configured differentiable Beta-policy action statistic."""
+
+    if statistic == "mean":
+        return distribution.mean
+    if statistic == "mode":
+        return distribution.mode
+    raise ValueError(
+        "behavior_cloning_action_statistic must be either 'mean' or 'mode'"
+    )
 
 
 def pretrain_behavior_cloning(policy_module, config, train_set, device) -> None:
@@ -122,7 +183,10 @@ def pretrain_behavior_cloning(policy_module, config, train_set, device) -> None:
         )
         with torch.autocast(device.type, amp_dtype, enabled=config.amp):
             distribution = policy_module.get_dist(tensordict)
-            predicted_action = distribution.mean
+            predicted_action = _behavior_cloning_action(
+                distribution,
+                config.behavior_cloning_action_statistic,
+            )
             predicted_direction = 2 * predicted_action - 1
             expert_direction = 2 * expert_action - 1
             direction_loss = (
@@ -164,10 +228,14 @@ def pretrain_behavior_cloning(policy_module, config, train_set, device) -> None:
                 observation = env._reset(must_load_new_subject=True)
                 path_index = 0
                 for _ in range(config.max_episode_steps):
+                    current_path_index = path_index
                     if env.gt_path_voxels is None:
                         expert_action = _geodesic_expert_action(env)
                     else:
-                        expert_action, path_index = _monotonic_expert_action(env, path_index)
+                        expert_action, expert_path_index = _monotonic_expert_action(
+                            env,
+                            current_path_index,
+                        )
                     batch.append(
                         (
                             observation["actor"][0].detach().clone(),
@@ -181,9 +249,14 @@ def pretrain_behavior_cloning(policy_module, config, train_set, device) -> None:
                         batch.clear()
 
                     rollout_action = expert_action
+                    used_policy = False
                     if torch.rand(()) < policy_probability:
                         with torch.no_grad():
-                            rollout_action = policy_module.get_dist(observation).mean.squeeze(0)
+                            rollout_action = _behavior_cloning_action(
+                                policy_module.get_dist(observation),
+                                config.behavior_cloning_action_statistic,
+                            ).squeeze(0)
+                        used_policy = True
                     transition = env._step(
                         TensorDict(
                             {"action": rollout_action.unsqueeze(0)},
@@ -191,6 +264,12 @@ def pretrain_behavior_cloning(policy_module, config, train_set, device) -> None:
                             device=device,
                         )
                     )
+                    if env.gt_path_voxels is not None:
+                        path_index = (
+                            _resynchronize_path_index(env, current_path_index)
+                            if used_policy
+                            else expert_path_index
+                        )
                     done = bool(transition["done"].item())
                     observation = transition
                     if done:

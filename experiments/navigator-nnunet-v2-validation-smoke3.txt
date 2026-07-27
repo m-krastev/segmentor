@@ -1,0 +1,5 @@
+# Frozen validation sentinel set selected by expert-route length only:
+# shortest, median, and longest route in the 41-case v2 validation manifest.
+s1389
+s0224
+s0120

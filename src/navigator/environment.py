@@ -4,7 +4,7 @@ integrated with TorchRL. Simplified version without try-except blocks.
 """
 
 from rich import print
-from itertools import cycle, product
+from itertools import product
 from math import ceil, dist, isfinite, sqrt
 from pathlib import Path
 import random
@@ -319,6 +319,27 @@ class SmallBowelEnv(EnvBase):
         segmentation_patch = get_patch(
             self.seg, self.current_pos_vox, self.config.patch_size_vox
         ).to(self.dtype)
+        goal_distance_patch = None
+        if self.config.observe_goal_distance:
+            # This is derived only from the traversable segmentation and the
+            # requested endpoint. Express local progress relative to the
+            # current state so the channel has a stable scale across subjects.
+            raw_goal_distance_patch = get_patch(
+                torch.from_numpy(self.goal_distance_map),
+                self.current_pos_vox,
+                self.config.patch_size_vox,
+                pad_value=float("inf"),
+            ).to(device=self.device, dtype=self.dtype)
+            goal_distance_patch = (
+                (float(self.current_goal_distance) - raw_goal_distance_patch)
+                / self.config.gdt_max_increase_theta
+            )
+            goal_distance_patch = torch.nan_to_num(
+                goal_distance_patch,
+                nan=0.0,
+                posinf=1.0,
+                neginf=-1.0,
+            ).clamp(-1.0, 1.0)
         # gt_path_patch = get_patch(
         #     self.gt_path_vol, self.current_pos_vox, self.config.patch_size_vox
         # )
@@ -366,16 +387,16 @@ class SmallBowelEnv(EnvBase):
             # chord across a curved bowel loop.
             progress_fraction = 1.0 - float(self.current_goal_distance) / initial_goal_distance
             progress_fraction = min(max(progress_fraction, 0.0), 1.0)
-        actor_state = torch.stack(
-            [
-                img_patch_1,
-                img_patch,
-                segmentation_patch,
-                wall_patch,
-                cum_path_patch,
-            ],
-            dim=0,
-        )
+        actor_channels = [
+            img_patch_1,
+            img_patch,
+            segmentation_patch,
+            wall_patch,
+            cum_path_patch,
+        ]
+        if goal_distance_patch is not None:
+            actor_channels.append(goal_distance_patch)
+        actor_state = torch.stack(actor_channels, dim=0)
         context = torch.cat(
             [
                 torch.as_tensor(
@@ -410,21 +431,35 @@ class SmallBowelEnv(EnvBase):
     def _project_action_to_allowed_displacement(self, action_normalized: torch.Tensor) -> Coords:
         """Project a requested direction onto a traversable local segment.
 
-        This projection uses neither reward nor endpoint information. It first
-        shortens the requested ray, then selects the best-aligned valid
-        one-voxel direction. Thus the continuous policy always controls
-        direction without being dominated by invalid endpoints in a thin mask.
+        This projection uses neither reward nor endpoint information. Action
+        magnitude controls the requested step length; invalid rays are
+        shortened, then fall back to the best-aligned valid one-voxel
+        direction. Retaining magnitude is necessary to reach a precise
+        endpoint without oscillating across it.
         """
-        desired = (2.0 * action_normalized.detach().float().cpu().numpy() - 1.0).reshape(3)
+        desired = (
+            (2.0 * action_normalized.detach().float().cpu().numpy() - 1.0)
+            * self.config.max_step_vox
+        ).reshape(3)
         desired_norm = float(np.linalg.norm(desired))
         if desired_norm <= np.finfo(np.float32).eps:
-            desired = np.asarray((1.0, 0.0, 0.0), dtype=np.float32)
-            desired_norm = 1.0
+            # Preserve the existing always-move fallback for an exactly
+            # centered action; the validity projection still chooses a local
+            # traversable tangent without using reward or goal information.
+            desired = np.asarray(
+                (float(self.config.max_step_vox), 0.0, 0.0),
+                dtype=np.float32,
+            )
+            desired_norm = float(self.config.max_step_vox)
         desired_unit = desired / desired_norm
         desired_chebyshev = desired / max(float(np.max(np.abs(desired))), 1e-8)
+        requested_step_vox = min(
+            self.config.max_step_vox,
+            max(1, int(round(float(np.max(np.abs(desired)))))),
+        )
 
         seen: set[Coords] = set()
-        for step_size in range(self.config.max_step_vox, 0, -1):
+        for step_size in range(requested_step_vox, 0, -1):
             displacement = tuple(np.rint(desired_chebyshev * step_size).astype(np.int64).tolist())
             if displacement in seen:
                 continue
@@ -442,6 +477,28 @@ class SmallBowelEnv(EnvBase):
         if candidates:
             return max(candidates, key=lambda candidate: candidate[:2])[2]
         return (0, 0, 0)
+
+    def _goal_distance_descent_displacement(self) -> Coords:
+        """Return the traversable local move with greatest endpoint progress."""
+
+        best: tuple[float, float, Coords] | None = None
+        radius = range(-self.config.max_step_vox, self.config.max_step_vox + 1)
+        for displacement in product(radius, repeat=3):
+            if not any(displacement) or not self._is_allowed_displacement(displacement):
+                continue
+            next_pos = tuple(
+                current + delta
+                for current, delta in zip(self.current_pos_vox, displacement)
+            )
+            next_distance = float(self.goal_distance_map[next_pos])
+            if not isfinite(next_distance):
+                continue
+            progress = float(self.current_goal_distance) - next_distance
+            step_length = float(np.linalg.norm(displacement))
+            candidate = (progress, step_length, displacement)
+            if best is None or candidate[:2] > best[:2]:
+                best = candidate
+        return best[2] if best is not None and best[0] > 0 else (0, 0, 0)
 
     def _get_final_coverage(self) -> float:
         """Calculate coverage. Assumes tensors are valid."""
@@ -618,6 +675,7 @@ class SmallBowelEnv(EnvBase):
         self.current_step_count = 0
         self.current_distance_traveled = 0
         self.wall_gradient = 0
+        self._goal_planner_active = False
 
         # Determine start position and select appropriate GDT
         rand = self.episodes_on_current_subject % 10  # 40-30-30
@@ -721,9 +779,19 @@ class SmallBowelEnv(EnvBase):
         # Extract Action
         action_normalized = tensordict.get("action").squeeze(0)
 
-        # Interpret the action as a direction and guarantee a traversable local
-        # move whenever the current component has a valid neighbour.
-        action_vox_delta = self._project_action_to_allowed_displacement(action_normalized)
+        # The optional hybrid controller latches only after the learned policy
+        # has achieved the preregistered coverage gate. From then on it follows
+        # a local mask-constrained distance descent to the requested endpoint.
+        if (
+            self.config.coverage_gated_goal_planner
+            and self.current_coverage >= self.config.success_coverage_threshold
+        ):
+            self._goal_planner_active = True
+        action_vox_delta = (
+            self._goal_distance_descent_displacement()
+            if self._goal_planner_active
+            else self._project_action_to_allowed_displacement(action_normalized)
+        )
 
         # Execute Step Logic
         next_pos_vox = (
@@ -935,6 +1003,13 @@ def get_first(x):
     return x[0]
 
 
+def repeat_loader(loader):
+    """Yield successive DataLoader epochs without retaining prior subjects."""
+
+    while True:
+        yield from loader
+
+
 def make_sb_env(
     config: Config,
     dataset: torch.utils.data.Dataset,
@@ -949,7 +1024,7 @@ def make_sb_env(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     num_workers = getattr(config, "num_workers", 0)
-    dataset_iterator = cycle(
+    dataset_iterator = repeat_loader(
         DataLoader(
             dataset,
             batch_size=1,
@@ -1304,7 +1379,7 @@ def make_mri_path_env(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_workers = getattr(config, "num_workers", 0)
     num_workers = 0
-    dataset_iterator = cycle(
+    dataset_iterator = repeat_loader(
         DataLoader(
             dataset,
             batch_size=1,

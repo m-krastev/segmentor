@@ -111,6 +111,18 @@ def validation_rank(metrics: dict) -> tuple[float, float, float, float]:
     )
 
 
+def deterministic_exploration_type(config: Config) -> ExplorationType:
+    """Return the configured deterministic statistic for Beta rollouts."""
+
+    if config.deterministic_action_statistic == "mean":
+        return ExplorationType.MEAN
+    if config.deterministic_action_statistic == "mode":
+        return ExplorationType.MODE
+    raise ValueError(
+        "deterministic_action_statistic must be either 'mean' or 'mode'"
+    )
+
+
 # --- Validation Loop (Adaptation Needed) ---
 def validation_loop_torchrl(
     actor_module,  # Pass the trained policy module
@@ -152,13 +164,11 @@ def validation_loop_torchrl(
 
     with (
         torch.no_grad(),
-        # Behavioral cloning supervises and rolls out the Beta mean. Using the
-        # mode here can point elsewhere when concentration parameters are near
-        # one, so deterministic validation must use the same policy statistic.
-        set_exploration_type(ExplorationType.MEAN),
+        set_exploration_type(deterministic_exploration_type(config)),
     ):
         for i in tqdm(range(num_val_subjects), desc="Validation"):
-            # Deterministic mode produces one reproducible rollout per subject.
+            # One deterministic statistic produces one reproducible rollout
+            # per subject.
             paths = []
             path_masks = []
             intermediate_results = []

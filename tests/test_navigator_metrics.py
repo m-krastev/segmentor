@@ -51,6 +51,29 @@ class NavigatorMetricsTest(unittest.TestCase):
         self.assertFalse(metrics.endpoint_reached)
         self.assertFalse(metrics.traversal_success)
 
+    def test_float32_spacing_roundoff_does_not_reject_exact_boundary(self):
+        shape = (17, 17, 17)
+        history = np.asarray([(8, 8, 8), (8, 8, 10)])
+        target = physical_path_tube(
+            shape,
+            history,
+            spacing_mm=(1.5000001192092896,) * 3,
+            radius_mm=9,
+        )
+        metrics = compute_path_metrics(
+            target,
+            history,
+            goal=(8, 8, 12),
+            spacing_mm=(1.5000001192092896,) * 3,
+            path_radius_mm=9,
+            endpoint_tolerance_mm=3,
+            success_dice=0.4,
+        )
+
+        self.assertGreater(metrics.endpoint_distance_mm, 3)
+        self.assertTrue(metrics.endpoint_reached)
+        self.assertTrue(metrics.traversal_success)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,10 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${NAVIGATOR_PROJECT_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
 UV_BIN="${UV_BIN:-$(command -v uv)}"
-UNIT="${NAVIGATOR_ORACLE_UNIT:-navigator-g1-oracle-validation-v1}"
-MANIFEST_DIR="${NAVIGATOR_MANIFEST_DIR:-experiments/navigator-nnunet-v1}"
+UNIT="${NAVIGATOR_ORACLE_UNIT:-navigator-g1-oracle-validation-v2}"
+MANIFEST_DIR="${NAVIGATOR_MANIFEST_DIR:-experiments/navigator-nnunet-v2}"
 MANIFEST="$MANIFEST_DIR/validation.txt"
-OUTPUT_DIR="${NAVIGATOR_ORACLE_OUTPUT_DIR:-results/navigator_nnunet/g1-oracle-validation-v1}"
+OUTPUT_DIR="${NAVIGATOR_ORACLE_OUTPUT_DIR:-results/navigator_nnunet/g1-oracle-validation-v2}"
 MAX_EPISODE_STEPS="${NAVIGATOR_MAX_EPISODE_STEPS:-2048}"
 
 cd "$PROJECT_ROOT"

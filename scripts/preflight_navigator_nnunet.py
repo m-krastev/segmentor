@@ -71,6 +71,18 @@ def release_optional_gpu_cache() -> None:
     gc.collect()
 
 
+def route_length_mm(route: np.ndarray | None, spacing: tuple[float, ...]) -> float:
+    """Return the physical length of an ordered voxel route."""
+
+    if route is None:
+        return 0.0
+    points = np.asarray(route, dtype=np.float64).reshape(-1, 3)
+    if len(points) < 2:
+        return 0.0
+    spacing_array = np.asarray(spacing[:3], dtype=np.float64)
+    return float(np.linalg.norm(np.diff(points, axis=0) * spacing_array, axis=1).sum())
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--nnunet-raw", required=True)
@@ -85,6 +97,15 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Require construction of a continuous coverage-then-end expert route.",
+    )
+    parser.add_argument(
+        "--minimum-expert-route-length-mm",
+        type=float,
+        default=0.0,
+        help=(
+            "Reject anatomically implausible expert routes shorter than this "
+            "physical length. Applied before splitting or model evaluation."
+        ),
     )
     return parser.parse_args()
 
@@ -120,22 +141,38 @@ def main() -> None:
     for index, case_id in enumerate(dataset.case_ids, start=1):
         try:
             subject = dataset[index - 1]
-            eligible.append(case_id)
             segmentation_voxels = int(np.asarray(subject["seg"], dtype=bool).sum())
             traversable_voxels = int(np.isfinite(subject["gdt_start"]).sum())
+            expert_route = subject.get("gt_path")
+            expert_route_voxels = (
+                int(len(expert_route)) if expert_route is not None else 0
+            )
+            expert_route_length_mm = route_length_mm(
+                expert_route,
+                tuple(float(value) for value in subject["spacing"]),
+            )
+            if expert_route_length_mm < args.minimum_expert_route_length_mm:
+                raise ValueError(
+                    f"Expert route for {case_id} is only "
+                    f"{expert_route_length_mm:.3f} mm; minimum required physical "
+                    f"length is {args.minimum_expert_route_length_mm:.3f} mm."
+                )
+            eligible.append(case_id)
             case_metadata[case_id] = {
                 "segmentation_voxels": segmentation_voxels,
+                "segmentation_volume_ml": (
+                    segmentation_voxels
+                    * float(np.prod(np.asarray(subject["spacing"][:3], dtype=np.float64)))
+                    / 1000.0
+                ),
                 "start_component_voxels": traversable_voxels,
                 "start_component_fraction": (
                     traversable_voxels / segmentation_voxels
                     if segmentation_voxels
                     else 0.0
                 ),
-                "expert_route_voxels": (
-                    int(len(subject["gt_path"]))
-                    if subject.get("gt_path") is not None
-                    else 0
-                ),
+                "expert_route_voxels": expert_route_voxels,
+                "expert_route_length_mm": expert_route_length_mm,
             }
             print(f"[{index}/{len(dataset)}] eligible {case_id}", flush=True)
         except Exception as error:
@@ -188,6 +225,7 @@ def main() -> None:
         "seed": args.seed,
         "voxel_size_mm": args.voxel_size_mm,
         "generate_expert_path": args.generate_expert_path,
+        "minimum_expert_route_length_mm": args.minimum_expert_route_length_mm,
         "discovered_cases": len(dataset),
         "eligible_cases": len(eligible),
         "rejected_cases": len(rejected),

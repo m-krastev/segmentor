@@ -47,6 +47,7 @@ class Config:
     tensorboard_log_dir: Optional[str] = None
     validation_save_paths: bool = False
     validation_output_dir: Optional[str] = None
+    deterministic_action_statistic: str = "mean"
 
     # --- Environment Hyperparameters ---
     voxel_size_mm: float = 1.0
@@ -55,6 +56,8 @@ class Config:
     use_immediate_gdt_reward: bool = True
     max_episode_steps: int = 2048
     terminate_on_success: bool = True
+    observe_goal_distance: bool = False
+    coverage_gated_goal_planner: bool = False
     # A 9 mm radius corresponds to an 18 mm diameter at the 1.5 mm nnU-Net
     # spacing, within the expected small-bowel caliber. Endpoint tolerance is a
     # separate localization criterion and must never be inferred from this.
@@ -95,6 +98,7 @@ class Config:
     behavior_cloning_learning_rate: float = 3e-4
     behavior_cloning_batch_size: int = 64
     behavior_cloning_max_policy_probability: float = 1.0
+    behavior_cloning_action_statistic: str = "mean"
     # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 10_000_000
@@ -164,6 +168,14 @@ class Config:
             raise ValueError("behavior_cloning_batch_size must be positive")
         if not 0 <= self.behavior_cloning_max_policy_probability <= 1:
             raise ValueError("behavior_cloning_max_policy_probability must be between 0 and 1")
+        if self.behavior_cloning_action_statistic not in {"mean", "mode"}:
+            raise ValueError(
+                "behavior_cloning_action_statistic must be either 'mean' or 'mode'"
+            )
+        if self.deterministic_action_statistic not in {"mean", "mode"}:
+            raise ValueError(
+                "deterministic_action_statistic must be either 'mean' or 'mode'"
+            )
 
         self.checkpoint_dir = self.checkpoint_dir + "/" + self.data_dir
         self.gdt_cell_length = self.voxel_size_mm
@@ -175,6 +187,7 @@ class Config:
         )
         self.endpoint_tolerance_vox = self.endpoint_tolerance_mm / self.voxel_size_mm
         self.allowed_area_radius_vox = mm_to_vox(self.allowed_area_radius_mm, self.voxel_size_mm)
+        self.observation_channels = 5 + int(self.observe_goal_distance)
         if self.max_step_vox < 1:
             raise ValueError("max_step_displacement_mm must span at least one voxel")
         if patch_vox_dim < 8:

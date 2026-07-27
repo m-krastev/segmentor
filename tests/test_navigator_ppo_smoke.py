@@ -5,14 +5,56 @@ from tensordict import TensorDict
 from tensordict.nn import set_composite_lp_aggregate
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
+from torchrl.envs.utils import ExplorationType
 
 from navigator.config import Config
 from navigator.models import create_ppo_modules
 from navigator.models.actor import ActorNetwork
-from navigator.train import log_tensorboard, validation_rank
+from navigator.pretrain import _behavior_cloning_action
+from navigator.train import (
+    deterministic_exploration_type,
+    log_tensorboard,
+    validation_rank,
+)
 
 
 class NavigatorPpoSmokeTest(unittest.TestCase):
+    def test_behavior_cloning_action_statistic_is_explicit(self):
+        distribution = type(
+            "Distribution",
+            (),
+            {
+                "mean": torch.tensor([0.25]),
+                "mode": torch.tensor([0.75]),
+            },
+        )()
+        torch.testing.assert_close(
+            _behavior_cloning_action(distribution, "mean"),
+            torch.tensor([0.25]),
+        )
+        torch.testing.assert_close(
+            _behavior_cloning_action(distribution, "mode"),
+            torch.tensor([0.75]),
+        )
+        with self.assertRaisesRegex(ValueError, "behavior_cloning_action_statistic"):
+            Config(behavior_cloning_action_statistic="median")
+
+    def test_deterministic_action_statistic_is_explicit(self):
+        self.assertEqual(
+            deterministic_exploration_type(
+                Config(deterministic_action_statistic="mean")
+            ),
+            ExplorationType.MEAN,
+        )
+        self.assertEqual(
+            deterministic_exploration_type(
+                Config(deterministic_action_statistic="mode")
+            ),
+            ExplorationType.MODE,
+        )
+        with self.assertRaisesRegex(ValueError, "deterministic_action_statistic"):
+            Config(deterministic_action_statistic="median")
+
     def test_validation_rank_prioritizes_complete_traversal(self):
         incomplete = {
             "validation/traversal_success_rate": 0.0,
