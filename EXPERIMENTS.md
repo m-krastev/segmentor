@@ -1580,3 +1580,29 @@ command or service, acceptance metrics, and outcome here.
 - The warm run started successfully with the requested configuration and
   loaded the v3 policy/value checkpoint. TensorBoard:
   `/home/matey/project/segmentor/checkpoints/navigator-gru-factorized-recovery1-warm1m-v1/nnunet-actual/tensorboard/20260728-004201-915859`.
+
+### M7 warm-1M interim report at 403,456 frames
+
+- Service `navigator-gru-factorized-recovery1-warm1m-v1` remained healthy at
+  `403,456 / 1,000,000` new frames (`40.3%`) with no CUDA or worker failure.
+  Observed resident CUDA memory was approximately `6,554 MiB` for the trainer
+  and `224 MiB` for the preprocessing worker.
+- The configured evaluation cadence produced validations every 128,000 frames,
+  rather than the anticipated 256,000, because the trainer's evaluation
+  counter advances per PPO update. Each validation still uses only the fixed
+  three cases.
+- Held-out results:
+  - frame `128,000`: mean Dice `0.039465`, endpoint distance `208.487 mm`,
+    traversal/endpoint success `0/3`;
+  - frame `256,000`: mean Dice `0.060485`, endpoint distance `115.641 mm`,
+    traversal/endpoint success `0/3`;
+  - frame `384,000`: mean Dice `0.064236`, endpoint distance `122.653 mm`,
+    traversal/endpoint success `0/3`.
+- At frame 384,000, per-case Dice (`s1389`, `s0224`, `s0120`) was `0.141279`,
+  `0.001673`, and `0.049757`; endpoint distance was `54.374`, `105.609`, and
+  `207.976 mm`.
+- Interpretation: endpoint localization has improved strongly relative to the
+  102,400-frame pilot (`291.938` to `122.653 mm`), but mean Dice is essentially
+  plateaued around `0.06`, no endpoint is within tolerance, and no traversal
+  succeeds. The mean remains dominated by `s1389`; this is not yet evidence of
+  cohort-wide tube following or progress toward the 0.40 Dice target.
