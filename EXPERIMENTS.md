@@ -1527,3 +1527,56 @@ command or service, acceptance metrics, and outcome here.
   `navigator-gru-factorized-recovery1-102k-v3` was launched only after this
   gate passed, with validations/checkpoints every 25,600 frames and no more
   than the fixed three validation cases.
+- V3 validation at frame `25,600`:
+  - mean Dice `0.0448746`, mean endpoint distance `281.253 mm`, endpoint and
+    traversal success `0/3`;
+  - per-case Dice (`s1389`, `s0224`, `s0120`): `0.081250`, `0.031342`,
+    `0.022032`;
+  - per-case endpoint distance: `145.763`, `336.823`, `361.173 mm`;
+  - peak validation-time trainer allocation observed by `nvidia-smi` was about
+    `6.1 GiB`, well inside the 15.5-GiB device.
+- V3 and the memory gate both use seed 42 but are not bitwise deterministic
+  under the CUDA/collector pipeline. Both independently beat the honest
+  no-recovery result at the same frame count; v3 improved mean Dice by 2.31×
+  and reduced endpoint distance by 197.1 mm. It remains far from success, so
+  the run continues to the preregistered 102,400 frames.
+- V3 validation at frame `51,200`:
+  - mean Dice declined to `0.0217959`, while mean endpoint distance improved
+    to `262.729 mm`; endpoint and traversal success stayed `0/3`;
+  - per-case Dice: `0.050079`, `0.010589`, `0.004719`;
+  - per-case endpoint distance: `243.578`, `272.261`, `272.348 mm`.
+- Interpretation at this checkpoint: Euclidean recovery is reducing
+  catastrophic drift, but coverage learning is not yet stable. The
+  preregistered rank therefore keeps frame 25,600 as best. No hyperparameter is
+  changed mid-run.
+- V3 validation at frame `76,800`:
+  - new best mean Dice `0.0579610`, mean endpoint distance `319.316 mm`, and
+    endpoint/traversal success `0/3`;
+  - per-case Dice: `0.153130`, `0.011726`, `0.009027`;
+  - per-case endpoint distance: `187.668`, `484.760`, `285.521 mm`.
+- The mean gain is dominated by `s1389`; the other two held-out cases remain
+  near seed-level Dice. Recovery permits real coverage learning on one case
+  but has not produced stable cross-subject generalization.
+- V3 final validation at frame `102,400`:
+  - new best mean Dice `0.0628456`, mean endpoint distance `291.938 mm`, and
+    endpoint/traversal success `0/3`;
+  - per-case Dice: `0.146759`, `0.015184`, `0.026594`;
+  - per-case endpoint distance: `105.534`, `484.760`, `285.521 mm`;
+  - the complete run took `7m04.7s` wall time and peaked at `5,455.4 MiB`
+    allocated / `6,236 MiB` reserved CUDA memory.
+- At 2,048 frames per subject, this pilot sampled only about 50 of the 330
+  training cases. It therefore cannot answer the earlier 1–3-million-frame
+  question or establish cohort-wide generalization.
+- Follow-up `navigator-gru-factorized-recovery1-warm1m-v1` warm-starts the
+  policy and value weights from v3's final/best 102,400-frame checkpoint and
+  collects one million additional frames:
+  - optimizer/scheduler state is intentionally reset because the pilot's
+    cosine schedule had already reached its floor;
+  - learning rate is reduced from `5e-5` to `2e-5`;
+  - all architecture, action, reward, split, and seed settings remain fixed;
+  - validation is reduced to four checkpoints (approximately every 256k new
+    frames), always on only the same three held-out cases;
+  - regular model checkpoints remain approximately every 51k frames.
+- The warm run started successfully with the requested configuration and
+  loaded the v3 policy/value checkpoint. TensorBoard:
+  `/home/matey/project/segmentor/checkpoints/navigator-gru-factorized-recovery1-warm1m-v1/nnunet-actual/tensorboard/20260728-004201-915859`.
