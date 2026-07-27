@@ -1029,6 +1029,8 @@ command or service, acceptance metrics, and outcome here.
   fails to learn a stable switch.
 - Planned evaluation-only service:
   `navigator-g1-patch48-goaldist-hybrid-eval-v1.service`.
+- Reproducible launcher:
+  `scripts/run_navigator_g1_patch48_goaldist_hybrid_eval.sh`.
 - Corrected independent three-case result:
   - mean Dice `0.43193`;
   - per-case Dice `0.47552`, `0.41094`, `0.40934`;
