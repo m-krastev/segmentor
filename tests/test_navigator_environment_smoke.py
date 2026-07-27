@@ -299,6 +299,122 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         finally:
             environment.close()
 
+    def test_episodic_cell_bonus_is_first_visit_only_and_diminishes(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=8,
+            reward_supervised=True,
+            coverage_reward_scale=0.0,
+            gdt_reward_scale=0.0,
+            use_immediate_gdt_reward=False,
+            r_final=0.0,
+            terminate_on_success=False,
+            episodic_cell_reward_scale=0.05,
+            episodic_cell_size_mm=2.0,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter(
+                [self._make_subject(shape, start, (8, 8, 14), segmentation)]
+            ),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        def step(z_action):
+            return environment._step(
+                TensorDict(
+                    {
+                        "action": torch.tensor(
+                            [[0.5, 0.5, z_action]],
+                            device=device,
+                        )
+                    },
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+
+        try:
+            environment._reset()
+            first = step(1.0)
+            second = step(1.0)
+            revisit = step(0.0)
+            self.assertAlmostEqual(
+                first["info", "episodic_cell_reward"].item(),
+                0.05,
+                places=6,
+            )
+            self.assertAlmostEqual(
+                second["info", "episodic_cell_reward"].item(),
+                0.05 / np.sqrt(2.0),
+                places=6,
+            )
+            self.assertEqual(
+                revisit["info", "episodic_cell_reward"].item(),
+                0.0,
+            )
+        finally:
+            environment.close()
+
+    def test_episodic_bonus_cannot_make_new_off_target_cell_profitable(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=4,
+            reward_supervised=True,
+            target_recovery_reward_scale=0.0,
+            coverage_reward_scale=0.0,
+            gdt_reward_scale=0.0,
+            use_immediate_gdt_reward=False,
+            r_final=0.0,
+            terminate_on_success=False,
+            episodic_cell_reward_scale=0.05,
+            episodic_cell_size_mm=2.0,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[start] = 1
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter(
+                [self._make_subject(shape, start, start, segmentation)]
+            ),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            transition = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertAlmostEqual(
+                transition["info", "episodic_cell_reward"].item(),
+                0.05,
+                places=6,
+            )
+            self.assertLess(transition["reward"].item(), 0.0)
+        finally:
+            environment.close()
+
     def test_outside_penalty_covers_entire_action_segment(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(
@@ -412,6 +528,12 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
     def test_target_recovery_reward_scale_must_be_non_negative(self):
         with self.assertRaisesRegex(ValueError, "target_recovery_reward_scale"):
             Config(target_recovery_reward_scale=-1)
+
+    def test_episodic_cell_reward_configuration_must_be_valid(self):
+        with self.assertRaisesRegex(ValueError, "episodic_cell_reward_scale"):
+            Config(episodic_cell_reward_scale=-1)
+        with self.assertRaisesRegex(ValueError, "episodic_cell_size_mm"):
+            Config(episodic_cell_size_mm=0)
 
     @staticmethod
     def _make_subject(shape, start, end, segmentation):

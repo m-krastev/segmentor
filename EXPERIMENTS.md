@@ -1606,3 +1606,54 @@ command or service, acceptance metrics, and outcome here.
   plateaued around `0.06`, no endpoint is within tolerance, and no traversal
   succeeds. The mean remains dominated by `s1389`; this is not yet evidence of
   cohort-wide tube following or progress toward the 0.40 Dice target.
+
+### M8: bounded episodic spatial exploration
+
+- Motivation: the warm-1M control improves endpoint distance but has not
+  generalized its coverage beyond one of the three held-out cases. Exploration
+  is therefore a plausible bottleneck, but CT-feature prediction error or
+  random-feature novelty could reward scanner texture and unrelated anatomy.
+- Design: add an opt-in, label-free, first-visit bonus over 6-mm spatial cells.
+  If the agent enters its `n`th new cell in an episode, the added reward is
+  `0.05 / sqrt(n)`; revisits receive zero. The reset position is marked visited
+  without reward. The construction borrows the episodic novelty principle from
+  [E3B](https://proceedings.neurips.cc/paper_files/paper/2022/hash/f4f79698d48bdc1a6dec20583724182b-Abstract-Conference.html),
+  while using exact controllable position instead of a learned embedding.
+  [RE3](https://proceedings.mlr.press/v139/seo21a.html) and
+  [Revisiting Intrinsic Reward](https://openreview.net/forum?id=j3GK3_xZydY)
+  support episodic state novelty as a useful, lightweight exploration signal,
+  but no claim is made that this exact cell counter reproduces those
+  algorithms.
+- Reward-hacking controls:
+  - no segmentation, GDT, endpoint, subject ID, or validation state enters the
+    bonus;
+  - the bonus is first-visit-only and decreases within every episode;
+  - at the preregistered scale, a newly visited off-target cell receives at
+    most `+0.05`, while the existing off-target penalty alone is `-0.25`
+    before step and wall costs, so novel background remains immediately
+    unprofitable;
+  - the intrinsic component is logged separately as
+    `train/episodic_cell_reward`.
+- Implementation adds validated CLI/configuration fields, forwards them
+  through the nnU-Net and systemd launchers, emits the component in transition
+  info, and leaves the feature disabled by default for protocol
+  reproducibility.
+- Verification:
+  - a focused environment suite passed `44` tests;
+  - the complete suite passed `73` tests and two subtests with `18`
+    deprecation warnings;
+  - dedicated tests confirm first-visit behavior, inverse-square-root decay,
+    zero revisit reward, invalid configuration rejection, and negative total
+    reward for a novel off-target cell.
+- Planned overnight ablation
+  `navigator-gru-episodic-cell-warm8m-v1`:
+  - wait for the matched warm-1M control to finish and require its
+    `final_model_torchrl.pth` before starting;
+  - warm-start only policy/value weights, resetting optimizer state;
+  - collect 8,000,000 additional frames with learning rate `1e-5`;
+  - preserve the GRU, factorized categorical action distribution, separated
+    actor/critic loss updates, reward-supervised inputs, fixed manifests, and
+    fixed three-case validation cohort;
+  - use an evaluation interval of 2,000 trainer updates (approximately every
+    1.024M frames under the observed counter semantics) and save every 500
+    updates (approximately every 256k frames).

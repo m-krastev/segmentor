@@ -6,17 +6,20 @@ PROJECT_ROOT="${NAVIGATOR_PROJECT_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
 ACTION="${1:-status}"
 UNIT="${2:-navigator-success-million}"
 SERVICE="${UNIT%.service}.service"
+UPSTREAM_UNIT="${3:-}"
 TRAIN_SCRIPT="${NAVIGATOR_TRAIN_SCRIPT:-scripts/train_navigator_phantoms.sh}"
 
 usage() {
   cat <<EOF
 Usage: $0 {start|status|logs|stop|restart} [unit-name]
+       $0 start-after [unit-name] upstream-unit
 
 Examples:
   $0 start navigator-success-million
   $0 status navigator-success-million
   $0 logs navigator-success-million
   $0 stop navigator-success-million
+  $0 start-after navigator-followup navigator-success-million
 
 The start action runs scripts/train_navigator_phantoms.sh by default. Set
 NAVIGATOR_TRAIN_SCRIPT=scripts/train_navigator_nnunet.sh for scratch training
@@ -70,6 +73,8 @@ start_service() {
     NAVIGATOR_ANNOTATION_FREE \
     NAVIGATOR_REWARD_SUPERVISED \
     NAVIGATOR_INTRINSIC_NOVELTY_REWARD_SCALE \
+    NAVIGATOR_EPISODIC_CELL_REWARD_SCALE \
+    NAVIGATOR_EPISODIC_CELL_SIZE_MM \
     NAVIGATOR_CURVATURE_PENALTY_SCALE \
     NAVIGATOR_FILTER_SCALES_MM \
     NAVIGATOR_TRAIN_VAL_SPLIT \
@@ -89,6 +94,8 @@ start_service() {
     NAVIGATOR_VF_COEF \
     NAVIGATOR_MAX_GRAD_NORM \
     NAVIGATOR_SEPARATE_ACTOR_CRITIC_LOSSES \
+    NAVIGATOR_REQUIRED_CHECKPOINT \
+    NAVIGATOR_WAIT_POLL_SECONDS \
     UV_BIN
   do
     if [[ -n "${!variable:-}" ]]; then
@@ -101,12 +108,25 @@ start_service() {
     exit 1
   fi
 
-  systemd-run "${systemd_args[@]}" "$PROJECT_ROOT/$TRAIN_SCRIPT"
+  if [[ "$ACTION" == "start-after" ]]; then
+    if [[ -z "$UPSTREAM_UNIT" ]]; then
+      echo "The start-after action requires an upstream unit." >&2
+      exit 2
+    fi
+    systemd-run "${systemd_args[@]}" \
+      /usr/bin/bash "$PROJECT_ROOT/scripts/wait_for_navigator_service.sh" \
+      "$UPSTREAM_UNIT" "$PROJECT_ROOT/$TRAIN_SCRIPT"
+  else
+    systemd-run "${systemd_args[@]}" "$PROJECT_ROOT/$TRAIN_SCRIPT"
+  fi
   echo "Follow logs with: $0 logs ${SERVICE%.service}"
 }
 
 case "$ACTION" in
   start)
+    start_service
+    ;;
+  start-after)
     start_service
     ;;
   status)

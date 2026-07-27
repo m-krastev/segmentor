@@ -102,6 +102,11 @@ class Config:
     wall_penalty_scale: float = 0.1
     # Image/self-state-only objectives used by annotation-free training.
     intrinsic_novelty_reward_scale: float = 0.05
+    # E3B-inspired episodic first-visit bonus over controllable spatial cells.
+    # This is label-free, decreases as cells are discovered, and is opt-in so
+    # existing reward protocols remain reproducible.
+    episodic_cell_reward_scale: float = 0.0
+    episodic_cell_size_mm: float = 6.0
     curvature_penalty_scale: float = 0.02
     # Reward for passing through must-pass nodes
     r_peaks: float = 4.0
@@ -167,6 +172,7 @@ class Config:
     cumulative_path_radius_vox: int = field(init=False)
     endpoint_tolerance_vox: float = field(init=False)
     allowed_area_radius_vox: int = field(init=False)
+    episodic_cell_size_vox: int = field(init=False)
     gdt_max_increase_theta: float = field(init=False)
     observation_channels: int = field(init=False, default=5)
     # Legacy: time, geodesic progress, Dice coverage, normalized position (3),
@@ -208,6 +214,10 @@ class Config:
             raise ValueError("step_penalty must be non-negative")
         if self.intrinsic_novelty_reward_scale < 0:
             raise ValueError("intrinsic_novelty_reward_scale must be non-negative")
+        if self.episodic_cell_reward_scale < 0:
+            raise ValueError("episodic_cell_reward_scale must be non-negative")
+        if self.episodic_cell_size_mm <= 0:
+            raise ValueError("episodic_cell_size_mm must be positive")
         if self.curvature_penalty_scale < 0:
             raise ValueError("curvature_penalty_scale must be non-negative")
         if not self.navigation_filter_scales_mm or any(
@@ -342,6 +352,10 @@ class Config:
         )
         self.endpoint_tolerance_vox = self.endpoint_tolerance_mm / self.voxel_size_mm
         self.allowed_area_radius_vox = mm_to_vox(self.allowed_area_radius_mm, self.voxel_size_mm)
+        self.episodic_cell_size_vox = max(
+            1,
+            mm_to_vox(self.episodic_cell_size_mm, self.voxel_size_mm),
+        )
         self.clean_policy_inputs = self.annotation_free or self.reward_supervised
         if self.clean_policy_inputs:
             # Current CT, four physically scaled image-filter responses, and
@@ -382,6 +396,7 @@ def parse_args() -> Config:
             "cumulative_path_radius_vox",
             "endpoint_tolerance_vox",
             "allowed_area_radius_vox",
+            "episodic_cell_size_vox",
             "gdt_max_increase_theta",
             "observation_channels",
             "context_features",

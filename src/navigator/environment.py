@@ -192,6 +192,9 @@ class SmallBowelEnv(EnvBase):
                 max_gdt_achieved=UnboundedContinuous(
                     shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
                 ),
+                episodic_cell_reward=UnboundedContinuous(
+                    shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
+                ),
             ),
             shape=self.batch_size,
         )
@@ -676,6 +679,28 @@ class SmallBowelEnv(EnvBase):
         coverage = (2 * self.path_target_intersection / union) if union else 0.0
         return float(coverage)
 
+    def _episodic_cell(self, position: Coords) -> Coords:
+        """Return the label-free spatial cell containing ``position``."""
+        cell_size = self.config.episodic_cell_size_vox
+        return tuple(int(coordinate) // cell_size for coordinate in position)
+
+    def _claim_episodic_cell_reward(self, position: Coords) -> torch.Tensor:
+        """Reward a cell's first visit with an episode-wise diminishing bonus."""
+        reward = torch.tensor(0.0, device=self.device, dtype=self.dtype)
+        scale = self.config.episodic_cell_reward_scale
+        if scale <= 0:
+            self.last_episodic_cell_reward = reward
+            return reward
+        cell = self._episodic_cell(position)
+        if cell in self.episodic_visited_cells:
+            self.last_episodic_cell_reward = reward
+            return reward
+        self.episodic_visited_cells.add(cell)
+        self.episodic_cell_discoveries += 1
+        reward += scale / sqrt(self.episodic_cell_discoveries)
+        self.last_episodic_cell_reward = reward
+        return reward
+
     def _get_target_mask(self) -> torch.Tensor:
         """Return the binary structure that the current episode must trace."""
         return self.seg.bool()
@@ -874,6 +899,7 @@ class SmallBowelEnv(EnvBase):
             )
         if segment_leaves_target:
             rt -= self.config.r_val1
+        rt += self._claim_episodic_cell_reward(next_pos_vox)
         return rt, S
 
     def _calculate_annotation_free_reward(
@@ -924,6 +950,7 @@ class SmallBowelEnv(EnvBase):
                 * torch.linalg.vector_norm(current).clamp_min(1e-6)
             )
             reward -= self.config.curvature_penalty_scale * (1.0 - cosine)
+        reward += self._claim_episodic_cell_reward(next_pos_vox)
         return reward, segment
 
     def _reset(
@@ -999,6 +1026,13 @@ class SmallBowelEnv(EnvBase):
             self.goal_distance_map = self.gdt_start
 
         self._start = self.current_pos_vox
+        self.episodic_visited_cells = {self._episodic_cell(self.current_pos_vox)}
+        self.episodic_cell_discoveries = 0
+        self.last_episodic_cell_reward = torch.tensor(
+            0.0,
+            device=self.device,
+            dtype=self.dtype,
+        )
 
         # Initialize path tracking
         self.cumulative_path_mask.zero_()
@@ -1085,6 +1119,7 @@ class SmallBowelEnv(EnvBase):
                     "max_gdt_achieved": torch.as_tensor(
                         self.max_gdt_achieved, dtype=self.dtype, device=self.device
                     ).view_as(self._is_done),
+                    "episodic_cell_reward": self.placeholder_zeros.clone(),
                 },
             },
             batch_size=self.batch_size,
@@ -1094,6 +1129,11 @@ class SmallBowelEnv(EnvBase):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Performs a step. Assumes env is initialized. Raises exceptions on errors."""
+        self.last_episodic_cell_reward = torch.tensor(
+            0.0,
+            device=self.device,
+            dtype=self.dtype,
+        )
         self.current_step_count += 1
         self.steps_on_current_subject += 1
         # Extract Action
@@ -1281,6 +1321,9 @@ class SmallBowelEnv(EnvBase):
                     "max_gdt_achieved": torch.as_tensor(
                         self.max_gdt_achieved, dtype=self.dtype, device=self.device
                     ).view_as(_reward),
+                    "episodic_cell_reward": self.last_episodic_cell_reward.view_as(
+                        _reward
+                    ),
                 },
             },
             batch_size=self.batch_size,
@@ -1567,6 +1610,13 @@ class MRIPathEnv(SmallBowelEnv):
 
         self._start = self.current_pos_vox
 
+        self.episodic_visited_cells = {self._episodic_cell(self.current_pos_vox)}
+        self.episodic_cell_discoveries = 0
+        self.last_episodic_cell_reward = torch.tensor(
+            0.0,
+            device=self.device,
+            dtype=self.dtype,
+        )
         self.cumulative_path_mask.zero_()
         # Use the current path as gt_path_vol for drawing
         self.gt_path_vol.zero_()
@@ -1618,6 +1668,7 @@ class MRIPathEnv(SmallBowelEnv):
                     "max_gdt_achieved": torch.as_tensor(
                         self.max_gdt_achieved, dtype=self.dtype, device=self.device
                     ).view_as(self._is_done),
+                    "episodic_cell_reward": self.placeholder_zeros.clone(),
                 },
             },
             batch_size=self.batch_size,
@@ -1666,6 +1717,7 @@ class MRIPathEnv(SmallBowelEnv):
         self.wall_gradient += wall_val
 
         rt -= self.config.r_val1 * self.seg[next_pos_vox].logical_not()
+        rt += self._claim_episodic_cell_reward(next_pos_vox)
         return rt, S
 
     def _get_target_mask(self) -> torch.Tensor:

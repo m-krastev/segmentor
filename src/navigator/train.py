@@ -652,6 +652,9 @@ def _train_torchrl(
         avg_kldiv = torch.stack(kl_div).mean().item()
         avg_reward = batch_data["next", "reward"].mean().item()
         max_reward = batch_data["next", "reward"].max().item()
+        avg_episodic_cell_reward = batch_data[
+            "next", "info", "episodic_cell_reward"
+        ].mean().item()
         idx = batch_data["next", "done"]
         # A 2,048-step episode legitimately spans multiple 1,024-frame
         # collector batches. Keep optimizing on those batches while logging NaN
@@ -710,6 +713,7 @@ def _train_torchrl(
             "losses/critic_grad_norm": critic_grad_norm,
             "train/reward": avg_reward,
             "train/max_reward": max_reward,
+            "train/episodic_cell_reward": avg_episodic_cell_reward,
             "train/step_count": step_count,
             "train/wall_gradient": wall_gradient,
             "train/episode_len": ep_len,
