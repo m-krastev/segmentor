@@ -2083,3 +2083,37 @@ command or service, acceptance metrics, and outcome here.
   remains below 20% Dice with zero traversal, a separately named GT-mask-input
   baseline may be started. It must never be reported as annotation-free or
   replace the image-only champion.
+- Completed 102.4k matrix, all seed/split/architecture matched:
+  - recovery `0.2`, entropy `0.0005`: Dice `0.044395`
+    (`0.075525`, `0.013265`), endpoint 106.542 mm;
+  - recovery `0.05`, entropy `0.003`: Dice `0.015460`
+    (`0.004307`, `0.026614`), endpoint 213.497 mm;
+  - recovery `0.2`, entropy `0.003`: Dice `0.099903`
+    (`0.122358`, `0.077448`), endpoint 114.577 mm;
+  - recovery `0.1`, entropy `0.0005`: Dice `0.011585`
+    (`0.003954`, `0.019216`), endpoint 148.411 mm;
+  - recovery `0.05`, entropy `0.001`: Dice `0.034132`
+    (`0.042663`, `0.025601`), endpoint 204.157 mm;
+  - recovery `0.1`, entropy `0.001`: Dice `0.069973`
+    (`0.080038`, `0.059908`), endpoint 152.104 mm.
+- Recovery and entropy interact nonlinearly. Strong settings alone trade one
+  validation case against the other, whereas recovery `0.2` plus entropy
+  `0.003` is the first balanced image-only policy and becomes the new champion
+  at `0.099903` Dice. It still has zero endpoint reaches/traversals, and its
+  endpoint distance is worse than the former champion's 93.100 mm.
+
+### M12: Selected million-frame image-only run
+
+- Promoted the balanced champion to
+  `navigator-bomopi-gru-p32-g1-r60-rec02-e003-1m-v1`:
+  - 1,024,000 frames;
+  - exact 32-cubed observations;
+  - GDT `1.0`, target-distance radius 60 mm, recovery `0.2`;
+  - entropy `0.003`;
+  - cosine annealing reaches 5e-6 at 102,400 frames and is then frozen;
+  - two-case held-out validation every 51,200 frames;
+  - target-KL guard remains disabled for this causal run because KL was
+    secondary and variable epoch counts would otherwise alter validation
+    cadence.
+- Effective settings and TensorBoard path were verified from the systemd log
+  before training. Validation-ranked best checkpoints are retained throughout.
