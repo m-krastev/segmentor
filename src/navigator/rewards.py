@@ -88,3 +88,40 @@ def target_recovery_potential_reward(
         * (float(previous_distance_mm) - float(next_distance_mm))
         / float(maximum_step_mm)
     )
+
+
+def target_distance_state_penalty(
+    distance_mm: float,
+    radius_mm: float,
+    scale: float,
+) -> float:
+    """Return a bounded persistent cost for being away from the target.
+
+    Unlike a potential difference, this remains negative while the agent moves
+    tangentially or stays far from the target. ``radius_mm`` is the distance at
+    which the penalty reaches its finite maximum.
+    """
+    if distance_mm < 0:
+        raise ValueError("distance_mm must be non-negative")
+    if radius_mm <= 0:
+        raise ValueError("radius_mm must be positive")
+    if scale < 0:
+        raise ValueError("scale must be non-negative")
+    return -float(scale) * min(float(distance_mm) / float(radius_mm), 1.0)
+
+
+def terminal_outcome_reward(
+    reached_goal: bool,
+    coverage: float,
+    threshold: float,
+    success_bonus: float,
+    failure_penalty: float,
+) -> float:
+    """Return a fixed success bonus or an explicit finite failure penalty."""
+    if success_bonus < 0:
+        raise ValueError("success_bonus must be non-negative")
+    if failure_penalty < 0:
+        raise ValueError("failure_penalty must be non-negative")
+    if is_path_success(reached_goal, coverage, threshold):
+        return float(success_bonus)
+    return -float(failure_penalty)

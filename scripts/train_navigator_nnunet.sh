@@ -39,7 +39,15 @@ ENDPOINT_TOLERANCE_MM="${NAVIGATOR_ENDPOINT_TOLERANCE_MM:-3}"
 MAX_EPISODE_STEPS="${NAVIGATOR_MAX_EPISODE_STEPS:-2048}"
 FRAMES_PER_BATCH="${NAVIGATOR_FRAMES_PER_BATCH:-1024}"
 GDT_REWARD_SCALE="${NAVIGATOR_GDT_REWARD_SCALE:-1}"
+GDT_PROGRESS_NORMALIZATION="${NAVIGATOR_GDT_PROGRESS_NORMALIZATION:-initial_distance}"
 TARGET_RECOVERY_REWARD_SCALE="${NAVIGATOR_TARGET_RECOVERY_REWARD_SCALE:-1}"
+TARGET_DISTANCE_PENALTY_SCALE="${NAVIGATOR_TARGET_DISTANCE_PENALTY_SCALE:-0}"
+TARGET_DISTANCE_PENALTY_RADIUS_MM="${NAVIGATOR_TARGET_DISTANCE_PENALTY_RADIUS_MM:-30}"
+GATE_POSITIVE_SHAPING_ON_TARGET_SEGMENT="${NAVIGATOR_GATE_POSITIVE_SHAPING_ON_TARGET_SEGMENT:-0}"
+OFF_TARGET_PENALTY_SCALE="${NAVIGATOR_OFF_TARGET_PENALTY_SCALE:-0.25}"
+WALL_PENALTY_SCALE="${NAVIGATOR_WALL_PENALTY_SCALE:-0.1}"
+TERMINAL_SUCCESS_BONUS="${NAVIGATOR_TERMINAL_SUCCESS_BONUS:-0}"
+TERMINAL_FAILURE_PENALTY="${NAVIGATOR_TERMINAL_FAILURE_PENALTY:--1}"
 ANNOTATION_FREE="${NAVIGATOR_ANNOTATION_FREE:-1}"
 REWARD_SUPERVISED="${NAVIGATOR_REWARD_SUPERVISED:-0}"
 INTRINSIC_NOVELTY_REWARD_SCALE="${NAVIGATOR_INTRINSIC_NOVELTY_REWARD_SCALE:-0.05}"
@@ -116,6 +124,12 @@ if [[ "$COVERAGE_GATED_GOAL_PLANNER" == "1" || "$COVERAGE_GATED_GOAL_PLANNER" ==
   GOAL_PLANNER_ARGS=(--coverage-gated-goal-planner)
 fi
 
+REWARD_GATING_ARGS=(--no-gate-positive-shaping-on-target-segment)
+if [[ "$GATE_POSITIVE_SHAPING_ON_TARGET_SEGMENT" == "1" ||
+      "$GATE_POSITIVE_SHAPING_ON_TARGET_SEGMENT" == "true" ]]; then
+  REWARD_GATING_ARGS=(--gate-positive-shaping-on-target-segment)
+fi
+
 VALIDATION_ARGS=()
 if [[ -n "$VALIDATION_OUTPUT_DIR" ]]; then
   VALIDATION_ARGS=(--validation-output-dir "$VALIDATION_OUTPUT_DIR")
@@ -157,7 +171,7 @@ elif [[ "$REWARD_SUPERVISED" == "1" || "$REWARD_SUPERVISED" == "true" ]]; then
     --gdt-reward-scale "$GDT_REWARD_SCALE"
     --target-recovery-reward-scale "$TARGET_RECOVERY_REWARD_SCALE"
     --r-final 50
-    --r-val1 0.25
+    --r-val1 "$OFF_TARGET_PENALTY_SCALE"
   )
 else
   ANNOTATION_ARGS=(
@@ -169,7 +183,7 @@ else
     --gdt-reward-scale "$GDT_REWARD_SCALE"
     --target-recovery-reward-scale "$TARGET_RECOVERY_REWARD_SCALE"
     --r-final 50
-    --r-val1 0.25
+    --r-val1 "$OFF_TARGET_PENALTY_SCALE"
   )
 fi
 
@@ -199,6 +213,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   "${EVAL_ARGS[@]}" \
   "${GOAL_DISTANCE_ARGS[@]}" \
   "${GOAL_PLANNER_ARGS[@]}" \
+  "${REWARD_GATING_ARGS[@]}" \
   "${LOSS_SEPARATION_ARGS[@]}" \
   "${VALIDATION_ARGS[@]}" \
   --device cuda \
@@ -225,6 +240,12 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --goal-action-prior 0 \
   --success-coverage-threshold 0.40 \
   --intrinsic-novelty-reward-scale "$INTRINSIC_NOVELTY_REWARD_SCALE" \
+  --gdt-progress-normalization "$GDT_PROGRESS_NORMALIZATION" \
+  --target-distance-penalty-scale "$TARGET_DISTANCE_PENALTY_SCALE" \
+  --target-distance-penalty-radius-mm "$TARGET_DISTANCE_PENALTY_RADIUS_MM" \
+  --wall-penalty-scale "$WALL_PENALTY_SCALE" \
+  --terminal-success-bonus "$TERMINAL_SUCCESS_BONUS" \
+  --terminal-failure-penalty "$TERMINAL_FAILURE_PENALTY" \
   --episodic-cell-reward-scale "$EPISODIC_CELL_REWARD_SCALE" \
   --episodic-cell-size-mm "$EPISODIC_CELL_SIZE_MM" \
   --curvature-penalty-scale "$CURVATURE_PENALTY_SCALE" \

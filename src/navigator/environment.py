@@ -35,7 +35,9 @@ from .rewards import (
     coverage_potential_reward,
     gdt_progress_reward,
     is_path_success,
+    target_distance_state_penalty,
     target_recovery_potential_reward,
+    terminal_outcome_reward,
     terminal_path_reward,
 )
 from .utils import (
@@ -44,6 +46,21 @@ from .utils import (
     get_patch,
     Coords,
     Spacing,
+)
+
+REWARD_COMPONENT_INFO_KEYS = (
+    "reward_invalid",
+    "reward_gdt",
+    "reward_recovery",
+    "reward_target_distance",
+    "reward_step",
+    "reward_wall",
+    "reward_off_target",
+    "reward_coverage",
+    "reward_intrinsic_novelty",
+    "reward_curvature",
+    "reward_episodic",
+    "reward_terminal",
 )
 
 from enum import IntEnum
@@ -195,6 +212,13 @@ class SmallBowelEnv(EnvBase):
                 episodic_cell_reward=UnboundedContinuous(
                     shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
                 ),
+                **{
+                    key: UnboundedContinuous(
+                        shape=torch.Size([*self.batch_size, 1]),
+                        dtype=self.dtype,
+                    )
+                    for key in REWARD_COMPONENT_INFO_KEYS
+                },
             ),
             shape=self.batch_size,
         )
@@ -327,7 +351,7 @@ class SmallBowelEnv(EnvBase):
             self.image_features = None
         self.gdt_start = None if self.config.annotation_free else gdt_start
         self.gdt_end = None if self.config.annotation_free else gdt_end
-        if self.config.target_recovery_reward_scale:
+        if self.config.needs_target_distance:
             if target_distance is None:
                 connected_target = (
                     (np.asarray(seg) != 0)
@@ -701,6 +725,39 @@ class SmallBowelEnv(EnvBase):
         self.last_episodic_cell_reward = reward
         return reward
 
+    def _reset_step_reward_components(self) -> None:
+        self.last_reward_components = {
+            key: torch.tensor(0.0, device=self.device, dtype=self.dtype)
+            for key in REWARD_COMPONENT_INFO_KEYS
+        }
+
+    def _reward_term(self, key: str, value) -> torch.Tensor:
+        """Record and return one scalar reward component."""
+        component = torch.as_tensor(
+            value,
+            device=self.device,
+            dtype=self.dtype,
+        )
+        self.last_reward_components[key] += component
+        return component
+
+    def _segment_is_on_target(self, segment: Tuple) -> bool:
+        """Return whether every voxel in an executed segment is on target."""
+        if not segment:
+            return False
+        if self.target_distance_map is not None:
+            distances = np.asarray(self.target_distance_map[segment])
+            return bool(
+                (distances <= np.finfo(np.float32).eps).all()
+            )
+        return bool(self.seg[segment].bool().all().item())
+
+    def _segment_max_target_distance(self, segment: Tuple) -> float:
+        """Return the maximum physical distance from target along a segment."""
+        if self.target_distance_map is None or not segment:
+            return 0.0
+        return float(np.asarray(self.target_distance_map[segment]).max())
+
     def _get_target_mask(self) -> torch.Tensor:
         """Return the binary structure that the current episode must trace."""
         return self.seg.bool()
@@ -812,22 +869,23 @@ class SmallBowelEnv(EnvBase):
         rt = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         # --- 1. Invalid movement penalty ---
         if not any(action_vox):
-            rt -= self.config.r_zero_mov
+            rt += self._reward_term("reward_invalid", -self.config.r_zero_mov)
             return rt, ()
 
         if not self._is_valid_pos(next_pos_vox):
-            rt -= self.config.r_val2
+            rt += self._reward_term("reward_invalid", -self.config.r_val2)
             return rt, ()
 
         # Set of voxels S on the line segment
         S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
+        segment_on_target = self._segment_is_on_target(S)
         # Checking only the endpoint permits a single action to cut through a
         # wall or jump between adjacent bowel loops.
         if (
             not self.config.clean_policy_inputs
             and not bool(np.asarray(self.allowed_area[S]).all())
         ):
-            rt -= self.config.r_val2
+            rt += self._reward_term("reward_invalid", -self.config.r_val2)
             return rt, ()
 
         # --- 2. GDT-based reward ---
@@ -849,30 +907,63 @@ class SmallBowelEnv(EnvBase):
                 # directional signal when enabled. Retain the legacy flat
                 # failure penalty only when that signal is unavailable.
                 if self.target_distance_map is None:
-                    rt -= self.config.r_val2
+                    rt += self._reward_term(
+                        "reward_invalid",
+                        -self.config.r_val2,
+                    )
             else:
                 delta = float(self.current_goal_distance) - next_goal_distance
-                rt += gdt_progress_reward(
-                    delta,
-                    max(float(self.initial_goal_distance), torch.finfo(self.dtype).eps),
-                    self.config.gdt_reward_scale,
-                )
+                if (
+                    not self.config.gate_positive_shaping_on_target_segment
+                    or segment_on_target
+                ):
+                    normalization = (
+                        self.config.gdt_max_increase_theta
+                        if self.config.gdt_progress_normalization == "max_step"
+                        else max(
+                            float(self.initial_goal_distance),
+                            torch.finfo(self.dtype).eps,
+                        )
+                    )
+                    rt += self._reward_term(
+                        "reward_gdt",
+                        gdt_progress_reward(
+                            delta,
+                            normalization,
+                            self.config.gdt_reward_scale,
+                        ),
+                    )
+                # A background-crossing shortcut must not receive delayed GDT
+                # credit on its next valid movement.
                 self.current_goal_distance = next_goal_distance
 
         if self.target_distance_map is not None:
             next_target_distance = float(self.target_distance_map[next_pos_vox])
-            rt += target_recovery_potential_reward(
-                self.current_target_distance,
-                next_target_distance,
-                self.config.gdt_max_increase_theta,
-                self.config.target_recovery_reward_scale,
+            rt += self._reward_term(
+                "reward_recovery",
+                target_recovery_potential_reward(
+                    self.current_target_distance,
+                    next_target_distance,
+                    self.config.gdt_max_increase_theta,
+                    self.config.target_recovery_reward_scale,
+                ),
             )
             self.current_target_distance = next_target_distance
+
+        if self.config.target_distance_penalty_scale:
+            rt += self._reward_term(
+                "reward_target_distance",
+                target_distance_state_penalty(
+                    self._segment_max_target_distance(S),
+                    self.config.target_distance_penalty_radius_mm,
+                    self.config.target_distance_penalty_scale,
+                ),
+            )
 
         # A revisit has no new-coverage reward, and every action still pays this
         # cost. No separate overlap penalty is needed; every line segment
         # necessarily contains its starting voxel.
-        rt -= self.config.step_penalty
+        rt += self._reward_term("reward_step", -self.config.step_penalty)
 
         # 2.5 Peaks-based reward
         # rt += self.reward_map[S].sum() * self.config.r_peaks
@@ -882,7 +973,10 @@ class SmallBowelEnv(EnvBase):
 
         # --- 3. Wall-based penalty ---
         wall_map = self.wall_map[S].max()
-        rt -= self.config.wall_penalty_scale * wall_map
+        rt += self._reward_term(
+            "reward_wall",
+            -self.config.wall_penalty_scale * wall_map,
+        )
 
         self.wall_gradient += wall_map
 
@@ -891,15 +985,20 @@ class SmallBowelEnv(EnvBase):
         # background and land on another bowel loop without cost. When the
         # recovery map exists, its zero set is the endpoint-connected target
         # rather than the union of potentially disconnected label islands.
-        if self.target_distance_map is None:
-            segment_leaves_target = bool(self.seg[S].logical_not().any().item())
-        else:
-            segment_leaves_target = bool(
-                (np.asarray(self.target_distance_map[S]) > 0).any()
-            )
+        segment_leaves_target = not segment_on_target
         if segment_leaves_target:
-            rt -= self.config.r_val1
-        rt += self._claim_episodic_cell_reward(next_pos_vox)
+            rt += self._reward_term(
+                "reward_off_target",
+                -self.config.r_val1,
+            )
+        if (
+            not self.config.gate_positive_shaping_on_target_segment
+            or segment_on_target
+        ):
+            rt += self._reward_term(
+                "reward_episodic",
+                self._claim_episodic_cell_reward(next_pos_vox),
+            )
         return rt, S
 
     def _calculate_annotation_free_reward(
@@ -911,10 +1010,16 @@ class SmallBowelEnv(EnvBase):
 
         reward = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         if not any(action_vox):
-            reward -= self.config.r_zero_mov
+            reward += self._reward_term(
+                "reward_invalid",
+                -self.config.r_zero_mov,
+            )
             return reward, ()
         if not self._is_valid_pos(next_pos_vox):
-            reward -= self.config.r_val2
+            reward += self._reward_term(
+                "reward_invalid",
+                -self.config.r_val2,
+            )
             return reward, ()
 
         segment = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
@@ -924,13 +1029,19 @@ class SmallBowelEnv(EnvBase):
             dtype=self.dtype,
             device=self.device,
         )
-        reward += self.config.intrinsic_novelty_reward_scale * novel_fraction
-        reward -= self.config.step_penalty
+        reward += self._reward_term(
+            "reward_intrinsic_novelty",
+            self.config.intrinsic_novelty_reward_scale * novel_fraction,
+        )
+        reward += self._reward_term("reward_step", -self.config.step_penalty)
 
         # Retain only the image-derived Meijering response. Its utility must be
         # established empirically; it is not a substitute for a hidden mask.
         wall_response = self.wall_map[segment].max()
-        reward -= self.config.wall_penalty_scale * wall_response
+        reward += self._reward_term(
+            "reward_wall",
+            -self.config.wall_penalty_scale * wall_response,
+        )
         self.wall_gradient += wall_response
 
         if len(self.tracking_path_history) > 1:
@@ -949,8 +1060,14 @@ class SmallBowelEnv(EnvBase):
                 torch.linalg.vector_norm(previous).clamp_min(1e-6)
                 * torch.linalg.vector_norm(current).clamp_min(1e-6)
             )
-            reward -= self.config.curvature_penalty_scale * (1.0 - cosine)
-        reward += self._claim_episodic_cell_reward(next_pos_vox)
+            reward += self._reward_term(
+                "reward_curvature",
+                -self.config.curvature_penalty_scale * (1.0 - cosine),
+            )
+        reward += self._reward_term(
+            "reward_episodic",
+            self._claim_episodic_cell_reward(next_pos_vox),
+        )
         return reward, segment
 
     def _reset(
@@ -1120,6 +1237,10 @@ class SmallBowelEnv(EnvBase):
                         self.max_gdt_achieved, dtype=self.dtype, device=self.device
                     ).view_as(self._is_done),
                     "episodic_cell_reward": self.placeholder_zeros.clone(),
+                    **{
+                        key: self.placeholder_zeros.clone()
+                        for key in REWARD_COMPONENT_INFO_KEYS
+                    },
                 },
             },
             batch_size=self.batch_size,
@@ -1129,6 +1250,7 @@ class SmallBowelEnv(EnvBase):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Performs a step. Assumes env is initialized. Raises exceptions on errors."""
+        self._reset_step_reward_components()
         self.last_episodic_cell_reward = torch.tensor(
             0.0,
             device=self.device,
@@ -1201,11 +1323,20 @@ class SmallBowelEnv(EnvBase):
                 self.cumulative_path_mask_pen[S] = 1
                 if not self.config.annotation_free:
                     next_coverage = float(self._get_final_coverage())
-                    reward += coverage_potential_reward(
+                    coverage_reward = coverage_potential_reward(
                         self.current_coverage,
                         next_coverage,
                         self.config.coverage_reward_scale,
                     )
+                    if (
+                        coverage_reward <= 0
+                        or not self.config.gate_positive_shaping_on_target_segment
+                        or self._segment_is_on_target(S)
+                    ):
+                        reward += self._reward_term(
+                            "reward_coverage",
+                            coverage_reward,
+                        )
                     self.current_coverage = next_coverage
 
         # Invalid actions leave the agent in place. Treating them as terminal
@@ -1240,19 +1371,34 @@ class SmallBowelEnv(EnvBase):
         final_coverage = 0
         if done and not self.config.annotation_free:
             final_coverage = coverage_for_decision
-            reward += terminal_path_reward(
-                float(final_coverage),
-                at_goal,
-                self.config.success_coverage_threshold,
-                self.config.r_final,
-                self.config.coverage_reward_scale
-                + (
-                    self.config.gdt_reward_scale
-                    if self.config.use_immediate_gdt_reward
-                    else 0.0
+            if self.config.terminal_failure_penalty >= 0:
+                reward += self._reward_term(
+                    "reward_terminal",
+                    terminal_outcome_reward(
+                        at_goal,
+                        float(final_coverage),
+                        self.config.success_coverage_threshold,
+                        self.config.terminal_success_bonus,
+                        self.config.terminal_failure_penalty,
+                    ),
                 )
-                + self.config.r_val2,
-            )
+            else:
+                reward += self._reward_term(
+                    "reward_terminal",
+                    terminal_path_reward(
+                        float(final_coverage),
+                        at_goal,
+                        self.config.success_coverage_threshold,
+                        self.config.r_final,
+                        self.config.coverage_reward_scale
+                        + (
+                            self.config.gdt_reward_scale
+                            if self.config.use_immediate_gdt_reward
+                            else 0.0
+                        )
+                        + self.config.r_val2,
+                    ),
+                )
 
         # Get Next State Patches
         next_obs_dict = self._get_state_patches()
@@ -1324,6 +1470,10 @@ class SmallBowelEnv(EnvBase):
                     "episodic_cell_reward": self.last_episodic_cell_reward.view_as(
                         _reward
                     ),
+                    **{
+                        key: value.view_as(_reward)
+                        for key, value in self.last_reward_components.items()
+                    },
                 },
             },
             batch_size=self.batch_size,
@@ -1669,6 +1819,10 @@ class MRIPathEnv(SmallBowelEnv):
                         self.max_gdt_achieved, dtype=self.dtype, device=self.device
                     ).view_as(self._is_done),
                     "episodic_cell_reward": self.placeholder_zeros.clone(),
+                    **{
+                        key: self.placeholder_zeros.clone()
+                        for key in REWARD_COMPONENT_INFO_KEYS
+                    },
                 },
             },
             batch_size=self.batch_size,
@@ -1679,15 +1833,15 @@ class MRIPathEnv(SmallBowelEnv):
     def _calculate_reward(self, action_vox: Coords, next_pos_vox: Coords) -> Tuple[float, Tuple]:
         rt = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         if not any(action_vox):
-            rt -= self.config.r_zero_mov
+            rt += self._reward_term("reward_invalid", -self.config.r_zero_mov)
             return rt, ()
         if not self._is_valid_pos(next_pos_vox):
-            rt -= self.config.r_val2
+            rt += self._reward_term("reward_invalid", -self.config.r_val2)
             return rt, ()
 
         S = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
         if not bool(np.asarray(self.allowed_area[S]).all()):
-            rt -= self.config.r_val2
+            rt += self._reward_term("reward_invalid", -self.config.r_val2)
             return rt, ()
 
         # GDT-based reward removed as gdt is always zero
@@ -1710,14 +1864,23 @@ class MRIPathEnv(SmallBowelEnv):
         #         rt -= 1
         #     self.max_gdt_achieved = next_gdt_val
 
-        rt -= self.config.step_penalty
+        rt += self._reward_term("reward_step", -self.config.step_penalty)
 
         wall_val = self.wall_map[S].max()
-        rt -= self.config.wall_penalty_scale * wall_val
+        rt += self._reward_term(
+            "reward_wall",
+            -self.config.wall_penalty_scale * wall_val,
+        )
         self.wall_gradient += wall_val
 
-        rt -= self.config.r_val1 * self.seg[next_pos_vox].logical_not()
-        rt += self._claim_episodic_cell_reward(next_pos_vox)
+        rt += self._reward_term(
+            "reward_off_target",
+            -self.config.r_val1 * self.seg[next_pos_vox].logical_not(),
+        )
+        rt += self._reward_term(
+            "reward_episodic",
+            self._claim_episodic_cell_reward(next_pos_vox),
+        )
         return rt, S
 
     def _get_target_mask(self) -> torch.Tensor:

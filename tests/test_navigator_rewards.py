@@ -4,7 +4,9 @@ from navigator.rewards import (
     coverage_potential_reward,
     gdt_progress_reward,
     is_path_success,
+    target_distance_state_penalty,
     target_recovery_potential_reward,
+    terminal_outcome_reward,
     terminal_path_reward,
 )
 
@@ -79,6 +81,57 @@ class TargetRecoveryPotentialRewardTests(unittest.TestCase):
             target_recovery_potential_reward(0.0, 1.0, 0.0, 1.0)
         with self.assertRaisesRegex(ValueError, "non-negative"):
             target_recovery_potential_reward(0.0, 1.0, 6.0, -1.0)
+
+
+class TargetDistanceStatePenaltyTests(unittest.TestCase):
+    def test_penalty_increases_with_distance_and_is_bounded(self):
+        self.assertEqual(target_distance_state_penalty(0.0, 30.0, 0.1), 0.0)
+        self.assertAlmostEqual(
+            target_distance_state_penalty(6.0, 30.0, 0.1),
+            -0.02,
+        )
+        self.assertAlmostEqual(
+            target_distance_state_penalty(15.0, 30.0, 0.1),
+            -0.05,
+        )
+        self.assertAlmostEqual(
+            target_distance_state_penalty(30.0, 30.0, 0.1),
+            -0.1,
+        )
+        self.assertAlmostEqual(
+            target_distance_state_penalty(300.0, 30.0, 0.1),
+            -0.1,
+        )
+
+    def test_configuration_must_be_valid(self):
+        with self.assertRaisesRegex(ValueError, "distance_mm"):
+            target_distance_state_penalty(-1.0, 30.0, 0.1)
+        with self.assertRaisesRegex(ValueError, "radius_mm"):
+            target_distance_state_penalty(1.0, 0.0, 0.1)
+        with self.assertRaisesRegex(ValueError, "scale"):
+            target_distance_state_penalty(1.0, 30.0, -0.1)
+
+
+class TerminalOutcomeRewardTests(unittest.TestCase):
+    def test_success_is_fixed_and_failure_is_explicit(self):
+        self.assertEqual(
+            terminal_outcome_reward(True, 0.4, 0.4, 50.0, 0.0),
+            50.0,
+        )
+        self.assertEqual(
+            terminal_outcome_reward(False, 1.0, 0.4, 50.0, 0.0),
+            0.0,
+        )
+        self.assertEqual(
+            terminal_outcome_reward(True, 0.39, 0.4, 50.0, 5.0),
+            -5.0,
+        )
+
+    def test_configuration_must_be_valid(self):
+        with self.assertRaisesRegex(ValueError, "success_bonus"):
+            terminal_outcome_reward(True, 1.0, 0.4, -1.0, 0.0)
+        with self.assertRaisesRegex(ValueError, "failure_penalty"):
+            terminal_outcome_reward(False, 0.0, 0.4, 1.0, -1.0)
 
 
 if __name__ == "__main__":

@@ -1663,3 +1663,75 @@ command or service, acceptance metrics, and outcome here.
     approximately 5,786 MiB of CUDA memory and no competing training process;
   - TensorBoard:
     `/home/matey/project/segmentor/checkpoints/navigator-gru-episodic-cell-warm8m-v1/nnunet-actual/tensorboard/20260728-014524-917157`.
+
+### M8 outcome and deployment failure
+
+- The episodic-cell run remained numerically unstable:
+  - its best validation at 3,072,000 frames reached mean Dice `0.122161`,
+    dominated by `s1389=0.347935`; `s0224=0.014689` and
+    `s0120=0.003858` did not generalize;
+  - its best mean endpoint distance was `110.456 mm` at 4,096,000 frames;
+  - traversal and endpoint success remained `0/3`;
+  - the final completed validation at 4,608,000 frames had regressed to mean
+    Dice `0.010505` and endpoint distance `262.602 mm`.
+- The service stopped at checkpoint 5,504,000 rather than 8,000,000. While
+  developing M9, source files were synchronized into the same checkout used by
+  the live process. A validation DataLoader worker imported the newer dataset
+  module but received the older in-memory `Config`, which lacked the new
+  derived `needs_target_distance` field. This hot-code deployment mistake
+  caused validation to fail and the service to exit. It was not an OOM or an
+  algorithmic terminal condition.
+- The 5,504,000 checkpoint and 3,072,000 best checkpoint are preserved.
+  Future source synchronization must use an idle or separate checkout. Dataset
+  loading now also has a backward-compatible derived-field fallback.
+
+### M9: numerically audited supervised reward contract
+
+- Inspection of the exact cached feature volumes showed that the Meijering
+  response was not consistently aligned with bowel:
+  - dark-tube mean response was lower inside than outside for `s1389` and
+    `s0120`, but higher inside for `s0224`;
+  - the navigation filters were already robustly normalized to `[0,1]`, after
+    which the reward transformed `[0,0.1]` to `[0,1]` a second time;
+  - this saturated `23.7%`, `47.7%`, and `48.3%` of the complete validation
+    volumes and produced a measured mean wall penalty of approximately `-155`
+    per episode. M9 therefore sets the image-filter reward scale to zero while
+    retaining the channels as policy inputs.
+- The historical GDT normalization made total monotonic endpoint progress
+  worth only `+1` per subject. Across cached finite cases, start-to-end GDT
+  ranged from `0` to `454.51 mm` (median `188.74 mm`), so identical physical
+  actions received subject-dependent hidden scales.
+- M9 reward protocol:
+  - GDT progress is normalized by the maximum physical action length
+    `sqrt(3)*6 = 10.392 mm`, with scale `0.1`;
+  - Euclidean recovery-potential scale is reduced from `1.0` to `0.05`;
+  - the binary off-target penalty is removed;
+  - a persistent segment-distance penalty is
+    `-0.1 * min(max_distance_along_segment / 30 mm, 1)`;
+  - any segment crossing background is forbidden from receiving positive GDT,
+    Dice, or supervised episodic-cell reward, while negative Dice damage is
+    retained;
+  - episodic first-cell scale is reduced from `0.05` to `0.01`;
+  - terminal success is a fixed `+50` only when endpoint and Dice threshold
+    both pass; terminal failure is `0`, avoiding the previous `-52` critic
+    shock;
+  - fixed valid-step cost remains `-0.01`.
+- Canonical numerical audit:
+  - 6-mm in-target forward/new-cell transition: `+0.057735`;
+  - in-target forward/backward cycle: `-0.010000`;
+  - 1.5-mm leave/return cycle: `-0.030000`;
+  - 6-mm leave/return cycle: `-0.060000`;
+  - 1.5-mm cross-loop background gap: `-0.015000`;
+  - tangential motion 6 mm from target: `-0.030000` per transition;
+  - tangential motion at or beyond 30 mm: `-0.110000` per transition;
+  - maximum 2,048-step episodic-cell return: `+0.890604`, versus fixed step
+    cost `-20.48`.
+- A reusable `scripts/audit_navigator_reward_contract.py` fails if valid
+  forward progress is not positive, a cross-loop shortcut is profitable, or a
+  canonical inside/outside cycle has non-negative return.
+- All reward terms are emitted and logged separately for empirical accounting:
+  invalid, GDT, recovery, persistent target distance, step, image wall,
+  off-target, coverage, image novelty, curvature, episodic cell, and terminal.
+- Verification: the numerical audit passed, focused reward/environment tests
+  passed, and the full suite passed `80` tests plus two subtests with `18`
+  deprecation warnings.

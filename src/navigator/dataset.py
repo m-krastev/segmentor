@@ -621,7 +621,22 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
             "small-bowel segmentation; full end-to-end traversal is impossible."
         )
 
-    if config.target_recovery_reward_scale:
+    # ``getattr`` keeps long-running workers compatible if a newer checkout
+    # adds the derived flag after the parent process instantiated Config.
+    needs_target_distance = getattr(
+        config,
+        "needs_target_distance",
+        bool(
+            config.target_recovery_reward_scale
+            or getattr(config, "target_distance_penalty_scale", 0.0)
+            or getattr(
+                config,
+                "gate_positive_shaping_on_target_segment",
+                False,
+            )
+        ),
+    )
+    if needs_target_distance:
         target_distance_cache_path = cache_dir / CACHE_FILES["target_distance"]
         if target_distance_cache_path.exists():
             target_distance_np = nib.load(target_distance_cache_path).get_fdata(

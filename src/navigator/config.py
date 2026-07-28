@@ -94,9 +94,25 @@ class Config:
     # Total return available for monotonic mask-constrained progress to the
     # requested endpoint. This is a telescoping potential, not a per-step bonus.
     gdt_reward_scale: float = 1.0
+    # ``initial_distance`` preserves the historical total-return normalization.
+    # ``max_step`` gives the same physical GDT displacement the same reward
+    # across subjects and prevents long paths from erasing local progress.
+    gdt_progress_normalization: str = "initial_distance"
     # Reward-only potential for recovering after an unconstrained action leaves
     # the supervised target. Zero preserves legacy behavior.
     target_recovery_reward_scale: float = 0.0
+    # Persistent cost for distance from the endpoint-connected target. It is
+    # evaluated over the complete action segment, not only at the endpoint.
+    target_distance_penalty_scale: float = 0.0
+    target_distance_penalty_radius_mm: float = 30.0
+    # When enabled, a segment that crosses background cannot receive positive
+    # GDT, Dice, or supervised episodic-cell shaping.
+    gate_positive_shaping_on_target_segment: bool = False
+    # Optional calibrated terminal protocol. A non-negative failure value
+    # enables a fixed success bonus and explicit failure penalty. The default
+    # negative sentinel preserves the historical coverage-scaled terminal.
+    terminal_success_bonus: float = 0.0
+    terminal_failure_penalty: float = -1.0
     success_coverage_threshold: float = 0.55
     step_penalty: float = 0.01
     wall_penalty_scale: float = 0.1
@@ -174,6 +190,7 @@ class Config:
     allowed_area_radius_vox: int = field(init=False)
     episodic_cell_size_vox: int = field(init=False)
     gdt_max_increase_theta: float = field(init=False)
+    needs_target_distance: bool = field(init=False)
     observation_channels: int = field(init=False, default=5)
     # Legacy: time, geodesic progress, Dice coverage, normalized position (3),
     # previous direction (3), and goal direction (3). Annotation-free mode
@@ -208,8 +225,24 @@ class Config:
             raise ValueError("coverage_reward_scale must be non-negative")
         if self.gdt_reward_scale < 0:
             raise ValueError("gdt_reward_scale must be non-negative")
+        if self.gdt_progress_normalization not in {
+            "initial_distance",
+            "max_step",
+        }:
+            raise ValueError(
+                "gdt_progress_normalization must be either "
+                "'initial_distance' or 'max_step'"
+            )
         if self.target_recovery_reward_scale < 0:
             raise ValueError("target_recovery_reward_scale must be non-negative")
+        if self.target_distance_penalty_scale < 0:
+            raise ValueError("target_distance_penalty_scale must be non-negative")
+        if self.target_distance_penalty_radius_mm <= 0:
+            raise ValueError("target_distance_penalty_radius_mm must be positive")
+        if self.terminal_success_bonus < 0:
+            raise ValueError("terminal_success_bonus must be non-negative")
+        if self.terminal_failure_penalty < -1:
+            raise ValueError("terminal_failure_penalty must be at least -1")
         if self.step_penalty < 0:
             raise ValueError("step_penalty must be non-negative")
         if self.intrinsic_novelty_reward_scale < 0:
@@ -295,6 +328,14 @@ class Config:
                 "target_recovery_reward_scale": (
                     self.target_recovery_reward_scale != 0
                 ),
+                "target_distance_penalty_scale": (
+                    self.target_distance_penalty_scale != 0
+                ),
+                "gate_positive_shaping_on_target_segment": (
+                    self.gate_positive_shaping_on_target_segment
+                ),
+                "terminal_success_bonus": self.terminal_success_bonus != 0,
+                "terminal_failure_penalty": self.terminal_failure_penalty >= 0,
                 "r_final": self.r_final != 0,
                 "r_val1": self.r_val1 != 0,
                 "goal_action_prior": self.goal_action_prior != 0,
@@ -374,6 +415,11 @@ class Config:
         if self.goal_action_prior < 0:
             raise ValueError("goal_action_prior must be non-negative")
         self.gdt_max_increase_theta = self.max_step_vox * self.voxel_size_mm * math.sqrt(3)
+        self.needs_target_distance = bool(
+            self.target_recovery_reward_scale
+            or self.target_distance_penalty_scale
+            or self.gate_positive_shaping_on_target_segment
+        )
 
 
 def parse_args() -> Config:
@@ -398,6 +444,7 @@ def parse_args() -> Config:
             "allowed_area_radius_vox",
             "episodic_cell_size_vox",
             "gdt_max_increase_theta",
+            "needs_target_distance",
             "observation_channels",
             "context_features",
             "clean_policy_inputs",

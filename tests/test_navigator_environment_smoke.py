@@ -6,7 +6,11 @@ import torch
 from tensordict import TensorDict
 
 from navigator.config import Config
-from navigator.environment import SmallBowelEnv, repeat_loader
+from navigator.environment import (
+    REWARD_COMPONENT_INFO_KEYS,
+    SmallBowelEnv,
+    repeat_loader,
+)
 from navigator.metrics import physical_path_tube
 from navigator.pretrain import (
     _geodesic_expert_action,
@@ -467,6 +471,180 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             for environment in environments:
                 environment.close()
 
+    def test_calibrated_reward_contract_rejects_cycles_and_shortcuts(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=8,
+            reward_supervised=True,
+            coverage_reward_scale=0.0,
+            gdt_reward_scale=0.1,
+            gdt_progress_normalization="max_step",
+            target_recovery_reward_scale=0.05,
+            target_distance_penalty_scale=0.1,
+            target_distance_penalty_radius_mm=30.0,
+            gate_positive_shaping_on_target_segment=True,
+            r_val1=0.0,
+            wall_penalty_scale=0.0,
+            r_final=0.0,
+            terminate_on_success=False,
+            terminal_success_bonus=50.0,
+            terminal_failure_penalty=0.0,
+            episodic_cell_reward_scale=0.01,
+            episodic_cell_size_mm=2.0,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        end = (8, 8, 12)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[8, 8, 4:13] = 1
+
+        def action(x, y, z):
+            return TensorDict(
+                {"action": torch.tensor([[x, y, z]], device=device)},
+                batch_size=torch.Size([1]),
+                device=device,
+            )
+
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter(
+                [self._make_subject(shape, start, end, segmentation)]
+            ),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            environment._reset()
+            forward = environment._step(action(0.5, 0.5, 1.0))
+            backward = environment._step(action(0.5, 0.5, 0.0))
+            self.assertGreater(forward["reward"].item(), 0.0)
+            self.assertLess(
+                forward["reward"].item() + backward["reward"].item(),
+                0.0,
+            )
+
+            leave = environment._step(action(1.0, 0.5, 0.5))
+            recover = environment._step(action(0.0, 0.5, 0.5))
+            self.assertLess(leave["reward"].item(), 0.0)
+            self.assertLess(
+                leave["reward"].item() + recover["reward"].item(),
+                0.0,
+            )
+            self.assertEqual(
+                leave["info", "episodic_cell_reward"].item(),
+                0.0,
+            )
+            self.assertAlmostEqual(
+                sum(
+                    leave["info", key].item()
+                    for key in REWARD_COMPONENT_INFO_KEYS
+                ),
+                leave["reward"].item(),
+                places=6,
+            )
+        finally:
+            environment.close()
+
+        shortcut_segmentation = np.zeros(shape, dtype=np.uint8)
+        shortcut_segmentation[start] = 1
+        shortcut_end = (8, 8, 10)
+        shortcut_segmentation[shortcut_end] = 1
+        shortcut_environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter(
+                [
+                    self._make_subject(
+                        shape,
+                        start,
+                        shortcut_end,
+                        shortcut_segmentation,
+                    )
+                ]
+            ),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            shortcut_environment._reset()
+            shortcut = shortcut_environment._step(action(0.5, 0.5, 1.0))
+            self.assertEqual(shortcut_environment.current_pos_vox, shortcut_end)
+            self.assertLess(shortcut["reward"].item(), 0.0)
+            self.assertEqual(
+                shortcut["info", "episodic_cell_reward"].item(),
+                0.0,
+            )
+        finally:
+            shortcut_environment.close()
+
+    def test_max_step_gdt_normalization_is_subject_length_invariant(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=8,
+            reward_supervised=True,
+            coverage_reward_scale=0.0,
+            gdt_reward_scale=0.1,
+            gdt_progress_normalization="max_step",
+            target_recovery_reward_scale=0.0,
+            target_distance_penalty_scale=0.0,
+            gate_positive_shaping_on_target_segment=True,
+            r_val1=0.0,
+            wall_penalty_scale=0.0,
+            step_penalty=0.0,
+            episodic_cell_reward_scale=0.0,
+            r_final=0.0,
+            terminate_on_success=False,
+        )
+        shape = (20, 20, 20)
+        start = (8, 8, 8)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environments = [
+            SmallBowelEnv(
+                config=config,
+                dataset_iterator=iter(
+                    [self._make_subject(shape, start, end, segmentation)]
+                ),
+                num_episodes_per_sample=1,
+                device=device,
+            )
+            for end in ((8, 8, 12), (8, 8, 16))
+        ]
+        try:
+            rewards = []
+            for environment in environments:
+                environment._reset()
+                transition = environment._step(
+                    TensorDict(
+                        {
+                            "action": torch.tensor(
+                                [[0.5, 0.5, 1.0]],
+                                device=device,
+                            )
+                        },
+                        batch_size=torch.Size([1]),
+                        device=device,
+                    )
+                )
+                rewards.append(transition["reward"])
+            torch.testing.assert_close(rewards[0], rewards[1])
+            self.assertAlmostEqual(
+                rewards[0].item(),
+                0.1 * 2.0 / np.sqrt(12.0),
+                places=6,
+            )
+        finally:
+            for environment in environments:
+                environment.close()
+
     def test_recovery_target_excludes_disconnected_label_islands(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(
@@ -528,6 +706,18 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
     def test_target_recovery_reward_scale_must_be_non_negative(self):
         with self.assertRaisesRegex(ValueError, "target_recovery_reward_scale"):
             Config(target_recovery_reward_scale=-1)
+
+    def test_calibrated_distance_reward_configuration_must_be_valid(self):
+        with self.assertRaisesRegex(ValueError, "gdt_progress_normalization"):
+            Config(gdt_progress_normalization="subject_magic")
+        with self.assertRaisesRegex(ValueError, "target_distance_penalty_scale"):
+            Config(target_distance_penalty_scale=-1)
+        with self.assertRaisesRegex(ValueError, "target_distance_penalty_radius_mm"):
+            Config(target_distance_penalty_radius_mm=0)
+        with self.assertRaisesRegex(ValueError, "terminal_success_bonus"):
+            Config(terminal_success_bonus=-1)
+        with self.assertRaisesRegex(ValueError, "terminal_failure_penalty"):
+            Config(terminal_failure_penalty=-2)
 
     def test_episodic_cell_reward_configuration_must_be_valid(self):
         with self.assertRaisesRegex(ValueError, "episodic_cell_reward_scale"):

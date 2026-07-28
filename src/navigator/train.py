@@ -40,7 +40,7 @@ from .dataset import (
 )
 
 # Use the TorchRL environment wrapper and factory function
-from .environment import make_sb_env
+from .environment import REWARD_COMPONENT_INFO_KEYS, make_sb_env
 from .metrics import compute_path_metrics
 
 torch.set_float32_matmul_precision("medium")
@@ -655,6 +655,10 @@ def _train_torchrl(
         avg_episodic_cell_reward = batch_data[
             "next", "info", "episodic_cell_reward"
         ].mean().item()
+        reward_component_means = {
+            key: batch_data["next", "info", key].mean().item()
+            for key in REWARD_COMPONENT_INFO_KEYS
+        }
         idx = batch_data["next", "done"]
         # A 2,048-step episode legitimately spans multiple 1,024-frame
         # collector batches. Keep optimizing on those batches while logging NaN
@@ -737,6 +741,12 @@ def _train_torchrl(
             "charts/action_1_mode": action[:, 1].cpu().mode()[0],
             "charts/action_2_mode": action[:, 2].cpu().mode()[0],
         }
+        log_data.update(
+            {
+                f"train/{key}": value
+                for key, value in reward_component_means.items()
+            }
+        )
         if config.action_distribution == "beta":
             log_data.update(
                 {
