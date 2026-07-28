@@ -486,7 +486,7 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             gdt_progress_normalization="max_step",
             target_recovery_reward_scale=0.05,
             target_distance_penalty_scale=0.1,
-            target_distance_penalty_radius_mm=30.0,
+            target_distance_penalty_radius_mm=600.0,
             gate_positive_shaping_on_target_segment=True,
             r_val1=0.0,
             wall_penalty_scale=0.0,

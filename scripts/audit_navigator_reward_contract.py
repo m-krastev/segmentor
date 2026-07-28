@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gdt-scale", type=float, default=0.1)
     parser.add_argument("--recovery-scale", type=float, default=0.05)
     parser.add_argument("--distance-scale", type=float, default=0.1)
-    parser.add_argument("--distance-radius-mm", type=float, default=30.0)
+    parser.add_argument("--distance-radius-mm", type=float, default=600.0)
     parser.add_argument("--step-penalty", type=float, default=0.01)
     parser.add_argument("--episodic-scale", type=float, default=0.01)
     parser.add_argument("--horizon", type=int, default=2048)
@@ -66,6 +66,7 @@ def main() -> None:
         "return_6mm_revisit": recovery(6.0, 0.0) + distance(6.0) + step,
         "outside_tangent_6mm": distance(6.0) + step,
         "outside_tangent_30mm": distance(30.0) + step,
+        "outside_tangent_600mm": distance(600.0) + step,
         # A background-crossing shortcut receives no positive GDT, coverage,
         # or episodic reward. The gap is represented by its segment maximum.
         "cross_loop_1.5mm_gap": distance(1.5) + step,

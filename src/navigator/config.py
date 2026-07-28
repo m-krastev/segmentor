@@ -104,7 +104,7 @@ class Config:
     # Persistent cost for distance from the endpoint-connected target. It is
     # evaluated over the complete action segment, not only at the endpoint.
     target_distance_penalty_scale: float = 0.0
-    target_distance_penalty_radius_mm: float = 30.0
+    target_distance_penalty_radius_mm: float = 600.0
     # When enabled, a segment that crosses background cannot receive positive
     # GDT, Dice, or supervised episodic-cell shaping.
     gate_positive_shaping_on_target_segment: bool = False

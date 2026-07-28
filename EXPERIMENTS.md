@@ -1735,3 +1735,35 @@ command or service, acceptance metrics, and outcome here.
 - Verification: the numerical audit passed, focused reward/environment tests
   passed, and the full suite passed `80` tests plus two subtests with `18`
   deprecation warnings.
+
+### M9.1 real-data 25.6k reward gate
+
+- `navigator-gru-reward-contract-25k-v1` completed from scratch in `2m13s`
+  without OOM. Peak CUDA memory was `4,995.1 MiB` allocated / `5,690 MiB`
+  reserved.
+- Three-case validation at frame 25,600:
+  - mean Dice `0.018376`;
+  - mean endpoint distance `336.200 mm`;
+  - endpoint and traversal success `0/3`.
+- Separate component logs rejected the nominal 30-mm distance protocol before
+  a long run:
+  - mean total reward per step: `-0.103460`;
+  - persistent target-distance term: `-0.093290`;
+  - step cost: `-0.010000`;
+  - GDT: `+0.000008`;
+  - recovery: `-0.000350`;
+  - Dice coverage: `+0.000142`;
+  - episodic cell: `+0.000030`;
+  - wall and binary off-target terms: exactly zero.
+- Thus the 30-mm radius saturated almost immediately after a random policy
+  left the bowel and recreated a nearly constant penalty. No longer run is
+  justified with this setting.
+- M9.2 expands the physical distance range to 600 mm. Across the audited cache,
+  the maximum target distance was approximately 643 mm, so this retains a
+  graded signal through nearly the complete volume while bounding the maximum
+  penalty near `-0.1`. Numerically:
+  - 6 mm from target: distance cost `-0.001`;
+  - 30 mm: `-0.005`;
+  - 150 mm: `-0.025`;
+  - 300 mm: `-0.050`;
+  - at or beyond 600 mm: `-0.100`.
