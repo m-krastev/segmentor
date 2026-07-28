@@ -718,6 +718,10 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             Config(terminal_success_bonus=-1)
         with self.assertRaisesRegex(ValueError, "terminal_failure_penalty"):
             Config(terminal_failure_penalty=-2)
+        with self.assertRaisesRegex(ValueError, "lr_anneal_timesteps"):
+            Config(lr_anneal_timesteps=-1)
+        with self.assertRaisesRegex(ValueError, "target_kl"):
+            Config(target_kl=-0.01)
 
     def test_episodic_cell_reward_configuration_must_be_valid(self):
         with self.assertRaisesRegex(ValueError, "episodic_cell_reward_scale"):

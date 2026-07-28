@@ -18,6 +18,10 @@ PATCH_SIZE_MM="${NAVIGATOR_PATCH_SIZE_MM:-48}"
 BATCH_SIZE="${NAVIGATOR_BATCH_SIZE:-64}"
 GDT_REWARD_SCALE="${NAVIGATOR_GDT_REWARD_SCALE:-0.1}"
 TARGET_DISTANCE_RADIUS_MM="${NAVIGATOR_TARGET_DISTANCE_PENALTY_RADIUS_MM:-600}"
+TARGET_RECOVERY_REWARD_SCALE="${NAVIGATOR_TARGET_RECOVERY_REWARD_SCALE:-0.05}"
+ENT_COEF="${NAVIGATOR_ENT_COEF:-0.0005}"
+LR_ANNEAL_TIMESTEPS="${NAVIGATOR_LR_ANNEAL_TIMESTEPS:-0}"
+TARGET_KL="${NAVIGATOR_TARGET_KL:-0}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -d "$DATA_DIR" ]]; then
@@ -31,13 +35,17 @@ export UV_NO_PROGRESS="${UV_NO_PROGRESS:-1}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache-navigator}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
-printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale=%s target_distance_radius_mm=%s\n' \
+printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale=%s target_distance_radius_mm=%s recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s\n' \
   "$DATA_DIR" \
   "$TOTAL_TIMESTEPS" \
   "$PATCH_SIZE_MM" \
   "$BATCH_SIZE" \
   "$GDT_REWARD_SCALE" \
-  "$TARGET_DISTANCE_RADIUS_MM"
+  "$TARGET_DISTANCE_RADIUS_MM" \
+  "$TARGET_RECOVERY_REWARD_SCALE" \
+  "$ENT_COEF" \
+  "$LR_ANNEAL_TIMESTEPS" \
+  "$TARGET_KL"
 
 exec "$UV_BIN" run --no-sync python -O -m navigator \
   --data-dir "$DATA_DIR" \
@@ -77,7 +85,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --coverage-reward-scale 50 \
   --gdt-reward-scale "$GDT_REWARD_SCALE" \
   --gdt-progress-normalization max_step \
-  --target-recovery-reward-scale 0.05 \
+  --target-recovery-reward-scale "$TARGET_RECOVERY_REWARD_SCALE" \
   --target-distance-penalty-scale 0.1 \
   --target-distance-penalty-radius-mm "$TARGET_DISTANCE_RADIUS_MM" \
   --step-penalty 0.01 \
@@ -98,7 +106,9 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --batch-size "$BATCH_SIZE" \
   --update-epochs 4 \
   --learning-rate 0.00005 \
-  --ent-coef 0.0005 \
+  --lr-anneal-timesteps "$LR_ANNEAL_TIMESTEPS" \
+  --ent-coef "$ENT_COEF" \
+  --target-kl "$TARGET_KL" \
   --vf-coef 0.5 \
   --max-grad-norm 0.5 \
   --num-episodes-per-sample 2 \

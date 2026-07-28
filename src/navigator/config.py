@@ -159,11 +159,18 @@ class Config:
     # Size of the buffer to store transitions
     frames_per_batch: int = 4096
     learning_rate: float = 5e-5
+    # Zero anneals over the complete run. A positive value reaches the minimum
+    # learning rate after this many frames and stays there, preventing a longer
+    # job from silently changing a validated short-run schedule.
+    lr_anneal_timesteps: int = 0
     batch_size: int = 256  # Size of mini-batch for PPO update
     update_epochs: int = 5  # Number of PPO update epochs
     gamma: float = 0.999
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
+    # Stop the remaining PPO epochs for a rollout after this mean approximate
+    # KL is exceeded. Zero disables the guard.
+    target_kl: float = 0.0
     # Entropy coefficient for exploration (higher values encourage exploration)
     ent_coef: float = 0.003
     # Value function coefficient (higher values encourage accurate value estimates)
@@ -263,6 +270,10 @@ class Config:
             raise ValueError("behavior_cloning_epochs must be non-negative")
         if self.behavior_cloning_learning_rate <= 0:
             raise ValueError("behavior_cloning_learning_rate must be positive")
+        if self.lr_anneal_timesteps < 0:
+            raise ValueError("lr_anneal_timesteps must be non-negative")
+        if self.target_kl < 0:
+            raise ValueError("target_kl must be non-negative")
         if self.behavior_cloning_batch_size < 1:
             raise ValueError("behavior_cloning_batch_size must be positive")
         if not 0 <= self.behavior_cloning_max_policy_probability <= 1:

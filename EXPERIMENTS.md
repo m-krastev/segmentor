@@ -2030,3 +2030,56 @@ command or service, acceptance metrics, and outcome here.
   continues through later annealing checkpoints. The trainer retains the
   validation-ranked best checkpoint, so continuing does not discard an earlier
   better long-run state.
+
+### M10.4: 512k completion and collapse diagnosis
+
+- The 512k service completed in 33 minutes 21 seconds without an OOM. Held-out
+  gates were:
+  - 102.4k: Dice `0.003759`, endpoint distance 192.245 mm;
+  - 204.8k: Dice `0.027686`, endpoint distance 232.481 mm;
+  - 307.2k: Dice `0.012548`, endpoint distance 200.090 mm;
+  - 409.6k: Dice `0.032446`, endpoint distance 203.701 mm;
+  - 512.0k: Dice `0.018795`, endpoint distance 206.663 mm.
+  No endpoint reach or traversal occurred. The long-run best
+  `checkpoint_409600best.pth` remains worse than the short-schedule champion
+  (`0.079295`, 93.100 mm).
+- This was deterministic policy collapse, not profitable reward hacking:
+  - joint maximum action probability rose from `0.0087` at 102.4k to `0.4412`
+    at 512k, while logit standard deviation rose from `0.455` to `2.200`;
+  - entropy loss magnitude fell from `0.003150` to `0.000978`;
+  - value loss rose from `0.130` to `3.017`;
+  - final GDT and coverage shaping were effectively zero while target-distance
+    cost saturated near `-0.093`;
+  - both final validation paths had exactly two unique positions in their last
+    512 steps and 100% immediate reversals. On-target center occupancy was only
+    0.39%/0.20%.
+- The PPO KL was not the primary failure: mean `0.00835`, 95th percentile
+  `0.01864`, maximum `0.03066`. Entropy starvation and off-target state
+  distribution collapse are the stronger observed mechanisms.
+
+### M11: Overnight anti-collapse matrix
+
+- Preserve the short-schedule champion and add opt-in controls:
+  - `NAVIGATOR_TARGET_RECOVERY_REWARD_SCALE`;
+  - `NAVIGATOR_ENT_COEF`;
+  - `NAVIGATOR_LR_ANNEAL_TIMESTEPS`, which freezes cosine annealing at its
+    minimum instead of silently stretching a validated short schedule;
+  - `NAVIGATOR_TARGET_KL`, which can skip remaining PPO epochs after excessive
+    rollout KL.
+- Reward audit for recovery scale `0.2`, GDT `1.0`, radius 60 mm:
+  - 1.5-mm leave `-0.041368`, return `+0.016368`, cycle `-0.025000`;
+  - 6-mm leave `-0.135470`, return `+0.095470`, cycle `-0.040000`;
+  - cross-loop gap remains `-0.012500`;
+  - inside forward/backward cycle remains `-0.010000`.
+  Recovery becomes locally clear without making an excursion profitable.
+- Queue three seed/split-matched 102.4k causal gates:
+  1. recovery `0.2`, entropy `0.0005`;
+  2. recovery `0.05`, entropy `0.003`;
+  3. recovery `0.2`, entropy `0.003`.
+  All retain 32-cubed inputs, GDT `1.0`, radius 60 mm, and the short 102.4k
+  annealing horizon.
+- Conditional supervised-input fallback authorized by the user: for the first
+  four hours, keep policy observations image-only. If the best held-out result
+  remains below 20% Dice with zero traversal, a separately named GT-mask-input
+  baseline may be started. It must never be reported as annotation-free or
+  replace the image-only champion.

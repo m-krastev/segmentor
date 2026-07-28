@@ -445,8 +445,15 @@ def _train_torchrl(
 
     amp_dtype = torch.bfloat16 if config.amp_dtype == "bf16" else torch.float16
     scaler = torch.GradScaler(enabled=config.amp and amp_dtype == torch.float16)
-    # Cosine annealing scheduler (optional)
-    scheduler_steps = math.ceil(total_timesteps / config.frames_per_batch) * config.update_epochs
+    # A validated short annealing horizon can be retained in a longer job. The
+    # scheduler is explicitly frozen at eta_min after that horizon; stepping a
+    # CosineAnnealingLR beyond T_max would otherwise increase the LR again.
+    anneal_timesteps = config.lr_anneal_timesteps or total_timesteps
+    anneal_timesteps = min(anneal_timesteps, total_timesteps)
+    scheduler_steps = (
+        math.ceil(anneal_timesteps / config.frames_per_batch)
+        * config.update_epochs
+    )
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=max(1, scheduler_steps),
@@ -572,7 +579,10 @@ def _train_torchrl(
 
         # --- PPO Update Phase ---
         actor_losses, critic_losses, entropy_losses, kl_div = [], [], [], []
+        ppo_epochs_completed = 0
+        kl_early_stop = False
         for _ in range(config.update_epochs):
+            epoch_kl_start = len(kl_div)
             if recurrent_policy:
                 minibatches = recurrent_minibatches(
                     batch_data,
@@ -639,11 +649,22 @@ def _train_torchrl(
                     else torch.tensor(0.0, device=device)
                 )
 
-            scheduler.step()
+            if scheduler.last_epoch < scheduler_steps:
+                scheduler.step()
             # scheduler_c.step()
             if qnets:
                 updater.step()
             num_updates += 1  # Count PPO update cycles
+            ppo_epochs_completed += 1
+            epoch_kl_values = kl_div[epoch_kl_start:]
+            if (
+                not qnets
+                and config.target_kl > 0
+                and epoch_kl_values
+                and torch.stack(epoch_kl_values).mean().item() > config.target_kl
+            ):
+                kl_early_stop = True
+                break
 
         # --- Logging ---
         avg_actor_loss = torch.stack(actor_losses).mean().item()
@@ -731,6 +752,8 @@ def _train_torchrl(
             "charts/max_gdt_achieved_std": max_std,
             "charts/max_gdt_achieved_max": max_gdt_value,
             "charts/num_updates": num_updates,
+            "charts/ppo_epochs_completed": ppo_epochs_completed,
+            "charts/kl_early_stop": float(kl_early_stop),
             "charts/action_0": action[:, 0].mean(),
             "charts/action_1": action[:, 1].mean(),
             "charts/action_2": action[:, 2].mean(),
