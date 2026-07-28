@@ -16,6 +16,8 @@ EVAL_INTERVAL="${NAVIGATOR_EVAL_INTERVAL:-400}"
 SAVE_FREQ="${NAVIGATOR_SAVE_FREQ:-50}"
 PATCH_SIZE_MM="${NAVIGATOR_PATCH_SIZE_MM:-48}"
 BATCH_SIZE="${NAVIGATOR_BATCH_SIZE:-64}"
+GDT_REWARD_SCALE="${NAVIGATOR_GDT_REWARD_SCALE:-0.1}"
+TARGET_DISTANCE_RADIUS_MM="${NAVIGATOR_TARGET_DISTANCE_PENALTY_RADIUS_MM:-600}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -d "$DATA_DIR" ]]; then
@@ -28,6 +30,14 @@ export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore}"
 export UV_NO_PROGRESS="${UV_NO_PROGRESS:-1}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache-navigator}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
+
+printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale=%s target_distance_radius_mm=%s\n' \
+  "$DATA_DIR" \
+  "$TOTAL_TIMESTEPS" \
+  "$PATCH_SIZE_MM" \
+  "$BATCH_SIZE" \
+  "$GDT_REWARD_SCALE" \
+  "$TARGET_DISTANCE_RADIUS_MM"
 
 exec "$UV_BIN" run --no-sync python -O -m navigator \
   --data-dir "$DATA_DIR" \
@@ -65,11 +75,11 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --goal-action-prior 0 \
   --success-coverage-threshold 0.40 \
   --coverage-reward-scale 50 \
-  --gdt-reward-scale 0.1 \
+  --gdt-reward-scale "$GDT_REWARD_SCALE" \
   --gdt-progress-normalization max_step \
   --target-recovery-reward-scale 0.05 \
   --target-distance-penalty-scale 0.1 \
-  --target-distance-penalty-radius-mm 600 \
+  --target-distance-penalty-radius-mm "$TARGET_DISTANCE_RADIUS_MM" \
   --step-penalty 0.01 \
   --wall-penalty-scale 0 \
   --r-val1 0 \

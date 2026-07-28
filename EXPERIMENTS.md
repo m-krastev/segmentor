@@ -1927,3 +1927,87 @@ command or service, acceptance metrics, and outcome here.
     same-shape long run.
 - Promoted unchanged to the 102,400-frame gate
   `navigator-bomopi-gru-patch32-102k-v1`.
+
+### M10.2: 32-cubed outcome and GDT-scale ablation
+
+- `navigator-bomopi-gru-patch32-102k-v1` completed 102,400 frames in
+  6 minutes 35 seconds:
+  - training peak CUDA memory was 10,357.7 MiB allocated and 12,148.0 MiB
+    reserved; validation raised the process peak to 11,442.3 MiB allocated and
+    12,942.0 MiB reserved;
+  - mean validation Dice was `0.035143` over pt14/pt18 (`0.010409`,
+    `0.059877`), with zero traversals and 209.383-mm mean endpoint distance;
+  - trajectories had 259/361 unique positions and no zero moves or immediate
+    reversals. The larger patch improved v3's `0.007603` Dice and severe local
+    revisitation, but produced broad unguided exploration rather than traversal.
+- The last ten training batches numerically decomposed to:
+  - target-distance state cost `-0.014269`;
+  - invalid-action cost `-0.014258`;
+  - fixed step cost `-0.009857`;
+  - coverage shaping `+0.000995`;
+  - GDT shaping `-0.000054`.
+  The useful directional potential is too small relative to the persistent
+  costs once the policy leaves the target.
+- Next ablation changes only GDT scale from `0.1` to `1.0`; the launcher exposes
+  this as `NAVIGATOR_GDT_REWARD_SCALE`. The exact reward-contract audit gives:
+  - 6-mm on-target forward/new: `+0.057735 -> +0.577350`;
+  - 6-mm on-target backward/revisit: `-0.067735 -> -0.587350`;
+  - forward/backward cycle: still `-0.010000`;
+  - 1.5-mm off-target leave/return cycle: still `-0.020500`;
+  - 6-mm off-target leave/return cycle: still `-0.022000`;
+  - 1.5-mm cross-loop gap: still `-0.010250`.
+  Thus the ablation strengthens desired on-target direction without making the
+  audited cycles, shortcuts, or off-target wandering profitable.
+- `navigator-bomopi-gru-patch32-gdt1-102k-v1` showed that GDT `1.0` alone is
+  too endpoint-directed:
+  - validation Dice fell to `0.003600` (`0.004020`, `0.003179`);
+  - endpoint distance improved from 209.383 mm to 136.005 mm, but neither case
+    reached the endpoint;
+  - the paths contained only 155/164 valid positions. pt14 ended at `y=130` in
+    a size-131 dimension and pt18 at `x=0`, after which deterministic actions
+    repeatedly attempted to cross the image boundary;
+  - mean validation reward was `-0.924491` per step and total return was
+    `-1893.36`, confirming invalid-action collapse rather than traversal.
+- The next causal ablation retains GDT `1.0` and changes only the
+  target-distance normalization radius from 600 mm to 60 mm, exposed as
+  `NAVIGATOR_TARGET_DISTANCE_PENALTY_RADIUS_MM`. At scale `0.1`, a 600-mm radius barely
+  distinguishes anatomically serious departures: 6/30 mm cost only
+  `-0.001/-0.005`. The 60-mm candidate gives:
+  - 6-mm off-target tangent: `-0.020000` including the fixed step cost;
+  - 30-mm off-target tangent: `-0.060000`;
+  - 1.5-mm leave/return cycle: `-0.025000`;
+  - 6-mm leave/return cycle: `-0.040000`;
+  - 1.5-mm cross-loop gap: `-0.012500`.
+  Recovery remains action-preferential and the audited cycles remain strictly
+  negative, while distance from the bowel becomes relevant before a boundary.
+- The first attempted r60 systemd run was invalid and is excluded: its saved
+  config still recorded 600 mm and its outputs were bit-for-bit identical to
+  the GDT-only run. The launcher had introduced
+  `NAVIGATOR_TARGET_DISTANCE_RADIUS_MM`, while the systemd environment
+  allowlist already used the canonical
+  `NAVIGATOR_TARGET_DISTANCE_PENALTY_RADIUS_MM`. The launcher now consumes the
+  canonical name, and every promoted run must verify the saved config.
+- The corrected run `navigator-bomopi-gru-patch32-gdt1-r60-102k-v2` logged
+  `patch_mm=48`, `gdt_scale=1.0`, and `target_distance_radius_mm=60` before
+  training. It improved both registered validation objectives:
+  - mean Dice `0.079295` and endpoint distance 93.100 mm, versus the 32-cubed
+    baseline's `0.035143` and 209.383 mm;
+  - pt14: Dice `0.150489`, endpoint distance 38.095 mm;
+  - pt18: Dice `0.008101`, endpoint distance 148.106 mm;
+  - zero endpoint reaches and zero full traversals.
+- Both validation rollouts executed all 2,048 actions without zero movements.
+  pt14/pt18 visited 348/385 unique positions, although their last 512 steps
+  contracted to 53/17 positions. The cases failed differently:
+  - pt14 center positions were on the endpoint-connected target for 97.12% of
+    the rollout (99.80% in its last 512) and ended 42.04 geodesic mm from goal;
+  - pt18 centers were on-target for only 0.05%, never returned in its last 512,
+    and ended 46.79 Euclidean mm from the target mask.
+- The four cached image-derived channels are not blank. Around the starting
+  32-cubed patch, pt18 nevertheless has roughly half pt14's response amplitude
+  across dark/bright tubularity, band-pass, and gradient channels, consistent
+  with a harder image-generalization case.
+- Training had not plateaued at the gate: completed-episode Dice averaged
+  `0.154716`, ended at `0.330172`, and peaked at `0.360105`. Promote the exact
+  verified configuration to 512,000 frames, retaining validation/checkpointing
+  every 102,400 frames. Do not change recovery scale until this learning curve
+  establishes whether pt18 can recover with more policy updates.
