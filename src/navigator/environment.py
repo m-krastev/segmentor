@@ -624,9 +624,11 @@ class SmallBowelEnv(EnvBase):
 
         This projection uses neither reward nor endpoint information. Action
         magnitude controls the requested step length; invalid rays are
-        shortened, then fall back to the best-aligned valid one-voxel
-        direction. An exact zero action remains zero so the executed transition
-        always preserves the policy's requested movement semantics.
+        shortened. In clean-policy dynamics, a ray with no executable forward
+        displacement remains stationary and is penalized as invalid; it must
+        never be reflected into an opposite movement. Legacy mask-constrained
+        dynamics retain a best-aligned tangent fallback. An exact zero action
+        remains zero.
         """
         desired = (
             (2.0 * action_normalized.detach().float().cpu().numpy() - 1.0)
@@ -656,6 +658,9 @@ class SmallBowelEnv(EnvBase):
             seen.add(displacement)
             if self._is_allowed_displacement(displacement):
                 return displacement
+
+        if self.config.clean_policy_inputs:
+            return (0, 0, 0)
 
         candidates = []
         for displacement in product((-1, 0, 1), repeat=3):

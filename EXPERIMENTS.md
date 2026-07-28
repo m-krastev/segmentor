@@ -1853,3 +1853,23 @@ command or service, acceptance metrics, and outcome here.
   `/home/matey/project/segmentor/checkpoints/navigator-bomopi-gru-102k-v2/data/bomopi_resampled2_unique-v1/tensorboard/20260728-144841-925634`.
 - Saved validation paths:
   `/home/matey/project/segmentor/results/navigator_bomopi/gru-102k-v2-validation`.
+- V2 completed 102,400 frames in `5m18s` wall time with peak CUDA memory
+  `1,942.3 MiB` allocated / `2,608 MiB` reserved. Final two-case validation:
+  - mean Dice `0.020817`, endpoint distance `290.766 mm`, and traversal /
+    endpoint success `0/2`;
+  - `pt14`: Dice `0.009387`, endpoint distance `237.403 mm`;
+  - `pt18`: Dice `0.032247`, endpoint distance `344.128 mm`.
+- V2 is rejected as a movement diagnostic. The factorized mode became
+  positively biased (recent action modes approximately `+3,+4,+4`) and drove
+  both cases to the positive volume boundary. `pt14` spent `99.90%` and
+  `pt18` `99.02%` of their saved paths on a boundary; both had only two unique
+  positions and `100%` immediate reversals over their final 512 positions.
+  The clean-policy projector was reflecting an impossible outward ray into an
+  opposite one-voxel fallback, after which the policy moved outward again.
+- Clean-policy projection now shortens a requested ray only while preserving
+  its direction. If no forward displacement is in bounds, it executes zero
+  movement and applies the existing invalid-action penalty; the opposite
+  tangent fallback remains only for legacy mask-constrained dynamics.
+- Matched replacement `navigator-bomopi-gru-102k-v3` changes only this boundary
+  behavior. Its reward, optimizer, seed, split, architecture, and 102,400-frame
+  budget remain identical to v2.
