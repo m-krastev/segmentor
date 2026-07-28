@@ -1767,3 +1767,31 @@ command or service, acceptance metrics, and outcome here.
   - 150 mm: `-0.025`;
   - 300 mm: `-0.050`;
   - at or beyond 600 mm: `-0.100`.
+
+### M9.2 real-data 25.6k reward gate
+
+- `navigator-gru-reward-contract-25k-v2` completed from scratch in `2m19s`
+  without OOM. Peak CUDA memory was `5,006.1 MiB` allocated / `5,730 MiB`
+  reserved.
+- The component distribution was materially less saturated:
+  - mean total reward per step: `-0.030932`;
+  - persistent target-distance term: `-0.020862`;
+  - fixed step cost: `-0.010000`;
+  - GDT: `+0.000021`;
+  - recovery: `-0.000476`;
+  - Dice coverage: `+0.000337`;
+  - episodic cell: `+0.000048`;
+  - wall, binary off-target, and terminal terms: exactly zero during training;
+  - mean value loss was `0.135334`, versus `0.750226` in M9.1.
+- Three-case validation at frame 25,600:
+  - mean Dice `0.047421`, versus `0.018376` in M9.1;
+  - mean endpoint distance `309.472 mm`, versus `336.200 mm`;
+  - endpoint and traversal success remained `0/3`;
+  - per-case Dice (`s1389`, `s0224`, `s0120`): `0.120505`,
+    `0.007085`, `0.014674`;
+  - per-case endpoint distance: `185.794`, `398.351`, `344.272 mm`.
+- Interpretation: no individual reward term is saturated at the old
+  `-0.1` level, critic scale is substantially reduced, and the short result is
+  competitive with earlier 25.6k pilots. Generalization remains absent and
+  `s1389` still dominates, so this supports only a 102.4k from-scratch
+  comparison, not a long run.
