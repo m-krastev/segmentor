@@ -1071,7 +1071,7 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         finally:
             environment.close()
 
-    def test_outward_and_zero_actions_project_to_valid_tangent(self):
+    def test_outward_action_projects_to_valid_tangent(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(
             device=str(device),
@@ -1088,30 +1088,84 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         segmentation = np.zeros(shape, dtype=np.uint8)
         segmentation[4, 4, 4:9] = 1
 
-        for raw_action in (
-            torch.tensor([[1.0, 0.5, 0.5]], device=device),
-            torch.tensor([[0.5, 0.5, 0.5]], device=device),
-        ):
-            environment = SmallBowelEnv(
-                config=config,
-                dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
-                num_episodes_per_sample=1,
-                device=device,
-            )
-            try:
-                environment._reset()
-                transition = environment._step(
-                    TensorDict(
-                        {"action": raw_action},
-                        batch_size=torch.Size([1]),
-                        device=device,
-                    )
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            environment._reset()
+            transition = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[1.0, 0.5, 0.5]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
                 )
-                self.assertNotEqual(environment.current_pos_vox, start)
-                self.assertEqual(environment.current_pos_vox[:2], start[:2])
-                self.assertFalse(transition["done"].item())
-            finally:
-                environment.close()
+            )
+            self.assertNotEqual(environment.current_pos_vox, start)
+            self.assertEqual(environment.current_pos_vox[:2], start[:2])
+            self.assertFalse(transition["done"].item())
+        finally:
+            environment.close()
+
+    def test_factorized_zero_action_remains_zero_and_is_penalized(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=4,
+            cumulative_path_radius_mm=1,
+            allowed_area_radius_mm=0,
+            max_episode_steps=8,
+            reward_supervised=True,
+            memory_model="gru",
+            action_distribution="factorized_categorical",
+            deterministic_action_statistic="mode",
+        )
+        shape = (16, 16, 16)
+        start = (4, 4, 4)
+        end = (4, 4, 12)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([self._make_subject(shape, start, end, segmentation)]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            environment._reset()
+            center = config.max_step_vox
+            transition = environment._step(
+                TensorDict(
+                    {
+                        "action": torch.full(
+                            (1, 3),
+                            center,
+                            dtype=torch.long,
+                            device=device,
+                        )
+                    },
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(environment.current_pos_vox, start)
+            self.assertAlmostEqual(
+                transition["reward"].item(),
+                -config.r_zero_mov,
+                places=6,
+            )
+            self.assertAlmostEqual(
+                transition["info", "reward_invalid"].item(),
+                -config.r_zero_mov,
+                places=6,
+            )
+            self.assertFalse(transition["done"].item())
+        finally:
+            environment.close()
 
     def test_action_magnitude_controls_step_length(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -1795,3 +1795,61 @@ command or service, acceptance metrics, and outcome here.
   competitive with earlier 25.6k pilots. Generalization remains absent and
   `s1389` still dominates, so this supports only a 102.4k from-scratch
   comparison, not a long run.
+
+### M10: BOMOPI-only movement and reward gate
+
+- Scope is restricted to `data/bomopi_resampled2`: 22 locally resampled
+  subject directories containing CT plus small-bowel, duodenum, and colon
+  labels. The nnU-Net cohort is not opened by this protocol.
+- The source audit found three byte-identical CT/label pairs:
+  `pt5=pt8`, `pt6=pt10`, and `pt11=pt16`. The fixed seed places every member
+  of these pairs in training in the unfiltered 22-directory split.
+- Full preflight rejected `pt13` and `pt22` because their label-derived
+  anatomical endpoints are disconnected in the small-bowel mask. End-to-end
+  traversal is impossible for those targets. Removing only those two cases
+  would put `pt16` in validation while byte-identical `pt11` remained in
+  training.
+- The actual gate therefore uses the immutable manifest
+  `experiments/navigator-bomopi-v1/eligible.txt`: 17 unique, traversable
+  anatomies exposed through a non-destructive symlink view. It excludes
+  impossible `pt13`/`pt22` and duplicate copies `pt8`/`pt10`/`pt16`; the
+  transferred source directory remains untouched.
+- Source volumes are synchronized to the CUDA checkout without the old cache
+  directories. Versioned GDT, target-distance, wall, and navigation-filter
+  caches are recomputed by the current code.
+- The persistent systemd gate runs `scripts/preflight_navigator_bomopi.py`
+  across every eligible directory before starting PPO; any invalid spacing, shape,
+  navigation-filter tensor, endpoint, or disconnected endpoint path aborts the
+  service rather than failing partway through training.
+- Before launch, exact zero movement was corrected: `(0, 0, 0)` now remains
+  stationary and receives the configured invalid-action penalty instead of
+  being silently executed as a maximum `+X` step.
+- The legacy subject loader now computes the same four image-only navigation
+  filter channels used by clean nnU-Net reward-supervised training. Labels
+  remain available to the reward/evaluator, not to policy observations or
+  movement projection.
+- The preregistered first gate is `navigator-bomopi-gru-102k-v1`:
+  - 90/10 seeded split, yielding 15 training subjects and 2 validation
+    subjects (`pt14`, `pt18`) with no duplicate-patient leakage;
+  - GRU-256 and exact factorized categorical voxel actions;
+  - M9.2 reward contract: max-step-normalized GDT `0.1`, recovery potential
+    `0.05`, 600-mm graded target-distance penalty `0.1`, coverage `50`,
+    episodic first-cell bonus `0.01`, step cost `0.01`, fixed success `+50`,
+    zero wall/binary-off-target/curvature terms;
+  - entropy coefficient reduced from `0.003` to `0.0005` because prior runs
+    remained almost maximally entropic and the entropy term dominated much of
+    the actor loss;
+  - 102,400 frames from scratch, one final two-case validation, TensorBoard,
+    and saved validation paths.
+- The v1 service intentionally stopped in preflight before PPO:
+  `pt13` and `pt22` had disconnected anatomical endpoints. This exposed the
+  duplicate-patient validation leak that a naive two-case deletion would have
+  created.
+- Replacement service `navigator-bomopi-gru-102k-v2` uses the 17-case
+  immutable manifest. Preflight passed every eligible case and PPO started
+  from scratch on the exact 15/2 split above. Initial CUDA allocation was
+  approximately `2.3 GiB`, with no OOM or loader failure.
+- TensorBoard:
+  `/home/matey/project/segmentor/checkpoints/navigator-bomopi-gru-102k-v2/data/bomopi_resampled2_unique-v1/tensorboard/20260728-144841-925634`.
+- Saved validation paths:
+  `/home/matey/project/segmentor/results/navigator_bomopi/gru-102k-v2-validation`.

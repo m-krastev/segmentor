@@ -625,8 +625,8 @@ class SmallBowelEnv(EnvBase):
         This projection uses neither reward nor endpoint information. Action
         magnitude controls the requested step length; invalid rays are
         shortened, then fall back to the best-aligned valid one-voxel
-        direction. Retaining magnitude is necessary to reach a precise
-        endpoint without oscillating across it.
+        direction. An exact zero action remains zero so the executed transition
+        always preserves the policy's requested movement semantics.
         """
         desired = (
             (2.0 * action_normalized.detach().float().cpu().numpy() - 1.0)
@@ -640,14 +640,7 @@ class SmallBowelEnv(EnvBase):
         desired = np.asarray(desired, dtype=np.float32).reshape(3)
         desired_norm = float(np.linalg.norm(desired))
         if desired_norm <= np.finfo(np.float32).eps:
-            # Preserve the existing always-move fallback for an exactly
-            # centered action; the validity projection still chooses a local
-            # traversable tangent without using reward or goal information.
-            desired = np.asarray(
-                (float(self.config.max_step_vox), 0.0, 0.0),
-                dtype=np.float32,
-            )
-            desired_norm = float(self.config.max_step_vox)
+            return (0, 0, 0)
         desired_unit = desired / desired_norm
         desired_chebyshev = desired / max(float(np.max(np.abs(desired))), 1e-8)
         requested_step_vox = min(

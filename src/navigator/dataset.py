@@ -287,8 +287,10 @@ class SmallBowelDataset(Dataset):
                 "duodenum": data["duodenum"],
                 "colon": data["colon"],
                 "wall_map": data["wall_map"],
+                "image_features": data.get("image_features"),
                 "gdt_start": data["gdt_start"],
                 "gdt_end": data["gdt_end"],
+                "target_distance": data.get("target_distance"),
                 "image_affine": data["image_affine"],
                 "spacing": data["spacing"],
                 "start_coord": data["start_coord"],
@@ -587,6 +589,13 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         wall_map_nii_save = nib.Nifti1Image(wall_map_np, result["image_affine"])
         nib.save(wall_map_nii_save, wall_map_cache_path)
     result["wall_map"] = wall_map_np
+    if config.clean_policy_inputs:
+        result["image_features"] = load_or_compute_navigation_filter_bank(
+            image_np,
+            image_nii.affine,
+            cache_dir,
+            config,
+        )
 
     # --- Load/Calculate GDT (Start) ---
     gdt_start_cache_path = cache_dir / CACHE_FILES["gdt_start"]
@@ -704,6 +713,11 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         result["start_coord"] = result["start_coord"][::-1]
         result["end_coord"] = result["end_coord"][::-1]
         result["wall_map"] = np.transpose(result["wall_map"], (2, 1, 0))
+        if result.get("image_features") is not None:
+            result["image_features"] = np.transpose(
+                result["image_features"],
+                (0, 3, 2, 1),
+            )
         result["gdt_start"] = np.transpose(result["gdt_start"], (2, 1, 0))
         result["gdt_end"] = np.transpose(result["gdt_end"], (2, 1, 0))
         if result.get("target_distance") is not None:
