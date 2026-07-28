@@ -14,6 +14,8 @@ VALIDATION_OUTPUT_DIR="${NAVIGATOR_VALIDATION_OUTPUT_DIR:-results/navigator_bomo
 TOTAL_TIMESTEPS="${NAVIGATOR_TOTAL_TIMESTEPS:-102400}"
 EVAL_INTERVAL="${NAVIGATOR_EVAL_INTERVAL:-400}"
 SAVE_FREQ="${NAVIGATOR_SAVE_FREQ:-50}"
+PATCH_SIZE_MM="${NAVIGATOR_PATCH_SIZE_MM:-48}"
+BATCH_SIZE="${NAVIGATOR_BATCH_SIZE:-64}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -d "$DATA_DIR" ]]; then
@@ -55,7 +57,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --shuffle-dataset \
   --seed 42 \
   --voxel-size-mm 1.5 \
-  --patch-size-mm 24 \
+  --patch-size-mm "$PATCH_SIZE_MM" \
   --max-step-displacement-mm 6 \
   --cumulative-path-radius-mm 9 \
   --endpoint-tolerance-mm 3 \
@@ -83,7 +85,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --max-episode-steps 2048 \
   --total-timesteps "$TOTAL_TIMESTEPS" \
   --frames-per-batch 1024 \
-  --batch-size 128 \
+  --batch-size "$BATCH_SIZE" \
   --update-epochs 4 \
   --learning-rate 0.00005 \
   --ent-coef 0.0005 \

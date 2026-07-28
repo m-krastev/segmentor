@@ -1906,3 +1906,24 @@ command or service, acceptance metrics, and outcome here.
     `/home/matey/project/segmentor/checkpoints/navigator-bomopi-gru-102k-v3/data/bomopi_resampled2_unique-v1/tensorboard/20260728-145851-926661`;
   - validation paths:
     `/home/matey/project/segmentor/results/navigator_bomopi/gru-102k-v3-validation`.
+
+### M10.1: 32-cubed visual context
+
+- The v2/v3 observation patch was only `24 mm = 16 voxels` per side at the
+  fixed 1.5-mm isotropic spacing. The next ablation uses
+  `48 mm = 32 voxels` per side, exactly `32^3`.
+- Patch volume and early convolutional activation volume increase by `8x`.
+  The visual encoder's adaptive pooling keeps its parameter count unchanged,
+  but a batch-128 run is not assumed safe from the earlier 16-GB OOM.
+- The launcher therefore defaults to PPO minibatch 64 for the first CUDA
+  memory smoke. No reward, movement, split, seed, GRU, rollout, or optimizer
+  setting changes. If peak memory is comfortably below capacity, a larger
+  minibatch can be profiled separately rather than changed mid-run.
+- CUDA smoke `navigator-bomopi-gru-patch32-smoke4k-v1` completed 4,096 frames
+  without an OOM in 26.4 seconds wall time:
+  - peak CUDA memory: 10,348.7 MiB allocated, 11,936.0 MiB reserved;
+  - model size remained 607,516 trainable parameters;
+  - batch 64 therefore leaves enough headroom on the 15.5-GiB GPU for a
+    same-shape long run.
+- Promoted unchanged to the 102,400-frame gate
+  `navigator-bomopi-gru-patch32-102k-v1`.
