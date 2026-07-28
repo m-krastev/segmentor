@@ -1873,3 +1873,36 @@ command or service, acceptance metrics, and outcome here.
 - Matched replacement `navigator-bomopi-gru-102k-v3` changes only this boundary
   behavior. Its reward, optimizer, seed, split, architecture, and 102,400-frame
   budget remain identical to v2.
+- V3 completed in `5m05s` wall time with peak CUDA memory `1,942.6 MiB`
+  allocated / `2,610 MiB` reserved. Final two-case validation:
+  - mean Dice `0.007603`, endpoint distance `158.943 mm`, and traversal /
+    endpoint success `0/2`;
+  - `pt14`: Dice `0.003503`, endpoint distance `133.002 mm`;
+  - `pt18`: Dice `0.011704`, endpoint distance `184.884 mm`.
+- The movement correction passed its empirical acceptance test:
+  - neither v3 path touched a volume boundary, versus approximately 99% of
+    both v2 paths;
+  - final-512 immediate reversal rate was `0%` for both subjects, versus
+    `100%` in v2;
+  - `pt14` visited 64 unique positions (36 in its final 512 recorded
+    positions), and `pt18` visited 51 (19 in its final 512). Thus the exact
+    boundary loop is gone, although substantial local revisitation remains.
+- Training diagnostics also became healthier:
+  - invalid-action incidence was `1.737%` over the complete run, `0.762%`
+    over the final ten updates, and `0.391%` in the final batch, showing that
+    PPO learned to avoid some newly explicit boundary failures;
+  - the graded target-distance cost improved from a complete-run mean
+    `-0.009921` to `-0.005734` over the final ten updates and `-0.002490` in
+    the final batch;
+  - value loss fell to `0.038760` in the final batch, whereas v2 ended at
+    `0.563134`;
+  - GDT progress remained slightly negative and validation Dice regressed, so
+    this is evidence for corrected dynamics and improved localization, not
+    successful bowel following.
+- V3 artifacts:
+  - final model:
+    `/home/matey/project/segmentor/checkpoints/navigator-bomopi-gru-102k-v3/data/bomopi_resampled2_unique-v1/final_model_torchrl.pth`;
+  - TensorBoard:
+    `/home/matey/project/segmentor/checkpoints/navigator-bomopi-gru-102k-v3/data/bomopi_resampled2_unique-v1/tensorboard/20260728-145851-926661`;
+  - validation paths:
+    `/home/matey/project/segmentor/results/navigator_bomopi/gru-102k-v3-validation`.
