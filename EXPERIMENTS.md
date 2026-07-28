@@ -1645,7 +1645,7 @@ command or service, acceptance metrics, and outcome here.
   - dedicated tests confirm first-visit behavior, inverse-square-root decay,
     zero revisit reward, invalid configuration rejection, and negative total
     reward for a novel off-target cell.
-- Planned overnight ablation
+- Launched overnight ablation
   `navigator-gru-episodic-cell-warm8m-v1`:
   - wait for the matched warm-1M control to finish and require its
     `final_model_torchrl.pth` before starting;
@@ -1654,6 +1654,12 @@ command or service, acceptance metrics, and outcome here.
   - preserve the GRU, factorized categorical action distribution, separated
     actor/critic loss updates, reward-supervised inputs, fixed manifests, and
     fixed three-case validation cohort;
-  - use an evaluation interval of 2,000 trainer updates (approximately every
-    1.024M frames under the observed counter semantics) and save every 500
-    updates (approximately every 256k frames).
+  - use an evaluation interval of 2,000 epoch updates (approximately every
+    512k frames under the observed counter semantics) and save every 500
+    updates (approximately every 128k frames).
+- The systemd queue handed off cleanly after the warm-1M control stopped:
+  - the required final control checkpoint existed before launch;
+  - the intrinsic run was active at 384,000 frames with one trainer using
+    approximately 5,786 MiB of CUDA memory and no competing training process;
+  - TensorBoard:
+    `/home/matey/project/segmentor/checkpoints/navigator-gru-episodic-cell-warm8m-v1/nnunet-actual/tensorboard/20260728-014524-917157`.
