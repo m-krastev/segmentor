@@ -2011,3 +2011,22 @@ command or service, acceptance metrics, and outcome here.
   verified configuration to 512,000 frames, retaining validation/checkpointing
   every 102,400 frames. Do not change recovery scale until this learning curve
   establishes whether pt18 can recover with more policy updates.
+
+### M10.3: 512k learning curve
+
+- Active unit: `navigator-bomopi-gru-patch32-gdt1-r60-512k-v1`.
+- Effective configuration was logged before training:
+  `steps=512000 patch_mm=48 batch=64 gdt_scale=1.0
+  target_distance_radius_mm=60`.
+- The 102,400-frame gate is deliberately not comparable to the completed
+  102,400-frame schedule at the same frame count: cosine annealing spans the
+  full 512,000 frames, so learning rate remains near its initial value rather
+  than reaching the 5e-6 minimum.
+- First held-out gate:
+  - mean Dice `0.003759` (pt14 `0.003726`, pt18 `0.003791`);
+  - mean endpoint distance 192.245 mm (155.176, 229.314);
+  - zero endpoint reaches and traversals.
+- This gate is worse than the short schedule, but the preregistered long curve
+  continues through later annealing checkpoints. The trainer retains the
+  validation-ranked best checkpoint, so continuing does not discard an earlier
+  better long-run state.
