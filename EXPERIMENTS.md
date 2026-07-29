@@ -2557,3 +2557,60 @@ command or service, acceptance metrics, and outcome here.
      introduced enough reward and metric confounders that they should not be
      used to judge whether the original method could work;
   4. August contributes no repository evidence.
+
+### M21: Guarded-Shin 102.4k result and historical-direction decision
+
+- The supervised-input `shin_normalized_guarded` screening run completed
+  successfully in 7m19s with exit status zero and 13,405 MiB peak allocated
+  CUDA memory. It did not produce traversal:
+  - 25.6k: Dice `0.120673`, endpoint distance `195.542 mm`;
+  - 51.2k: Dice `0.119211`, endpoint distance `152.992 mm`;
+  - 76.8k: Dice `0.109110`, endpoint distance `125.960 mm`;
+  - 102.4k: Dice `0.104079`, endpoint distance `124.816 mm`;
+  - both pt14 and pt18 used all 2,048 steps at every gate, with zero endpoint
+    reaches and zero traversal successes.
+- The opposite Dice/distance trends suggest some global displacement toward
+  the endpoint without correct bowel coverage. Final path statistics confirm
+  strong loitering:
+  - pt14: 84 unique positions among 2,049, only 27 unique in the last 512, and
+    28.2% immediate reversals in that final window;
+  - pt18: 127 unique positions among 2,049 and only 15 unique in the last 512;
+  - neither trajectory used zero actions, so this is cycling/limited-state
+    motion rather than rounding to a stationary action.
+- The final training batch had no positive GDT signal:
+  - `train/reward_gdt=0`, `train/max_reward=-0.666667`;
+  - background/invalid and off-target components accounted for almost the
+    entire mean reward (`-0.327474` and `-0.339193`);
+  - mean training reward was `-0.679271`, while the policy remained stochastic
+    (`max_action_probability=0.01683`).
+  This is a reward-regime collapse, not merely insufficient training time.
+- Direct comparison:
+  - the matched modern 102.4k baseline reached Dice `0.176511` and endpoint
+    distance `40.819 mm`;
+  - the explicit undilated-revisit 102.4k run reached Dice `0.249127` and
+    endpoint distance `68.339 mm`;
+  - the same modern lineage peaked at 512k with Dice `0.298841` and endpoint
+    distance `33.694 mm`, but continued training collapsed to Dice `0.062772`
+    by 1.024M;
+  - none reached the endpoint. The modern implementation has demonstrated
+    nontrivial partial tracking, but neither reward family is stable enough for
+    an unchanged multi-million-step run.
+- Decision:
+  - do not continue the completed guarded-Shin checkpoint unchanged;
+  - do not check out and resume historical `068dc4d`, whose revisit geometry,
+    physical theta, validation, and bookkeeping are invalid;
+  - retain the current tested movement, PPO likelihood, metric, recurrent-state,
+    logging, and annotation-separation infrastructure, but construct one
+    controlled "068-repaired" ablation from the historical design:
+    60-mm physical field of view, approximately 9-10-mm action, 6-mm path
+    radius, CT/wall/undilated-path actor inputs, physical GDT/theta, current-voxel
+    exclusion for revisit, fixed endpoint-start validation, and strict
+    endpoint-plus-Dice success;
+  - remove the July survival/potential/terminal-crash shaping and do not treat
+    GT-mask-policy results as annotation-free evidence.
+- Proposed bounded go/no-go criterion: screen at 256k, run to 512k only if
+  valid/GDT-positive action rates and final-window path diversity are improving,
+  and require by 1M at least one held-out endpoint reach plus mean Dice near the
+  registered `0.40` target. If the repaired historical geometry still fails,
+  stop extending PPO budgets and pivot the main method to the proposed
+  energy/spline or hybrid tracker.
