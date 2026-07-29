@@ -2663,14 +2663,23 @@ command or service, acceptance metrics, and outcome here.
   `scripts/run_navigator_bomopi_068_repaired.sh` launcher:
   60-mm (`40^3`) patch, 9-mm action (`6` vox), 6-mm path radius (`4` vox),
   GRU plus factorized categorical action likelihood, `lr=1e-5`, `gamma=0.99`,
-  entropy `0.001`, minibatch `16`, five PPO epochs, 800-step horizon, and a
+  entropy `0.001`, true recurrent minibatch/sequence length `32`, five PPO
+  epochs, 800-step horizon, and a
   bounded 256k-frame screen.
 - The first 4k CUDA smoke with the paper's minibatch `32` failed during the
   first GroupNorm forward pass: PyTorch held 10.42 GiB and requested another
   3.91 GiB with only 3.84 GiB free on the 15.50-GiB GPU. This was a real
   capacity miss rather than substantial allocator fragmentation (318 MiB was
-  reserved but unallocated). The launcher therefore uses minibatch `16`; no
-  task geometry, rollout, reward, or horizon parameter was reduced.
+  reserved but unallocated). The initial hypothesis was that PPO minibatch
+  activation memory caused the failure, so a second smoke requested `16`.
+- A second smoke with advertised minibatch `16` failed with the exact same
+  allocation. The complete traceback locates the allocation at
+  `adv_module(batch_data)`, before PPO minibatching. The original recurrent
+  sampler also makes any requested minibatch below the configured 64-step
+  recurrent sequence into one effective 64-transition minibatch. The corrected
+  hardware setting therefore restores minibatch `32`, sets recurrent sequence
+  length `32`, and reduces only the rollout-wide GAE chunk from 1,024 to 512
+  frames. Five PPO epochs and every task parameter remain unchanged.
 - Verification in an isolated copy on the Linux CUDA host, using its existing
   `uv` environment:
   - shell syntax and reward audit passed;

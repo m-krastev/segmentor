@@ -11,7 +11,7 @@ export NAVIGATOR_TOTAL_TIMESTEPS="${NAVIGATOR_TOTAL_TIMESTEPS:-256000}"
 export NAVIGATOR_EVAL_INTERVAL="${NAVIGATOR_EVAL_INTERVAL:-400}"
 export NAVIGATOR_SAVE_FREQ="${NAVIGATOR_SAVE_FREQ:-50}"
 export NAVIGATOR_PATCH_SIZE_MM="${NAVIGATOR_PATCH_SIZE_MM:-60}"
-export NAVIGATOR_BATCH_SIZE="${NAVIGATOR_BATCH_SIZE:-16}"
+export NAVIGATOR_BATCH_SIZE="${NAVIGATOR_BATCH_SIZE:-32}"
 export NAVIGATOR_ENT_COEF="${NAVIGATOR_ENT_COEF:-0.001}"
 export NAVIGATOR_TARGET_KL="${NAVIGATOR_TARGET_KL:-0.03}"
 export NAVIGATOR_OBSERVE_SEGMENTATION=false
@@ -24,9 +24,10 @@ exec "$SCRIPT_DIR/run_navigator_bomopi_gate.sh" \
   --cumulative-path-radius-mm 6 \
   --max-episode-steps 800 \
   --num-steps-per-sample 1600 \
-  --frames-per-batch 1024 \
+  --frames-per-batch 512 \
   --learning-rate 0.00001 \
   --gamma 0.99 \
-  --batch-size 16 \
+  --recurrent-sequence-length 32 \
+  --batch-size 32 \
   --update-epochs 5 \
   "$@"
