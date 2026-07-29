@@ -2874,3 +2874,35 @@ command or service, acceptance metrics, and outcome here.
   residence was `0.10625`, while pt18 remained at `0.9375`. The smoke passes
   the technical gate for a fresh 64k screen but is not scientific evidence of
   traversal.
+- `navigator-bomopi-gru-068-masked-compact-64k-v1.service` completed with exit
+  status zero in 6m04s and mandatory final validation at exactly 65,536
+  frames. Peak CUDA allocation/reservation was `7,588/9,460 MiB`. All gates
+  retained action-executed fraction `1.0`:
+  - 16,384: Dice `0.010002`, endpoint `161.032 mm`, positive GDT `0.015625`,
+    recent diversity `0.226563`, boundary residence `0.424375`;
+  - 32,768: Dice `0.010374`, endpoint `189.193 mm`, positive GDT `0.001875`,
+    recent diversity `0.347656`, boundary residence `0.315625`;
+  - 49,152: Dice `0.023095`, endpoint `91.552 mm`, positive GDT `0.00125`,
+    recent diversity `0.03125`, boundary residence `0.381875`;
+  - 65,536: Dice `0.011535`, endpoint `91.446 mm`, positive GDT `0.0025`,
+    recent diversity `0.169922`, boundary residence `0.415`.
+  No gate reached an endpoint or completed traversal.
+- The final gate passes three of four preregistered continuation criteria:
+  boundary residence, recent diversity, and endpoint distance. Positive GDT
+  fails by almost an order of magnitude, Dice did not retain its 49k peak, and
+  failures remain case-specific (pt18 ended at `82.9%` boundary residence and
+  `1.95%` recent diversity). This justifies only the registered 256k
+  continuation, not a claim of anatomical tracking.
+- Final policy diagnostics remain weak: maximum action probability `0.01674`,
+  raw entropy approximately `4.9755` nats versus the uniform compact maximum
+  `5.0499`, value loss `6.689`, and final training GDT reward `0.000503`.
+  Compact support improved deterministic geometry without demonstrating that
+  PPO has concentrated on reward-aligned actions.
+- The reproducible continuation launcher
+  `scripts/run_navigator_bomopi_068_masked_compact_256k.sh` resumes the final
+  64k optimizer/policy state and explicitly fixes
+  `lr_anneal_timesteps=65536`. The saved scheduler is already at
+  `last_epoch=T_max=640` and learning rate `5e-6`; this prevents a longer
+  `total_timesteps` value from silently making cosine annealing rise after
+  resume. Continue beyond 256k only with a held-out positive-GDT increase and
+  sustained Dice/diversity, and never without an endpoint reach by 1M.
