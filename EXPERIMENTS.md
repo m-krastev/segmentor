@@ -2233,3 +2233,34 @@ command or service, acceptance metrics, and outcome here.
   complete nonzero integer displacement, preserves exact PPO likelihoods, and
   initializes equal total mass for each Chebyshev step length. Reward, GT-mask
   input, GRU, split, patch, optimizer, seed, and validation remain unchanged.
+- The run completed in 7m20s without OOM. Held-out gates were:
+  - 25.6k: Dice `0.041949`, endpoint distance 139.021 mm;
+  - 51.2k: Dice `0.039119`, endpoint distance 83.992 mm;
+  - 76.8k: Dice `0.058441`, endpoint distance 174.832 mm;
+  - 102.4k: Dice `0.046047`, endpoint distance 170.352 mm.
+  No endpoint reach or traversal occurred. The 728-way joint head removes the
+  independent-axis mode defect but is too diffuse at this budget and is
+  rejected relative to the matched factorized 102.4k baseline (`0.176511`).
+
+### M17: Undilated revisitation penalty
+
+- Trajectory audit showed that the active reward had only an opportunity cost
+  for revisitation: zero new Dice/cell reward plus the fixed step cost. The old
+  binary overlap term was removed because its segment included the mandatory
+  starting voxel, making it fire on virtually every valid action.
+- Add an explicit agent-owned revisit component:
+  - exclude the segment's mandatory starting voxel;
+  - evaluate prior occupancy on `cumulative_path_mask_pen`, the undilated
+    centerline, before inserting the current segment;
+  - penalize the occupied fraction rather than the occupied voxel count;
+  - retain the 9-mm Euclidean tube only for the policy feature, Dice metric,
+    and path output.
+- BOMOPI scale is `0.01`. Numerical contract after a segment has been visited:
+  - unseen one- or four-voxel tail: `0`;
+  - fully revisited one- or four-voxel tail: `-0.01`;
+  - partial overlap: `-0.01 * overlap_fraction`;
+  - a two-action forward/backward cycle receives an additional `-0.01`, and
+    continued two-position oscillation receives `-0.02` per cycle.
+- Dilation remains segment-local: `_add_path_segment` expands only the current
+  executed line by the fixed physical-radius offsets and unions those voxels
+  into the cumulative mask. It never redilates the accumulated mask.

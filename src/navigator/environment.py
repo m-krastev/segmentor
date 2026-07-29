@@ -54,6 +54,7 @@ REWARD_COMPONENT_INFO_KEYS = (
     "reward_recovery",
     "reward_target_distance",
     "reward_step",
+    "reward_revisit",
     "reward_wall",
     "reward_off_target",
     "reward_coverage",
@@ -760,6 +761,23 @@ class SmallBowelEnv(EnvBase):
             return 0.0
         return float(np.asarray(self.target_distance_map[segment]).max())
 
+    def _segment_revisit_fraction(self, segment: Tuple) -> float:
+        """Return prior centerline occupancy after excluding the start voxel.
+
+        The cumulative Dice mask is a physically dilated tube and would mark
+        legitimate nearby forward motion as revisitation. This deliberately
+        uses the separate undilated centerline map before the current segment
+        is inserted. Normalizing by segment length prevents shorter actions
+        from reducing the maximum penalty for a complete backtrack.
+        """
+
+        if not segment or len(segment[0]) <= 1:
+            return 0.0
+        tail = tuple(axis[1:] for axis in segment)
+        return float(
+            np.asarray(self.cumulative_path_mask_pen[tail], dtype=np.float32).mean()
+        )
+
     def _get_target_mask(self) -> torch.Tensor:
         """Return the binary structure that the current episode must trace."""
         return self.seg.bool()
@@ -962,10 +980,12 @@ class SmallBowelEnv(EnvBase):
                 ),
             )
 
-        # A revisit has no new-coverage reward, and every action still pays this
-        # cost. No separate overlap penalty is needed; every line segment
-        # necessarily contains its starting voxel.
         rt += self._reward_term("reward_step", -self.config.step_penalty)
+        rt += self._reward_term(
+            "reward_revisit",
+            -self.config.revisit_penalty_scale
+            * self._segment_revisit_fraction(S),
+        )
 
         # 2.5 Peaks-based reward
         # rt += self.reward_map[S].sum() * self.config.r_peaks
@@ -1036,6 +1056,11 @@ class SmallBowelEnv(EnvBase):
             self.config.intrinsic_novelty_reward_scale * novel_fraction,
         )
         reward += self._reward_term("reward_step", -self.config.step_penalty)
+        reward += self._reward_term(
+            "reward_revisit",
+            -self.config.revisit_penalty_scale
+            * self._segment_revisit_fraction(segment),
+        )
 
         # Retain only the image-derived Meijering response. Its utility must be
         # established empirically; it is not a substitute for a hidden mask.

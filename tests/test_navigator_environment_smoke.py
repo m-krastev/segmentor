@@ -581,6 +581,97 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         finally:
             shortcut_environment.close()
 
+    def test_revisit_penalty_uses_undilated_tail_and_is_length_normalized(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        revisit_scale = 0.2
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=4,
+            cumulative_path_radius_mm=3,
+            max_episode_steps=8,
+            reward_supervised=True,
+            use_immediate_gdt_reward=False,
+            coverage_reward_scale=0.0,
+            gdt_reward_scale=0.0,
+            target_recovery_reward_scale=0.0,
+            target_distance_penalty_scale=0.0,
+            revisit_penalty_scale=revisit_scale,
+            r_val1=0.0,
+            wall_penalty_scale=0.0,
+            step_penalty=0.0,
+            episodic_cell_reward_scale=0.0,
+            r_final=0.0,
+            terminate_on_success=False,
+        )
+        shape = (24, 24, 24)
+        start = (12, 12, 8)
+        end = (12, 12, 20)
+        segmentation = np.ones(shape, dtype=np.uint8)
+
+        def action(z: float):
+            return TensorDict(
+                {
+                    "action": torch.tensor(
+                        [[0.5, 0.5, z]],
+                        device=device,
+                    )
+                },
+                batch_size=torch.Size([1]),
+                device=device,
+            )
+
+        # A normalized Beta action of 0.625/0.375 requests +/-1 voxel when
+        # max_step_vox is four; 1.0/0.0 requests +/-4 voxels.
+        for forward_z, backward_z in ((0.625, 0.375), (1.0, 0.0)):
+            with self.subTest(step=(forward_z, backward_z)):
+                environment = SmallBowelEnv(
+                    config=config,
+                    dataset_iterator=iter(
+                        [self._make_subject(shape, start, end, segmentation)]
+                    ),
+                    num_episodes_per_sample=1,
+                    device=device,
+                )
+                try:
+                    reset = environment._reset()
+                    # The observation mask is the 3-voxel-radius Dice tube,
+                    # whereas revisit bookkeeping begins as an empty thin
+                    # centerline and is updated only after a valid action.
+                    self.assertGreater(
+                        int(reset["actor"][0, -1].sum().item()),
+                        1,
+                    )
+                    self.assertEqual(
+                        int(environment.cumulative_path_mask_pen.sum()),
+                        0,
+                    )
+
+                    forward = environment._step(action(forward_z))
+                    backward = environment._step(action(backward_z))
+                    self.assertAlmostEqual(
+                        forward["info", "reward_revisit"].item(),
+                        0.0,
+                        places=6,
+                    )
+                    self.assertAlmostEqual(
+                        backward["info", "reward_revisit"].item(),
+                        -revisit_scale,
+                        places=6,
+                    )
+                    self.assertAlmostEqual(
+                        backward["reward"].item(),
+                        -revisit_scale,
+                        places=6,
+                    )
+                finally:
+                    environment.close()
+
+    def test_revisit_penalty_scale_must_be_non_negative(self):
+        with self.assertRaisesRegex(ValueError, "revisit_penalty_scale"):
+            Config(revisit_penalty_scale=-0.01)
+
     def test_max_step_gdt_normalization_is_subject_length_invariant(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(

@@ -25,6 +25,7 @@ TARGET_KL="${NAVIGATOR_TARGET_KL:-0}"
 RELOAD_CHECKPOINT_PATH="${NAVIGATOR_RELOAD_CHECKPOINT_PATH:-}"
 OBSERVE_SEGMENTATION="${NAVIGATOR_OBSERVE_SEGMENTATION:-false}"
 ACTION_DISTRIBUTION="${NAVIGATOR_ACTION_DISTRIBUTION:-factorized_categorical}"
+REVISIT_PENALTY_SCALE="${NAVIGATOR_REVISIT_PENALTY_SCALE:-0.01}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -d "$DATA_DIR" ]]; then
@@ -38,7 +39,7 @@ export UV_NO_PROGRESS="${UV_NO_PROGRESS:-1}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache-navigator}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
-printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale=%s target_distance_radius_mm=%s recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s\n' \
+printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale=%s target_distance_radius_mm=%s recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s revisit_scale=%s\n' \
   "$DATA_DIR" \
   "$TOTAL_TIMESTEPS" \
   "$PATCH_SIZE_MM" \
@@ -51,7 +52,8 @@ printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale
   "$TARGET_KL" \
   "${RELOAD_CHECKPOINT_PATH:-none}" \
   "$OBSERVE_SEGMENTATION" \
-  "$ACTION_DISTRIBUTION"
+  "$ACTION_DISTRIBUTION" \
+  "$REVISIT_PENALTY_SCALE"
 
 EXTRA_ARGS=()
 if [[ -n "$RELOAD_CHECKPOINT_PATH" ]]; then
@@ -112,6 +114,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --target-distance-penalty-scale 0.1 \
   --target-distance-penalty-radius-mm "$TARGET_DISTANCE_RADIUS_MM" \
   --step-penalty 0.01 \
+  --revisit-penalty-scale "$REVISIT_PENALTY_SCALE" \
   --wall-penalty-scale 0 \
   --r-val1 0 \
   --r-val2 1 \

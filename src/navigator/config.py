@@ -119,6 +119,11 @@ class Config:
     terminal_failure_penalty: float = -1.0
     success_coverage_threshold: float = 0.55
     step_penalty: float = 0.01
+    # Penalize the fraction of a newly executed centerline segment that was
+    # already visited. The mandatory starting voxel is excluded, and the
+    # undilated agent-owned centerline is used so ordinary forward motion
+    # inside the evaluation tube is not misclassified as a revisit.
+    revisit_penalty_scale: float = 0.0
     wall_penalty_scale: float = 0.1
     # Image/self-state-only objectives used by annotation-free training.
     intrinsic_novelty_reward_scale: float = 0.05
@@ -256,6 +261,8 @@ class Config:
             raise ValueError("terminal_failure_penalty must be at least -1")
         if self.step_penalty < 0:
             raise ValueError("step_penalty must be non-negative")
+        if self.revisit_penalty_scale < 0:
+            raise ValueError("revisit_penalty_scale must be non-negative")
         if self.intrinsic_novelty_reward_scale < 0:
             raise ValueError("intrinsic_novelty_reward_scale must be non-negative")
         if self.episodic_cell_reward_scale < 0:
