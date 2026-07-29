@@ -2433,3 +2433,127 @@ command or service, acceptance metrics, and outcome here.
   3. even a correct reproduction may not transfer to BOMOPI without a useful
      wall representation or a topology-preserving target because the paper's
      image/annotation assumptions differ.
+
+### M20: Historical June-August 2025 implementation audit
+
+- Audit all Navigator commits dated June through August 2025, with particular
+  attention to `068dc4d` ("word for word implementation of the original
+  code"), the July orientation/config branches, and the July RND branch.
+- The Git topology is important: `068dc4d` is the tip of `origin/og`, forked
+  from `eec05e0` through `505adea`. The later `956ff64`, `7af9094`, and
+  `ebf5c73` commits are a sibling lineage forked from `eec05e0`; they are not
+  descendants of the word-for-word revision. The closest June reproduction
+  was therefore abandoned rather than incrementally repaired.
+- `068dc4d` plausibly was the June version that "got closer":
+  - the Beta policy and `[0,1] -> [-max,+max]` environment mapping were
+    coherent, and the independent three-axis Beta likelihood was retained for
+    PPO;
+  - the earlier minibatch-indexing error was absent: the inner PPO loop sliced
+    with its own `j` index;
+  - at 1.5-mm data spacing, its nominal 40-voxel patch is 60 mm across, its
+    four-voxel cumulative-path radius is 6 mm, and its six-voxel axis action is
+    9 mm. These values are much closer to the paper's 60-mm patch, 6-mm
+    cylinder, and 10-mm action than the names in the 1-mm `Config` imply;
+  - it restored the three intended actor channels: CT, Meijering wall
+    response, and cumulative path, and used the paper's mean rather than
+    maximum wall response;
+  - it restored the paper PPO values for learning rate (`1e-5`), discount
+    (`0.99`), clip (`0.2`), entropy (`0.001`), and five epochs.
+- It was nevertheless not a valid word-for-word reproduction:
+  - minibatch size was 256 rather than 32, the horizon was 1,024 rather than
+    800, collection used one environment rather than four mixed PathSet and
+    SegmSet environments, and the critic did not receive the paper's optional
+    GT-path channel;
+  - `theta` was computed as `6*sqrt(3)=10.392` even though the GDT used the
+    NIfTI physical spacing. A six-voxel diagonal at 1.5 mm can advance
+    15.588 mm, while the paper's 10-mm-per-axis threshold is 17.321 mm.
+    Legitimate diagonal progress could therefore become an abrupt-jump
+    penalty;
+  - the revisit workaround `cumulative_path_mask[S][3:]` was geometrically
+    invalid. After a six-voxel straight segment is dilated by four voxels,
+    the next straight segment's offsets three and four are already occupied,
+    so an ordinary continuation pays `-4`. Conversely, actions containing at
+    most three rasterized points have an empty checked tail and can revisit
+    without penalty. This shapes action length/direction instead of detecting
+    actual return to an old centerline;
+  - a nominal clean six-voxel axial advance earns at most
+    `6*(9/10.392)=5.196` from physical GDT progress, then can lose `4` to the
+    false revisit and up to `6` to the wall term. The reward for a correct
+    continuation could therefore still be negative;
+  - validation ran ten rollouts with the training reset distribution and chose
+    the one with the highest *mean* step reward. It did not perform the paper's
+    fixed pylorus-to-end test. Because 60% of resets were reverse-end or
+    middle-point starts, the selected result could be a much easier partial
+    traversal, and averaging instead of summing favored short terminal
+    jackpots;
+  - the terminal segment that entered the goal radius was not inserted into
+    the path mask/history, and horizon truncation reported zero final coverage.
+    The logged coverage was consequently not a stable full-traversal metric.
+- The other June lineage added several confounders instead of repairing these
+  issues:
+  - `956ff64`/`7af9094` reduced the patch to 16 voxels (about 24 mm at the
+    relevant spacing), removed the useful wall channel in favor of repeated CT
+    patches, took the maximum wall response, disabled revisit, added a
+    time-dependent survival term, and used hand-binned terminal coverage;
+  - `7af9094` dilated the GT segmentation before computing its Dice denominator
+    and allowed region while continuing to use GDT caches from the undilated
+    segmentation. This could bridge nearby loops and inflate/alter coverage;
+  - `3a0b0b0` introduced an undilated revisit map but checked the entire
+    rasterized segment, including its mandatory current voxel. From the second
+    action onward, every nonempty segment therefore paid the revisit penalty.
+- July continued from `3a0b0b0`/the sibling master line, not from `068dc4d`:
+  - the active 16-voxel patch retained only about 24 mm of physical context;
+  - the revisit map still included the mandatory current voxel, so every
+    action after the first paid `-3` or `-4`;
+  - the "survival" reward was
+    `gamma*t-(t-1) = 1-(1-gamma)*t`. At `gamma=0.999`, this pays about `+1`
+    initially, remains positive until step 1,000, and becomes negative
+    thereafter. It encourages delaying termination independently of anatomical
+    progress and is not potential-based shaping over an environment state;
+  - the July config lineage also added a second GDT potential bonus on top of
+    the paper GDT term and used the maximum wall response. These changes can
+    make progress look strong numerically while changing the paper objective.
+- The July orientation branch (`1968d58`, repaired enough to construct
+  TensorDict inputs in `6a19333`) gave the actor its last action as a
+  quaternion-like orientation and gave only the critic an explicit
+  goal-direction quaternion. The direction encoding used a unit direction as
+  a rotation vector of fixed one-radian magnitude rather than a rotation from
+  a canonical heading. The branch also:
+  - restarted 50% of episodes from previously achieved GDT maxima, making
+    training coverage a curriculum/partial-path statistic rather than evidence
+    of endpoint-to-endpoint traversal;
+  - paid `100*(2*Dice)` on every termination in `1968d58`, including leaving
+    the allowed area. At Dice 0.20, crashing received a `+40` terminal bonus;
+  - allowed travel in a ten-voxel dilation around the bowel, while the
+    Meijering channel was weak. Explicit heading therefore made straight-line
+    persistence easier without supplying the missing wall evidence, consistent
+    with the commit message that the agent was "back to driving through a
+    wall."
+- The July RND commit `cc35a0b` did not establish a usable curiosity baseline:
+  - intrinsic reward defaulted off;
+  - its RND constructor expected a Gymnasium `VectorEnv`, observation spaces,
+    and `num_envs`, but was passed the TorchRL bowel environment;
+  - training selected `observations`/`next_observations`, while the collector
+    stored nested `actor` and `("next","actor")` keys and the RND code itself
+    later requested `observation`/`("next","observation")`;
+  - the default Mnih 3-D encoder applies an 8-kernel/stride-4 convolution and
+    then a 4-kernel convolution, which is invalid for a 16-cubed patch
+    (`16 -> 3`, then kernel 4);
+  - even after repair, feeding the growing cumulative-path channel to RND would
+    reward path-map novelty and could incentivize wandering rather than bowel
+    traversal unless anatomy/path novelty were separated and gated.
+- No commits of any kind exist between 2025-07-20 and 2026-01-01, and no
+  Navigator commits exist in August 2025 on any local or remote-tracking
+  branch. There is therefore no August implementation to audit from Git; any
+  August run would need external WandB/checkpoint/log artifacts to reconstruct.
+- Overall attribution:
+  1. `068dc4d` was probably genuinely closer because its physical field of
+     view, tube radius, action scale, action distribution, and PPO settings were
+     the closest combination to Shin;
+  2. its false revisit geometry, wrong physical `theta`, biased validation, and
+     data/wall mismatch were still sufficient to prevent reliable complete
+     traversal;
+  3. later June and July results are not clean continuations of that branch and
+     introduced enough reward and metric confounders that they should not be
+     used to judge whether the original method could work;
+  4. August contributes no repository evidence.
