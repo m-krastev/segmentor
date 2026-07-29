@@ -1815,6 +1815,7 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             reward_supervised=True,
             memory_model="gru",
             action_distribution="masked_categorical",
+            categorical_action_support="direction_length",
             deterministic_action_statistic="mode",
         )
         shape = (16, 16, 16)
@@ -1845,7 +1846,8 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
                 ].item()
             )
 
-            selected = (4, 2, 1)
+            self.assertEqual(config.categorical_action_count, 26 * 4)
+            selected = (4, 4, 0)
             action_index = config.action_displacements.index(selected)
             self.assertTrue(action_mask[action_index].item())
             transition = environment._step(

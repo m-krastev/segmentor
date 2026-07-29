@@ -181,6 +181,10 @@ class Config:
     # "factorized_categorical" models the three exact integer coordinates
     # with independent categorical factors, avoiding a 728-way output head.
     action_distribution: str = "beta"
+    # "dense" includes every nonzero integer vector inside the action cube.
+    # "direction_length" separates 26 lattice directions and integer
+    # Chebyshev lengths, avoiding thousands of near-duplicate headings.
+    categorical_action_support: str = "dense"
     # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 10_000_000
@@ -407,6 +411,20 @@ class Config:
                 "masked_categorical requires clean bounds-only policy dynamics "
                 "via reward_supervised or annotation_free mode"
             )
+        if self.categorical_action_support not in {"dense", "direction_length"}:
+            raise ValueError(
+                "categorical_action_support must be either dense or "
+                "direction_length"
+            )
+        if (
+            self.categorical_action_support != "dense"
+            and self.action_distribution
+            not in {"categorical", "masked_categorical"}
+        ):
+            raise ValueError(
+                "non-dense categorical_action_support applies only to joint "
+                "categorical actions"
+            )
         if self.memory_model != "none" and self.td3:
             raise ValueError("Recurrent memory baselines currently support PPO only")
         if self.annotation_free and self.reward_supervised:
@@ -473,14 +491,26 @@ class Config:
         self.checkpoint_dir = self.checkpoint_dir + "/" + self.data_dir
         self.gdt_cell_length = self.voxel_size_mm
         self.max_step_vox = mm_to_vox(self.max_step_displacement_mm, self.voxel_size_mm)
-        self.action_displacements = tuple(
-            displacement
-            for displacement in product(
-                range(-self.max_step_vox, self.max_step_vox + 1),
-                repeat=3,
+        if self.categorical_action_support == "direction_length":
+            lattice_directions = tuple(
+                direction
+                for direction in product((-1, 0, 1), repeat=3)
+                if any(direction)
             )
-            if any(displacement)
-        )
+            self.action_displacements = tuple(
+                tuple(length * component for component in direction)
+                for length in range(1, self.max_step_vox + 1)
+                for direction in lattice_directions
+            )
+        else:
+            self.action_displacements = tuple(
+                displacement
+                for displacement in product(
+                    range(-self.max_step_vox, self.max_step_vox + 1),
+                    repeat=3,
+                )
+                if any(displacement)
+            )
         self.categorical_action_count = len(self.action_displacements)
         self.factorized_axis_action_count = 2 * self.max_step_vox + 1
         patch_vox_dim = mm_to_vox(self.patch_size_mm, self.voxel_size_mm)

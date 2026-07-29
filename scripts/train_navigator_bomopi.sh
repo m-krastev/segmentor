@@ -25,6 +25,7 @@ TARGET_KL="${NAVIGATOR_TARGET_KL:-0}"
 RELOAD_CHECKPOINT_PATH="${NAVIGATOR_RELOAD_CHECKPOINT_PATH:-}"
 OBSERVE_SEGMENTATION="${NAVIGATOR_OBSERVE_SEGMENTATION:-false}"
 ACTION_DISTRIBUTION="${NAVIGATOR_ACTION_DISTRIBUTION:-factorized_categorical}"
+CATEGORICAL_ACTION_SUPPORT="${NAVIGATOR_CATEGORICAL_ACTION_SUPPORT:-dense}"
 REVISIT_PENALTY_SCALE="${NAVIGATOR_REVISIT_PENALTY_SCALE:-0.01}"
 REWARD_CONTRACT="${NAVIGATOR_REWARD_CONTRACT:-potential}"
 POLICY_OBSERVATION_CONTRACT="${NAVIGATOR_POLICY_OBSERVATION_CONTRACT:-navigation_filters}"
@@ -41,7 +42,7 @@ export UV_NO_PROGRESS="${UV_NO_PROGRESS:-1}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache-navigator}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
-printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_contract=%s policy_observation_contract=%s potential_gdt_scale=%s potential_target_distance_radius_mm=%s potential_recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s potential_revisit_scale=%s\n' \
+printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_contract=%s policy_observation_contract=%s potential_gdt_scale=%s potential_target_distance_radius_mm=%s potential_recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s categorical_action_support=%s potential_revisit_scale=%s\n' \
   "$DATA_DIR" \
   "$TOTAL_TIMESTEPS" \
   "$PATCH_SIZE_MM" \
@@ -57,6 +58,7 @@ printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_co
   "${RELOAD_CHECKPOINT_PATH:-none}" \
   "$OBSERVE_SEGMENTATION" \
   "$ACTION_DISTRIBUTION" \
+  "$CATEGORICAL_ACTION_SUPPORT" \
   "$REVISIT_PENALTY_SCALE"
 
 EXTRA_ARGS=()
@@ -150,6 +152,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --recurrent-sequence-length 64 \
   --recurrent-backend pad \
   --action-distribution "$ACTION_DISTRIBUTION" \
+  --categorical-action-support "$CATEGORICAL_ACTION_SUPPORT" \
   --deterministic-action-statistic mode \
   --train-val-split 0.9 \
   --shuffle-dataset \

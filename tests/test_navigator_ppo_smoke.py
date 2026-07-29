@@ -121,6 +121,39 @@ class NavigatorPpoSmokeTest(unittest.TestCase):
                 memory_model="gru",
             )
 
+    def test_direction_length_support_has_26_actions_per_step_length(self):
+        config = Config(
+            reward_supervised=True,
+            action_distribution="masked_categorical",
+            categorical_action_support="direction_length",
+            deterministic_action_statistic="mode",
+            memory_model="gru",
+        )
+        self.assertEqual(config.max_step_vox, 6)
+        self.assertEqual(config.categorical_action_count, 26 * 6)
+        self.assertEqual(
+            len(set(config.action_displacements)),
+            config.categorical_action_count,
+        )
+        self.assertIn((6, 6, 6), config.action_displacements)
+        self.assertIn((-4, 0, 4), config.action_displacements)
+        self.assertNotIn((4, 2, 1), config.action_displacements)
+        self.assertTrue(
+            all(
+                len({abs(value) for value in action if value}) == 1
+                for action in config.action_displacements
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "dense or direction_length"):
+            Config(categorical_action_support="unknown")
+        with self.assertRaisesRegex(ValueError, "joint categorical"):
+            Config(
+                action_distribution="factorized_categorical",
+                categorical_action_support="direction_length",
+                deterministic_action_statistic="mode",
+                memory_model="gru",
+            )
+
     def test_validation_rank_prioritizes_complete_traversal(self):
         incomplete = {
             "validation/traversal_success_rate": 0.0,
@@ -576,6 +609,7 @@ class NavigatorPpoSmokeTest(unittest.TestCase):
             memory_hidden_size=16,
             recurrent_sequence_length=4,
             action_distribution="masked_categorical",
+            categorical_action_support="direction_length",
             deterministic_action_statistic="mode",
         )
         policy, value = create_ppo_modules(config, device)

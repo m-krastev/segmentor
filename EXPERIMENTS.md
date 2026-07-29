@@ -2824,3 +2824,40 @@ command or service, acceptance metrics, and outcome here.
   (26 lattice directions times six step lengths, at most 156 categories).
   This tests whether PPO can assign useful likelihood mass without changing
   reward scales, observation channels, GT separation, or movement semantics.
+
+### M24: Preregistered compact masked-action screen
+
+- Implemented `categorical_action_support=direction_length` as an explicit
+  alternative to the unchanged `dense` default. At the registered six-voxel
+  maximum it contains the Cartesian product of 26 nonzero directions in
+  `{-1,0,1}^3` and lengths 1 through 6: exactly 156 unique integer actions.
+  Each selected vector is still executed exactly and the policy is still
+  renormalized over the bounds-only feasible subset. No reward, observation,
+  label, movement, PPO, validation, or success setting changes.
+- Motivation is numerical rather than cosmetic:
+  - the dense head's equal-length prior has entropy `7.1830` nats, equivalent
+    to about 1,317 uniformly likely actions; its trained 64k entropy was still
+    about `7.162` nats, so it had barely reduced action uncertainty;
+  - compact support starts at `log(156)=5.0499` nats and removes 524,280 head
+    parameters, reducing the registered model from 1,162,629 to approximately
+    638,349 trainable parameters;
+  - all six axial, face-diagonal, and body-diagonal step scales remain
+    available, so the repaired Shin reward magnitudes and physical maximum
+    progress threshold are unchanged;
+  - a 300,000-point spherical audit estimates the worst nearest-heading error
+    of the 26-direction set at `27.56 degrees`. This angular quantization is the
+    deliberate price of the ablation and must not be hidden.
+- Reproducible launcher:
+  `scripts/run_navigator_bomopi_068_masked_compact_64k.sh`. Run a 4,096-frame
+  CUDA smoke first, then a fresh 65,536-frame screen only if invalid-action
+  fraction remains exactly zero and PPO/CUDA values are finite.
+- Preregistered 64k continuation gate versus the failed dense run:
+  - final boundary-state fraction below `0.80`;
+  - recent unique-position fraction above `0.10`;
+  - positive-GDT fraction at least `0.02`;
+  - either mean Dice above `0.02` or mean endpoint distance below
+    `197.59 mm`, the best dense-screen endpoint gate.
+  Require at least three of these four criteria plus a non-collapsing trend to
+  justify 256k. The registered long-run target remains at least `0.40` Dice
+  with full endpoint-to-endpoint traversal; compact support is not allowed to
+  redefine success.

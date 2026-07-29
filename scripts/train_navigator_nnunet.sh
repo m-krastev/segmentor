@@ -66,6 +66,7 @@ S5_STATE_SIZE="${NAVIGATOR_S5_STATE_SIZE:-256}"
 RECURRENT_SEQUENCE_LENGTH="${NAVIGATOR_RECURRENT_SEQUENCE_LENGTH:-64}"
 RECURRENT_BACKEND="${NAVIGATOR_RECURRENT_BACKEND:-pad}"
 ACTION_DISTRIBUTION="${NAVIGATOR_ACTION_DISTRIBUTION:-beta}"
+CATEGORICAL_ACTION_SUPPORT="${NAVIGATOR_CATEGORICAL_ACTION_SUPPORT:-dense}"
 
 if [[ -z "$DETERMINISTIC_ACTION_STATISTIC" ]]; then
   if [[ "$ACTION_DISTRIBUTION" != "beta" ]]; then
@@ -229,6 +230,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --recurrent-sequence-length "$RECURRENT_SEQUENCE_LENGTH" \
   --recurrent-backend "$RECURRENT_BACKEND" \
   --action-distribution "$ACTION_DISTRIBUTION" \
+  --categorical-action-support "$CATEGORICAL_ACTION_SUPPORT" \
   --train-val-split "$TRAIN_VAL_SPLIT" \
   --shuffle-dataset \
   --voxel-size-mm 1.5 \

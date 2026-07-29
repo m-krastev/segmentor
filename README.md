@@ -112,6 +112,14 @@ The feasibility mask depends only on the current voxel and CT volume bounds;
 it contains no target mask, GDT, or endpoint information. TensorBoard data is
 written below the selected checkpoint directory.
 
+The controlled compact-action follow-up retains that contract but limits the
+joint support to 26 lattice directions at six integer step lengths:
+
+```bash
+NAVIGATOR_TRAIN_SCRIPT=scripts/run_navigator_bomopi_068_masked_compact_64k.sh \
+  scripts/navigator_systemd.sh start navigator-bomopi-gru-068-masked-compact-64k-v1
+```
+
 #### Data Preprocessing for nnUNet
 
 To prepare data for nnUNet format:
