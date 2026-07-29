@@ -2208,3 +2208,28 @@ command or service, acceptance metrics, and outcome here.
   The final console summary was approximately `0.06` mean Dice and zero
   success. Per-gate JSON ranking and best-checkpoint trajectory audit remain
   required before selecting or extending this run.
+
+### M16: Joint categorical movement ablation
+
+- Exact per-gate extraction confirmed that the 512k supervised checkpoint is
+  the retained champion. The next 51.2k frames already regressed from
+  `0.298841` to `0.202396` Dice, and all later gates through 1,024k remained
+  between `0.035600` and `0.084947`; no endpoint reach or traversal occurred.
+- The 512k trajectory audit identified a deterministic movement failure hidden
+  by the aggregate Dice:
+  - pt14 visited 307 positions overall but only two positions in its final 512
+    steps, with a 100% final-window immediate-reversal rate;
+  - pt18 visited 394 positions overall and 141 in its final 512 steps, but its
+    final-window immediate-reversal rate was still 48.8%;
+  - the stochastic training policy was not globally collapsed (joint maximum
+    action probability `0.03269`, logit standard deviation `0.81492`).
+- The factorized categorical policy cannot represent correlations between the
+  three displacement coordinates. Its deterministic rollout independently
+  selected axis modes `(4, -4, 4)` at 512k, which can turn small marginal-logit
+  changes into a long diagonal mode and a two-point reversal even while sampled
+  training actions remain diverse.
+- Queue a one-factor, from-scratch 102.4k supervised-input ablation using the
+  existing joint categorical implementation. It assigns a probability to each
+  complete nonzero integer displacement, preserves exact PPO likelihoods, and
+  initializes equal total mass for each Chebyshev step length. Reward, GT-mask
+  input, GRU, split, patch, optimizer, seed, and validation remain unchanged.
