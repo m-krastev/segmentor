@@ -2861,3 +2861,16 @@ command or service, acceptance metrics, and outcome here.
   justify 256k. The registered long-run target remains at least `0.40` Dice
   with full endpoint-to-endpoint traversal; compact support is not allowed to
   redefine success.
+- The managed 4,096-frame CUDA smoke completed with exit status zero in 39s,
+  including mandatory final validation. The compact model has the predicted
+  638,349 parameters. Peak CUDA allocation/reservation was
+  `7,505.0/8,678.0 MiB`; invalid-action fraction was exactly zero and final KL
+  was `0.00258`.
+- Smoke held-out metrics were Dice `0.012346`, endpoint distance `218.394 mm`,
+  positive-GDT fraction `0.006875`, recent unique-position fraction
+  `0.035156`, and boundary-state fraction `0.521875`. This is directionally
+  better than the dense 4k smoke (`0.009305`, `247.666 mm`, and `0.956875`
+  boundary residence), but the two cases were asymmetric: pt14 boundary
+  residence was `0.10625`, while pt18 remained at `0.9375`. The smoke passes
+  the technical gate for a fresh 64k screen but is not scientific evidence of
+  traversal.
