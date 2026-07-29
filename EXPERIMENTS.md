@@ -2704,3 +2704,73 @@ command or service, acceptance metrics, and outcome here.
   action rate and final-window path diversity improve; by 1M require at least
   one held-out endpoint reach and mean Dice near `0.40`, otherwise pivot away
   from a pure PPO primary method.
+
+### M23: Repaired-068 256k failure and exact boundary-safe policy
+
+- The completed `navigator-bomopi-gru-068-repaired-256k-v1` run was
+  technically stable but failed its scientific screen:
+  - 40,960 frames: held-out mean Dice `0.011352`, endpoint distance
+    `223.939 mm`;
+  - 81,920 frames: held-out mean Dice `0.014162`, endpoint distance
+    `203.067 mm`;
+  - both validations ran 800 steps with zero endpoint reaches and zero
+    traversal successes;
+  - the final 256k training batch had mean Dice `0.00966`, invalid-action
+    reward `-0.658854`, off-target reward `-0.007813`, zero GDT reward, and
+    maximum per-step reward `-0.666667`.
+- Deterministic path inspection exposed a boundary exploit, not merely slow
+  learning. Each validation path made ten moves to 11 positions and then
+  selected outward actions for roughly 790 steps. A rejected action paid the
+  flat invalid penalty `-2/3`, whereas executing an off-target action could
+  pay step, distance, and wall costs in addition. The policy therefore found
+  a locally preferable stationary boundary action whose categorical
+  probability still participated in PPO.
+- Replaced that distribution with exact state-dependent joint masking:
+
+  `pi(a|s) = exp(z_a) / sum(exp(z_b), b in A(s))` for `a in A(s)`, and zero
+  otherwise.
+
+  `A(s)` contains every configured nonzero displacement whose endpoint remains
+  inside the volume. The mask depends only on image bounds and the current
+  position; it does not inspect the bowel mask, GDT, goal, reward, or any other
+  label. The action and its masked log-probability are stored together in the
+  rollout, so PPO evaluates exactly the distribution that sampled the action.
+  The environment executes the selected integer displacement directly and
+  raises if the mask/action contract is ever violated.
+- Added collapse telemetry to both training and deterministic validation:
+  executed/invalid action fraction, positive-GDT fraction, off-target fraction,
+  recent unique-position fraction over 256 steps, immediate reversals,
+  boundary-state fraction, and the fraction of actions available in the
+  current mask.
+- Fixed a separate scheduling defect. Validation and regular checkpoints used
+  `num_updates % interval == 0`; variable PPO epoch counts/KL early stopping
+  could jump over a multiple and silently omit the event. Scheduling now fires
+  whenever an interval threshold is crossed and advances the threshold past
+  the current counter. This explains why the 256k run produced only two
+  validations despite a nominal 400-update interval.
+- Verification on the Linux CUDA host used the existing project environment
+  through `uv --no-sync`:
+  - focused reward/environment/PPO suite: 81 tests passed;
+  - complete `test_navigator_*.py` suite: 99 tests passed;
+  - the recurrent PPO test confirms every sampled action is feasible, the
+    stored log-probability equals an independently reconstructed exact masked
+    log-probability, and the PPO backward pass remains finite.
+- Registered follow-up: a 4,096-frame CUDA smoke, followed only on technical
+  success by `navigator-bomopi-gru-068-masked-64k-v1`. The 64k screen validates
+  approximately every 16,384 frames and must maintain exactly zero invalid
+  actions. Continue beyond 64k only if held-out Dice/endpoint distance,
+  positive-GDT rate, and path diversity show a coherent improvement without a
+  boundary or short-cycle collapse.
+- The 4,096-frame CUDA smoke completed in about 20 seconds of training at
+  roughly 200 frames/s. Peak CUDA allocation/reservation was
+  `7,551.998/9,214 MiB`, leaving adequate headroom on the 15.5-GiB GPU.
+  Every training batch and both held-out rollouts had executed-action fraction
+  `1.0` and invalid-action fraction `0.0`, verifying that the old stationary
+  invalid-action exploit is unreachable. PPO remained finite; final
+  approximate KL was `0.004834`.
+- The smoke is not evidence of tracking quality. Its 4k held-out mean Dice was
+  `0.009305`, endpoint distance `247.666 mm`, positive-GDT fraction `0.010625`,
+  and recent unique-position fraction `0.033203`. Although every action
+  executed, deterministic trajectories already spent `95.69%` of states near
+  an image boundary. The 64k screen must therefore distinguish a temporary
+  untrained mode from a new boundary-following collapse.

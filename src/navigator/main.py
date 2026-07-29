@@ -43,8 +43,13 @@ def main():
     config = parse_args()
     print("Parsed configuration:")
 
-    # Convert dataclass to dict for printing/wandb config
-    config_dict = vars(config)
+    # Keep the console readable: the derived joint action table has thousands
+    # of entries and remains available in saved config/checkpoint metadata.
+    config_dict = vars(config).copy()
+    if "action_displacements" in config_dict:
+        config_dict["action_displacements"] = (
+            f"<{config.categorical_action_count} nonzero displacements>"
+        )
     print(config_dict)
 
     seed_everything(config.seed)
@@ -175,7 +180,10 @@ def main():
             ),
             "action": (
                 torch.zeros(1, dtype=torch.long, device=config.device)
-                if config.action_distribution == "categorical"
+                if config.action_distribution in {
+                    "categorical",
+                    "masked_categorical",
+                }
                 else torch.zeros(
                     1,
                     3,
@@ -206,6 +214,13 @@ def main():
                     2,
                     device=config.device,
                 )
+        if config.action_distribution == "masked_categorical":
+            dummy_data["action_mask"] = torch.ones(
+                1,
+                config.categorical_action_count,
+                dtype=torch.bool,
+                device=config.device,
+            )
         dummy_input = TensorDict(dummy_data, batch_size=[1], device=config.device)
         policy_module(dummy_input.clone())
         value_module(dummy_input.clone())

@@ -176,6 +176,8 @@ class Config:
     recurrent_backend: str = "pad"
     # "beta" reproduces the original continuous policy. "categorical"
     # assigns one joint category to each nonzero integer displacement.
+    # "masked_categorical" uses the same joint support but renormalizes over
+    # only the nonzero displacements whose endpoints remain inside the image.
     # "factorized_categorical" models the three exact integer coordinates
     # with independent categorical factors, avoiding a 728-way output head.
     action_distribution: str = "beta"
@@ -343,6 +345,10 @@ class Config:
             raise ValueError("lr_anneal_timesteps must be non-negative")
         if self.target_kl < 0:
             raise ValueError("target_kl must be non-negative")
+        if self.eval_interval < 1:
+            raise ValueError("eval_interval must be positive")
+        if self.save_freq < 1:
+            raise ValueError("save_freq must be positive")
         if not 0 < self.gamma <= 1:
             raise ValueError("gamma must be in (0, 1]")
         if self.behavior_cloning_batch_size < 1:
@@ -374,11 +380,12 @@ class Config:
         if self.action_distribution not in {
             "beta",
             "categorical",
+            "masked_categorical",
             "factorized_categorical",
         }:
             raise ValueError(
                 "action_distribution must be one of: beta, categorical, "
-                "factorized_categorical"
+                "masked_categorical, factorized_categorical"
             )
         if self.action_distribution != "beta":
             if self.memory_model == "none":
@@ -393,6 +400,13 @@ class Config:
                 raise ValueError(
                     "categorical actions do not yet support behavior cloning"
                 )
+        if self.action_distribution == "masked_categorical" and not (
+            self.annotation_free or self.reward_supervised
+        ):
+            raise ValueError(
+                "masked_categorical requires clean bounds-only policy dynamics "
+                "via reward_supervised or annotation_free mode"
+            )
         if self.memory_model != "none" and self.td3:
             raise ValueError("Recurrent memory baselines currently support PPO only")
         if self.annotation_free and self.reward_supervised:

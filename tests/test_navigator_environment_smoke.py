@@ -1803,6 +1803,77 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         finally:
             environment.close()
 
+    def test_masked_categorical_exposes_only_exact_in_bounds_displacements(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=4,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=8,
+            reward_supervised=True,
+            memory_model="gru",
+            action_distribution="masked_categorical",
+            deterministic_action_statistic="mode",
+        )
+        shape = (16, 16, 16)
+        start = (0, 0, 0)
+        end = (8, 8, 8)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter(
+                [self._make_subject(shape, start, end, segmentation)]
+            ),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        try:
+            reset = environment._reset()
+            action_mask = reset["action_mask"][0]
+            displacements = torch.as_tensor(
+                config.action_displacements,
+                device=device,
+            )
+            expected = (displacements >= 0).all(dim=-1)
+            torch.testing.assert_close(action_mask, expected)
+            self.assertFalse(
+                action_mask[
+                    config.action_displacements.index((-1, 0, 0))
+                ].item()
+            )
+
+            selected = (4, 2, 1)
+            action_index = config.action_displacements.index(selected)
+            self.assertTrue(action_mask[action_index].item())
+            transition = environment._step(
+                TensorDict(
+                    {
+                        "action": torch.tensor(
+                            [action_index],
+                            dtype=torch.long,
+                            device=device,
+                        )
+                    },
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(environment.current_pos_vox, selected)
+            self.assertEqual(
+                transition["info", "action_executed"].item(),
+                1.0,
+            )
+            self.assertEqual(
+                transition["info", "reward_invalid"].item(),
+                0.0,
+            )
+            self.assertTrue(transition["action_mask"].any())
+        finally:
+            environment.close()
+
     def test_factorized_categorical_action_executes_exact_integer_displacement(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(

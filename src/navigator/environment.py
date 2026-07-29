@@ -4,6 +4,7 @@ integrated with TorchRL. Simplified version without try-except blocks.
 """
 
 from rich import print
+from collections import Counter, deque
 from itertools import product
 from math import ceil, dist, isfinite, sqrt
 from pathlib import Path
@@ -169,6 +170,11 @@ class SmallBowelEnv(EnvBase):
         self._dilated_line_offsets: dict[
             tuple[Coords, ...], torch.Tensor
         ] = {}
+        self._action_displacements_tensor = torch.as_tensor(
+            config.action_displacements,
+            dtype=torch.long,
+            device=self.device,
+        )
         self.maxarea_dilation = torch.compile(
             torch.nn.Sequential(*[BinaryDilation3D()] * config.allowed_area_radius_vox)
         )
@@ -179,8 +185,8 @@ class SmallBowelEnv(EnvBase):
         self.placeholder_zeros = torch.zeros_like(self._is_done, dtype=self.dtype)
 
     def _set_specs(self):
-        self.observation_spec = Composite(
-            actor=UnboundedContinuous(
+        observation_fields = {
+            "actor": UnboundedContinuous(
                 shape=torch.Size(
                     [
                         *self.batch_size,
@@ -190,11 +196,11 @@ class SmallBowelEnv(EnvBase):
                 ),
                 dtype=self.dtype,
             ),
-            context=UnboundedContinuous(
+            "context": UnboundedContinuous(
                 shape=torch.Size([*self.batch_size, self.config.context_features]),
                 dtype=self.dtype,
             ),
-            info=Composite(
+            "info": Composite(
                 final_coverage=BoundedContinuous(
                     low=0, high=1, shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
                 ),
@@ -219,6 +225,18 @@ class SmallBowelEnv(EnvBase):
                 episodic_cell_reward=UnboundedContinuous(
                     shape=torch.Size([*self.batch_size, 1]), dtype=self.dtype
                 ),
+                action_executed=BoundedContinuous(
+                    low=0,
+                    high=1,
+                    shape=torch.Size([*self.batch_size, 1]),
+                    dtype=self.dtype,
+                ),
+                recent_unique_position_fraction=BoundedContinuous(
+                    low=0,
+                    high=1,
+                    shape=torch.Size([*self.batch_size, 1]),
+                    dtype=self.dtype,
+                ),
                 **{
                     key: UnboundedContinuous(
                         shape=torch.Size([*self.batch_size, 1]),
@@ -226,10 +244,23 @@ class SmallBowelEnv(EnvBase):
                     )
                     for key in REWARD_COMPONENT_INFO_KEYS
                 },
-            ),
+            )
+        }
+        if self.config.action_distribution == "masked_categorical":
+            observation_fields["action_mask"] = Binary(
+                shape=torch.Size(
+                    [*self.batch_size, self.config.categorical_action_count]
+                ),
+                dtype=torch.bool,
+            )
+        self.observation_spec = Composite(
+            **observation_fields,
             shape=self.batch_size,
         )
-        if self.config.action_distribution == "categorical":
+        if self.config.action_distribution in {
+            "categorical",
+            "masked_categorical",
+        }:
             self.action_spec = Categorical(
                 n=self.config.categorical_action_count,
                 shape=self.batch_size,
@@ -647,6 +678,25 @@ class SmallBowelEnv(EnvBase):
         s = self.image.shape
         return (0 <= pos_vox[0] < s[0]) and (0 <= pos_vox[1] < s[1]) and (0 <= pos_vox[2] < s[2])
 
+    def _get_action_mask(self) -> torch.Tensor:
+        """Return bounds-only feasibility for every nonzero joint action."""
+        if self.config.action_distribution != "masked_categorical":
+            raise RuntimeError("Action masks are defined only for masked_categorical")
+        endpoints = self._action_displacements_tensor + torch.as_tensor(
+            self.current_pos_vox,
+            dtype=torch.long,
+            device=self.device,
+        )
+        valid = (
+            (endpoints >= 0)
+            & (endpoints < self._volume_shape_tensor)
+        ).all(dim=-1)
+        if not valid.any():
+            raise RuntimeError(
+                f"No feasible nonzero action at in-bounds position {self.current_pos_vox}"
+            )
+        return valid
+
     def _is_allowed_displacement(self, displacement: Coords) -> bool:
         """Return whether the entire proposed segment is traversable."""
         if not any(displacement):
@@ -898,6 +948,22 @@ class SmallBowelEnv(EnvBase):
             self.policy_path_mask[indices] = 1
             return
         self.policy_path_mask[tuple(int(value) for value in voxels)] = 1
+
+    def _record_recent_position(self, position: Coords) -> None:
+        """Update the fixed-window position diversity diagnostic."""
+        position = tuple(int(value) for value in position)
+        if len(self.recent_positions) == self.recent_positions.maxlen:
+            oldest = self.recent_positions.popleft()
+            self.recent_position_counts[oldest] -= 1
+            if self.recent_position_counts[oldest] == 0:
+                del self.recent_position_counts[oldest]
+        self.recent_positions.append(position)
+        self.recent_position_counts[position] += 1
+
+    def _recent_unique_position_fraction(self) -> float:
+        if not self.recent_positions:
+            return 0.0
+        return len(self.recent_position_counts) / len(self.recent_positions)
 
     def get_tracking_history(self) -> np.ndarray:
         """Get the history of tracked positions."""
@@ -1371,6 +1437,8 @@ class SmallBowelEnv(EnvBase):
 
         # Initialize various tracking variables
         self.tracking_path_history = [self.current_pos_vox]
+        self.recent_positions = deque([self.current_pos_vox], maxlen=256)
+        self.recent_position_counts = Counter({self.current_pos_vox: 1})
         self.cum_reward = torch.tensor(0.0, dtype=self.dtype, device=self.device)
         if self.config.annotation_free:
             self.max_gdt_achieved = 0.0
@@ -1415,30 +1483,37 @@ class SmallBowelEnv(EnvBase):
 
         # --- Update Internal Done Flag and Package Output ---
         self._is_done.fill_(False)
-        reset_td = TensorDict(
-            {
-                "actor": obs_dict["actor"].unsqueeze(0),  # Add batch dim
-                "context": obs_dict["context"].unsqueeze(0),
-                "done": self._is_done.clone(),
-                "terminated": self._is_done.clone(),
-                "truncated": self._is_done.clone(),
-                "info": {
-                    "final_step_count": torch.zeros_like(self._is_done, dtype=self.dtype),
-                    "final_length": torch.zeros_like(self._is_done, dtype=self.dtype),
-                    "final_wall_gradient": torch.zeros_like(self._is_done, dtype=self.dtype),
-                    "final_coverage": self.placeholder_zeros.clone(),
-                    "final_success": self.placeholder_zeros.clone(),
-                    "total_reward": self.placeholder_zeros.clone(),
-                    "max_gdt_achieved": torch.as_tensor(
-                        self.max_gdt_achieved, dtype=self.dtype, device=self.device
-                    ).view_as(self._is_done),
-                    "episodic_cell_reward": self.placeholder_zeros.clone(),
-                    **{
-                        key: self.placeholder_zeros.clone()
-                        for key in REWARD_COMPONENT_INFO_KEYS
-                    },
+        reset_data = {
+            "actor": obs_dict["actor"].unsqueeze(0),  # Add batch dim
+            "context": obs_dict["context"].unsqueeze(0),
+            "done": self._is_done.clone(),
+            "terminated": self._is_done.clone(),
+            "truncated": self._is_done.clone(),
+            "info": {
+                "final_step_count": torch.zeros_like(self._is_done, dtype=self.dtype),
+                "final_length": torch.zeros_like(self._is_done, dtype=self.dtype),
+                "final_wall_gradient": torch.zeros_like(self._is_done, dtype=self.dtype),
+                "final_coverage": self.placeholder_zeros.clone(),
+                "final_success": self.placeholder_zeros.clone(),
+                "total_reward": self.placeholder_zeros.clone(),
+                "max_gdt_achieved": torch.as_tensor(
+                    self.max_gdt_achieved, dtype=self.dtype, device=self.device
+                ).view_as(self._is_done),
+                "episodic_cell_reward": self.placeholder_zeros.clone(),
+                "action_executed": self.placeholder_zeros.clone(),
+                "recent_unique_position_fraction": torch.ones_like(
+                    self.placeholder_zeros
+                ),
+                **{
+                    key: self.placeholder_zeros.clone()
+                    for key in REWARD_COMPONENT_INFO_KEYS
                 },
             },
+        }
+        if self.config.action_distribution == "masked_categorical":
+            reset_data["action_mask"] = self._get_action_mask().unsqueeze(0)
+        reset_td = TensorDict(
+            reset_data,
             batch_size=self.batch_size,
             device=self.device,
         )
@@ -1467,6 +1542,14 @@ class SmallBowelEnv(EnvBase):
             self._goal_planner_active = True
         if self._goal_planner_active:
             action_vox_delta = self._goal_distance_descent_displacement()
+        elif self.config.action_distribution == "masked_categorical":
+            action_index = int(action_normalized.item())
+            action_vox_delta = self.config.action_displacements[action_index]
+            if not self._is_allowed_displacement(action_vox_delta):
+                raise RuntimeError(
+                    "masked_categorical selected an infeasible displacement "
+                    f"{action_vox_delta} at {self.current_pos_vox}"
+                )
         elif self.config.action_distribution == "categorical":
             action_index = int(action_normalized.item())
             action_vox_delta = self._project_desired_displacement(
@@ -1536,6 +1619,7 @@ class SmallBowelEnv(EnvBase):
                                 coverage_reward,
                             )
                     self.current_coverage = next_coverage
+        self._record_recent_position(self.current_pos_vox)
 
         # Invalid actions leave the agent in place. Treating them as terminal
         # creates a cheap suicide policy whenever accumulated path costs can
@@ -1642,55 +1726,70 @@ class SmallBowelEnv(EnvBase):
                 f"final_coverage={final_coverage:.3f}; {endpoint_debug}"
             )
 
-        output_td = TensorDict(
-            {
-                "actor": next_obs_dict["actor"].unsqueeze(0),
-                "context": next_obs_dict["context"].unsqueeze(0),
-                "reward": _reward,
-                "done": torch.as_tensor(done, device=self.device).view_as(_reward),
-                "terminated": torch.as_tensor(terminated, device=self.device).view_as(_reward),
-                "truncated": torch.as_tensor(truncated, device=self.device).view_as(_reward),
-                "info": {
-                    "final_coverage": torch.as_tensor(
-                        final_coverage, device=self.device, dtype=self.dtype
-                    ).view_as(_reward)
-                    if done
-                    else self.placeholder_zeros.clone(),
-                    "final_success": torch.as_tensor(
-                        solved_path, device=self.device, dtype=self.dtype
-                    ).view_as(_reward)
-                    if done
-                    else self.placeholder_zeros.clone(),
-                    "final_step_count": torch.as_tensor(
-                        self.current_step_count, device=self.device, dtype=self.dtype
-                    ).view_as(_reward)
-                    if done
-                    else torch.as_tensor(0, device=self.device, dtype=self.dtype).view_as(_reward),
-                    "final_length": torch.as_tensor(
-                        self.current_distance_traveled if done else 0,
-                        device=self.device,
-                        dtype=self.dtype,
-                    ).view_as(_reward),
-                    "final_wall_gradient": torch.as_tensor(
-                        self.wall_gradient if done else 0,
-                        device=self.device,
-                        dtype=self.dtype,
-                    ).view_as(_reward),
-                    "total_reward": self.cum_reward.view_as(_reward).clone()
-                    if done
-                    else self.placeholder_zeros.clone(),
-                    "max_gdt_achieved": torch.as_tensor(
-                        self.max_gdt_achieved, dtype=self.dtype, device=self.device
-                    ).view_as(_reward),
-                    "episodic_cell_reward": self.last_episodic_cell_reward.view_as(
-                        _reward
-                    ),
-                    **{
-                        key: value.view_as(_reward)
-                        for key, value in self.last_reward_components.items()
-                    },
+        output_data = {
+            "actor": next_obs_dict["actor"].unsqueeze(0),
+            "context": next_obs_dict["context"].unsqueeze(0),
+            "reward": _reward,
+            "done": torch.as_tensor(done, device=self.device).view_as(_reward),
+            "terminated": torch.as_tensor(terminated, device=self.device).view_as(_reward),
+            "truncated": torch.as_tensor(truncated, device=self.device).view_as(_reward),
+            "info": {
+                "final_coverage": torch.as_tensor(
+                    final_coverage, device=self.device, dtype=self.dtype
+                ).view_as(_reward)
+                if done
+                else self.placeholder_zeros.clone(),
+                "final_success": torch.as_tensor(
+                    solved_path, device=self.device, dtype=self.dtype
+                ).view_as(_reward)
+                if done
+                else self.placeholder_zeros.clone(),
+                "final_step_count": torch.as_tensor(
+                    self.current_step_count, device=self.device, dtype=self.dtype
+                ).view_as(_reward)
+                if done
+                else torch.as_tensor(
+                    0, device=self.device, dtype=self.dtype
+                ).view_as(_reward),
+                "final_length": torch.as_tensor(
+                    self.current_distance_traveled if done else 0,
+                    device=self.device,
+                    dtype=self.dtype,
+                ).view_as(_reward),
+                "final_wall_gradient": torch.as_tensor(
+                    self.wall_gradient if done else 0,
+                    device=self.device,
+                    dtype=self.dtype,
+                ).view_as(_reward),
+                "total_reward": self.cum_reward.view_as(_reward).clone()
+                if done
+                else self.placeholder_zeros.clone(),
+                "max_gdt_achieved": torch.as_tensor(
+                    self.max_gdt_achieved, dtype=self.dtype, device=self.device
+                ).view_as(_reward),
+                "episodic_cell_reward": self.last_episodic_cell_reward.view_as(
+                    _reward
+                ),
+                "action_executed": torch.as_tensor(
+                    is_next_pos_allowed,
+                    device=self.device,
+                    dtype=self.dtype,
+                ).view_as(_reward),
+                "recent_unique_position_fraction": torch.as_tensor(
+                    self._recent_unique_position_fraction(),
+                    device=self.device,
+                    dtype=self.dtype,
+                ).view_as(_reward),
+                **{
+                    key: value.view_as(_reward)
+                    for key, value in self.last_reward_components.items()
                 },
             },
+        }
+        if self.config.action_distribution == "masked_categorical":
+            output_data["action_mask"] = self._get_action_mask().unsqueeze(0)
+        output_td = TensorDict(
+            output_data,
             batch_size=self.batch_size,
             device=self.device,
         )

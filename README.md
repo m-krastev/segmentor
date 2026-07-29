@@ -100,6 +100,18 @@ training. It retains true 32-transition recurrent PPO minibatches; the rollout
 chunk is 512 because TorchRL GAE evaluates that entire chunk at once on the
 15.5-GiB test GPU.
 
+The boundary-safe follow-up uses an exact joint categorical distribution over
+only nonzero in-bounds displacements:
+
+```bash
+NAVIGATOR_TRAIN_SCRIPT=scripts/run_navigator_bomopi_068_masked_64k.sh \
+  scripts/navigator_systemd.sh start navigator-bomopi-gru-068-masked-64k-v1
+```
+
+The feasibility mask depends only on the current voxel and CT volume bounds;
+it contains no target mask, GDT, or endpoint information. TensorBoard data is
+written below the selected checkpoint directory.
+
 #### Data Preprocessing for nnUNet
 
 To prepare data for nnUNet format:

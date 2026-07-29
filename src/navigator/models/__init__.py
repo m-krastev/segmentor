@@ -29,6 +29,7 @@ from ..config import Config
 __all__ = [
     "ActorNetwork",
     "CriticNetwork",
+    "FeasibleCategorical",
     "NavigatorVisualEncoder",
     "create_ppo_modules",
 ]
@@ -94,6 +95,28 @@ class IndependentCategorical(Independent):
 
     def __init__(self, logits: torch.Tensor):
         super().__init__(Categorical(logits=logits), 1)
+
+
+class FeasibleCategorical(Categorical):
+    """Categorical distribution normalized over a state-dependent valid set.
+
+    The mask is part of the environment state stored in every rollout. PPO
+    therefore reconstructs exactly the same normalized distribution when it
+    evaluates the old action under the updated policy.
+    """
+
+    def __init__(
+        self,
+        logits: torch.Tensor,
+        action_mask: torch.Tensor,
+    ):
+        action_mask = action_mask.to(device=logits.device, dtype=torch.bool)
+        if action_mask.shape != logits.shape:
+            action_mask = torch.broadcast_to(action_mask, logits.shape)
+        if not action_mask.any(dim=-1).all():
+            raise ValueError("Every state must expose at least one feasible action")
+        self.action_mask = action_mask
+        super().__init__(logits=logits.masked_fill(~action_mask, -torch.inf))
 
 
 # --- TorchRL Modules ---
@@ -255,7 +278,7 @@ def _create_recurrent_ppo_modules(
         )
         distribution_class = IndependentBeta
         distribution_in_keys = ["alpha", "beta"]
-    elif config.action_distribution == "categorical":
+    elif config.action_distribution in {"categorical", "masked_categorical"}:
         parameter_module = TensorDictModule(
             RecurrentCategoricalHead(
                 input_features=config.memory_hidden_size,
@@ -270,8 +293,12 @@ def _create_recurrent_ppo_modules(
             dtype=torch.int64,
             device=device,
         )
-        distribution_class = Categorical
-        distribution_in_keys = ["logits"]
+        if config.action_distribution == "masked_categorical":
+            distribution_class = FeasibleCategorical
+            distribution_in_keys = ["logits", "action_mask"]
+        else:
+            distribution_class = Categorical
+            distribution_in_keys = ["logits"]
     else:
         parameter_module = TensorDictModule(
             RecurrentFactorizedCategoricalHead(

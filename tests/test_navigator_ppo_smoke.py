@@ -9,10 +9,11 @@ from torchrl.envs.utils import ExplorationType
 from torchrl.modules import set_recurrent_mode
 
 from navigator.config import Config
-from navigator.models import create_ppo_modules
+from navigator.models import FeasibleCategorical, create_ppo_modules
 from navigator.models.actor import ActorNetwork
 from navigator.pretrain import _behavior_cloning_action
 from navigator.train import (
+    advance_periodic_threshold,
     deterministic_exploration_type,
     log_tensorboard,
     recurrent_minibatches,
@@ -21,6 +22,40 @@ from navigator.train import (
 
 
 class NavigatorPpoSmokeTest(unittest.TestCase):
+    def test_feasible_categorical_has_exact_masked_probabilities(self):
+        logits = torch.tensor([[0.0, 1.0, 2.0, 3.0]])
+        mask = torch.tensor([[True, False, True, False]])
+        distribution = FeasibleCategorical(logits, mask)
+
+        expected = torch.softmax(torch.tensor([0.0, 2.0]), dim=0)
+        torch.testing.assert_close(
+            distribution.probs[0, [0, 2]],
+            expected,
+        )
+        self.assertEqual(distribution.probs[0, 1].item(), 0.0)
+        self.assertEqual(distribution.probs[0, 3].item(), 0.0)
+        self.assertEqual(distribution.mode.item(), 2)
+        self.assertAlmostEqual(
+            distribution.log_prob(torch.tensor([2])).item(),
+            expected[1].log().item(),
+            places=6,
+        )
+        samples = distribution.sample((1024,))
+        self.assertTrue(torch.isin(samples, torch.tensor([0, 2])).all())
+        with self.assertRaisesRegex(ValueError, "at least one"):
+            FeasibleCategorical(logits, torch.zeros_like(mask))
+
+    def test_periodic_threshold_cannot_be_skipped(self):
+        due, next_threshold = advance_periodic_threshold(399, 400, 400)
+        self.assertFalse(due)
+        self.assertEqual(next_threshold, 400)
+        due, next_threshold = advance_periodic_threshold(403, 400, 400)
+        self.assertTrue(due)
+        self.assertEqual(next_threshold, 800)
+        due, next_threshold = advance_periodic_threshold(1207, next_threshold, 400)
+        self.assertTrue(due)
+        self.assertEqual(next_threshold, 1600)
+
     def test_behavior_cloning_action_statistic_is_explicit(self):
         distribution = type(
             "Distribution",
@@ -67,6 +102,12 @@ class NavigatorPpoSmokeTest(unittest.TestCase):
             Config(
                 action_distribution="categorical",
                 memory_model="gru",
+            )
+        with self.assertRaisesRegex(ValueError, "clean bounds-only"):
+            Config(
+                action_distribution="masked_categorical",
+                memory_model="gru",
+                deterministic_action_statistic="mode",
             )
         with self.assertRaisesRegex(ValueError, "deterministic mode"):
             Config(
@@ -508,6 +549,152 @@ class NavigatorPpoSmokeTest(unittest.TestCase):
             rollout["logits"].shape,
             torch.Size([*batch_size, config.categorical_action_count]),
         )
+        self.assertTrue(torch.isfinite(total_loss))
+        self.assertTrue(
+            all(
+                parameter.grad is None
+                or torch.isfinite(parameter.grad).all()
+                for parameter in loss_module.parameters()
+            )
+        )
+
+    def test_masked_categorical_recurrent_policy_supports_exact_ppo_backward(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        set_composite_lp_aggregate(False).set()
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            reward_supervised=True,
+            memory_model="gru",
+            memory_hidden_size=16,
+            recurrent_sequence_length=4,
+            action_distribution="masked_categorical",
+            deterministic_action_statistic="mode",
+        )
+        policy, value = create_ppo_modules(config, device)
+        batch_size = torch.Size([2, 4])
+        state_shape = (
+            *batch_size,
+            config.memory_num_layers,
+            config.memory_hidden_size,
+        )
+        action_mask = torch.ones(
+            *batch_size,
+            config.categorical_action_count,
+            dtype=torch.bool,
+            device=device,
+        )
+        action_mask[..., ::3] = False
+        current = {
+            "actor": torch.randn(
+                *batch_size,
+                config.observation_channels,
+                *config.patch_size_vox,
+                device=device,
+            ),
+            "context": torch.randn(
+                *batch_size,
+                config.context_features,
+                device=device,
+            ),
+            "action_mask": action_mask,
+            "is_init": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "recurrent_state": torch.zeros(state_shape, device=device),
+        }
+        current["is_init"][:, 0] = True
+        next_data = {
+            "actor": torch.randn(
+                *batch_size,
+                config.observation_channels,
+                *config.patch_size_vox,
+                device=device,
+            ),
+            "context": torch.randn(
+                *batch_size,
+                config.context_features,
+                device=device,
+            ),
+            "action_mask": action_mask.clone(),
+            "is_init": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "recurrent_state": torch.zeros(state_shape, device=device),
+            "reward": torch.randn(*batch_size, 1, device=device),
+            "done": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+            "terminated": torch.zeros(
+                *batch_size,
+                1,
+                dtype=torch.bool,
+                device=device,
+            ),
+        }
+        rollout = TensorDict(
+            current
+            | {
+                "next": TensorDict(
+                    next_data,
+                    batch_size=batch_size,
+                    device=device,
+                )
+            },
+            batch_size=batch_size,
+            device=device,
+        )
+        with set_recurrent_mode(True):
+            with torch.no_grad():
+                policy(rollout)
+            selected_is_valid = rollout["action_mask"].gather(
+                -1,
+                rollout["action"].unsqueeze(-1),
+            )
+            self.assertTrue(selected_is_valid.all())
+            exact_log_prob = FeasibleCategorical(
+                rollout["logits"],
+                rollout["action_mask"],
+            ).log_prob(rollout["action"])
+            torch.testing.assert_close(
+                rollout["action_log_prob"],
+                exact_log_prob,
+            )
+            GAE(
+                gamma=config.gamma,
+                lmbda=config.gae_lambda,
+                value_network=value,
+                average_gae=True,
+                deactivate_vmap=True,
+            )(rollout)
+            loss_module = ClipPPOLoss(
+                actor_network=policy,
+                critic_network=value,
+                clip_epsilon=config.clip_epsilon,
+                entropy_coeff=config.ent_coef,
+                entropy_bonus=True,
+                critic_coeff=config.vf_coef,
+                loss_critic_type="smooth_l1",
+                normalize_advantage=False,
+            )
+            losses = loss_module(rollout)
+            total_loss = (
+                losses["loss_objective"]
+                + losses["loss_entropy"]
+                + losses["loss_critic"]
+            )
+        total_loss.backward()
+
         self.assertTrue(torch.isfinite(total_loss))
         self.assertTrue(
             all(

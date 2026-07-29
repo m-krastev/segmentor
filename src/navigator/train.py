@@ -115,6 +115,20 @@ def validation_rank(metrics: dict) -> tuple[float, float, float, float]:
     )
 
 
+def advance_periodic_threshold(
+    current_value: int,
+    next_threshold: int,
+    interval: int,
+) -> tuple[bool, int]:
+    """Return whether a threshold was crossed and advance past the current value."""
+    if interval < 1:
+        raise ValueError("interval must be positive")
+    due = current_value >= next_threshold
+    while next_threshold <= current_value:
+        next_threshold += interval
+    return due, next_threshold
+
+
 def deterministic_exploration_type(config: Config) -> ExplorationType:
     """Return the configured deterministic statistic for Beta rollouts."""
 
@@ -205,6 +219,8 @@ def validation_loop_torchrl(
             intermediate_results = []
             reward, step_count, final_coverage, success = 0, 0, 0, 0
             endpoint_reached, endpoint_distance_mm = 0, float("inf")
+            action_executed_fraction = positive_gdt_fraction = 0.0
+            recent_unique_position_fraction = boundary_state_fraction = 0.0
             must_load_new_subject = True
             for _ in range(1):
                 try:
@@ -222,6 +238,20 @@ def validation_loop_torchrl(
                     reward = rollout["next", "reward"].mean().item()
                     total_reward = rollout["next", "info", "total_reward"].sum().item()
                     step_count = rollout["action"].shape[1]
+                    action_executed_fraction = rollout[
+                        "next", "info", "action_executed"
+                    ].float().mean().item()
+                    positive_gdt_fraction = (
+                        rollout["next", "info", "reward_gdt"] > 0
+                    ).float().mean().item()
+                    recent_unique_position_fraction = rollout[
+                        "next", "info", "recent_unique_position_fraction"
+                    ].reshape(-1)[-1].item()
+                    if config.action_distribution == "masked_categorical":
+                        boundary_state_fraction = (
+                            rollout["action_mask"].sum(dim=-1)
+                            < config.categorical_action_count
+                        ).float().mean().item()
                     path = tracking_env.get_tracking_history()
                     if config.annotation_free:
                         evaluation_target = load_nnunet_evaluation_target(
@@ -263,6 +293,10 @@ def validation_loop_torchrl(
                             success,
                             endpoint_reached,
                             endpoint_distance_mm,
+                            action_executed_fraction,
+                            positive_gdt_fraction,
+                            recent_unique_position_fraction,
+                            boundary_state_fraction,
                         )
                     )
                 except Exception as e:
@@ -287,6 +321,10 @@ def validation_loop_torchrl(
                 success,
                 endpoint_reached,
                 endpoint_distance_mm,
+                action_executed_fraction,
+                positive_gdt_fraction,
+                recent_unique_position_fraction,
+                boundary_state_fraction,
             ) = intermediate_results[best_run]
             path = paths[best_run]
             path_mask = path_masks[best_run]
@@ -306,6 +344,16 @@ def validation_loop_torchrl(
             val_results["success"].append(success)
             val_results["endpoint_reached"].append(endpoint_reached)
             val_results["endpoint_distance_mm"].append(endpoint_distance_mm)
+            val_results["action_executed_fraction"].append(
+                action_executed_fraction
+            )
+            val_results["positive_gdt_fraction"].append(positive_gdt_fraction)
+            val_results["recent_unique_position_fraction"].append(
+                recent_unique_position_fraction
+            )
+            val_results["boundary_state_fraction"].append(
+                boundary_state_fraction
+            )
 
     val_env.close()  # Close the validation environment
 
@@ -325,6 +373,18 @@ def validation_loop_torchrl(
         "validation/traversal_success_rate": np.mean(val_results["success"]),
         "validation/endpoint_reach_rate": np.mean(val_results["endpoint_reached"]),
         "validation/avg_endpoint_distance_mm": np.mean(val_results["endpoint_distance_mm"]),
+        "validation/action_executed_fraction": np.mean(
+            val_results["action_executed_fraction"]
+        ),
+        "validation/positive_gdt_fraction": np.mean(
+            val_results["positive_gdt_fraction"]
+        ),
+        "validation/recent_unique_position_fraction": np.mean(
+            val_results["recent_unique_position_fraction"]
+        ),
+        "validation/boundary_state_fraction": np.mean(
+            val_results["boundary_state_fraction"]
+        ),
         "validation/num_cases": len(val_results["coverage"]),
     }
 
@@ -502,6 +562,13 @@ def _train_torchrl(
             print(f"Error loading checkpoint: Missing key {e}")
         except Exception as e:
             print(f"An unexpected error occurred while loading checkpoint: {e}")
+
+    next_validation_update = (
+        num_updates // config.eval_interval + 1
+    ) * config.eval_interval
+    next_checkpoint_update = (
+        num_updates // config.save_freq + 1
+    ) * config.save_freq
 
     # --- Collector ---
     # Collects data by interacting policy_module with environment instances
@@ -706,7 +773,10 @@ def _train_torchrl(
             # are computed only by the post-rollout validation evaluator.
             final_coverage = missing_episode_stat
             success_rate = missing_episode_stat
-        if config.action_distribution == "categorical":
+        if config.action_distribution in {
+            "categorical",
+            "masked_categorical",
+        }:
             displacement_table = torch.as_tensor(
                 config.action_displacements,
                 dtype=torch.float32,
@@ -720,6 +790,38 @@ def _train_torchrl(
             ).float()
         else:
             action = ((batch_data["action"] * 2 - 1) * config.max_step_vox).round()
+        action_executed = batch_data[
+            "next", "info", "action_executed"
+        ].reshape(-1).bool()
+        executed_action_fraction = action_executed.float().mean()
+        positive_gdt_fraction = (
+            batch_data["next", "info", "reward_gdt"].reshape(-1) > 0
+        ).float().mean()
+        off_target_fraction = (
+            batch_data["next", "info", "reward_off_target"].reshape(-1) < 0
+        ).float().mean()
+        recent_unique_position_fraction = batch_data[
+            "next", "info", "recent_unique_position_fraction"
+        ].reshape(-1).mean()
+        immediate_reversal_fraction = torch.tensor(0.0, device=device)
+        if action.shape[0] > 1:
+            valid_pairs = action_executed[1:] & action_executed[:-1]
+            if "is_init" in batch_data.keys():
+                valid_pairs &= ~batch_data["is_init"].reshape(-1)[1:].bool()
+            if valid_pairs.any():
+                immediate_reversal_fraction = (
+                    (action[1:] == -action[:-1]).all(dim=-1)[valid_pairs]
+                    .float()
+                    .mean()
+                )
+        available_action_fraction = torch.tensor(1.0, device=device)
+        boundary_state_fraction = torch.tensor(0.0, device=device)
+        if config.action_distribution == "masked_categorical":
+            action_mask = batch_data["action_mask"].bool()
+            available_action_fraction = action_mask.float().mean()
+            boundary_state_fraction = (
+                action_mask.sum(dim=-1) < config.categorical_action_count
+            ).float().mean()
         if completed_episode:
             max_gdt_achieved = batch_data["next", "info", "max_gdt_achieved"][idx]
             max_std, max_mean = torch.std_mean(max_gdt_achieved, unbiased=False)
@@ -747,6 +849,16 @@ def _train_torchrl(
             "train/success_rate": success_rate,
             "train/traversal_success_rate": success_rate,
             "train/total_reward": total_reward,
+            "train/executed_action_fraction": executed_action_fraction,
+            "train/invalid_action_fraction": 1.0 - executed_action_fraction,
+            "train/positive_gdt_fraction": positive_gdt_fraction,
+            "train/off_target_fraction": off_target_fraction,
+            "train/recent_unique_position_fraction": (
+                recent_unique_position_fraction
+            ),
+            "train/immediate_reversal_fraction": immediate_reversal_fraction,
+            "train/boundary_state_fraction": boundary_state_fraction,
+            "train/available_action_fraction": available_action_fraction,
             "charts/learning_rate": optimizer.param_groups[0]["lr"],
             "charts/max_gdt_achieved": max_mean,
             "charts/max_gdt_achieved_std": max_std,
@@ -777,8 +889,17 @@ def _train_torchrl(
                     "losses/beta": batch_data["beta"].mean(),
                 }
             )
-        elif config.action_distribution == "categorical":
-            action_probabilities = batch_data["logits"].softmax(dim=-1)
+        elif config.action_distribution in {
+            "categorical",
+            "masked_categorical",
+        }:
+            action_logits = batch_data["logits"]
+            if config.action_distribution == "masked_categorical":
+                action_logits = action_logits.masked_fill(
+                    ~batch_data["action_mask"].bool(),
+                    -torch.inf,
+                )
+            action_probabilities = action_logits.softmax(dim=-1)
             log_data.update(
                 {
                     "policy/max_action_probability": (
@@ -823,7 +944,12 @@ def _train_torchrl(
         log_tensorboard(tensorboard_writer, log_data, step=collected_frames)
 
         # --- Validation and Checkpointing ---
-        if num_updates % config.eval_interval == 0:
+        validation_due, next_validation_update = advance_periodic_threshold(
+            num_updates,
+            next_validation_update,
+            config.eval_interval,
+        )
+        if validation_due:
             val_metrics = validation_loop_torchrl(
                 actor_module=policy_module,
                 config=config,
@@ -869,7 +995,12 @@ def _train_torchrl(
                     )
 
         # Regular checkpoint saving
-        if num_updates % config.save_freq == 0:
+        checkpoint_due, next_checkpoint_update = advance_periodic_threshold(
+            num_updates,
+            next_checkpoint_update,
+            config.save_freq,
+        )
+        if checkpoint_due:
             save_checkpoint(
                 policy_module,
                 value_module,
