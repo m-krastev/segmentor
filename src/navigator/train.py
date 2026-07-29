@@ -129,6 +129,14 @@ def advance_periodic_threshold(
     return due, next_threshold
 
 
+def should_run_final_validation(
+    collected_frames: int,
+    last_validation_frame: int | None,
+) -> bool:
+    """Require a final metric unless this exact policy state was validated."""
+    return collected_frames > 0 and last_validation_frame != collected_frames
+
+
 def deterministic_exploration_type(config: Config) -> ExplorationType:
     """Return the configured deterministic statistic for Beta rollouts."""
 
@@ -623,6 +631,57 @@ def _train_torchrl(
 
     # --- Training Loop ---
     pbar = tqdm(total=total_timesteps, desc="Training", unit="steps", initial=collected_frames)
+    last_validation_frame: int | None = None
+
+    def validate_current_policy() -> dict:
+        """Validate, log, and update the best checkpoint at the current frame."""
+        nonlocal best_val_metric, best_val_rank, last_validation_frame
+        val_metrics = validation_loop_torchrl(
+            actor_module=policy_module,
+            config=config,
+            val_dataset=val_set,
+            device=device,
+            global_step=collected_frames,
+        )
+        last_validation_frame = collected_frames
+        policy_module.train()
+        if config.track_wandb and wandb is not None:
+            log_wandb(val_metrics, step=collected_frames)
+        log_tensorboard(tensorboard_writer, val_metrics, step=collected_frames)
+
+        if config.annotation_free:
+            print(
+                "  Annotation-free protocol: validation labels are "
+                "report-only and cannot select a checkpoint."
+            )
+            return val_metrics
+
+        current_metric = val_metrics.get(
+            config.metric_to_optimize,
+            float("-inf"),
+        )
+        current_rank = validation_rank(val_metrics)
+        if current_rank > best_val_rank:
+            best_val_metric = current_metric
+            best_val_rank = current_rank
+            print(
+                f"  New best validation rank: {best_val_rank} "
+                f"({config.metric_to_optimize}={best_val_metric:.4f})"
+            )
+            save_checkpoint(
+                policy_module,
+                value_module,
+                optimizer,
+                scheduler,
+                collected_frames,
+                num_updates,
+                config,
+                True,
+                best_val_metric,
+                best_val_rank=best_val_rank,
+            )
+        return val_metrics
+
     # Use collector's iterator
     for i, batch_data in enumerate(collector, start=collected_frames):
         current_frames = batch_data.numel()  # Number of steps collected in this batch
@@ -950,49 +1009,7 @@ def _train_torchrl(
             config.eval_interval,
         )
         if validation_due:
-            val_metrics = validation_loop_torchrl(
-                actor_module=policy_module,
-                config=config,
-                val_dataset=val_set,
-                device=device,
-                global_step=collected_frames,
-            )
-            policy_module.train()
-            if config.track_wandb and wandb is not None:
-                log_wandb(val_metrics, step=collected_frames)
-            log_tensorboard(tensorboard_writer, val_metrics, step=collected_frames)
-
-            # Checkpointing logic (save based on validation metric)
-            if config.annotation_free:
-                print(
-                    "  Annotation-free protocol: validation labels are "
-                    "report-only and cannot select a checkpoint."
-                )
-            else:
-                current_metric = val_metrics.get(
-                    config.metric_to_optimize,
-                    float("-inf"),
-                )
-                current_rank = validation_rank(val_metrics)
-                if current_rank > best_val_rank:
-                    best_val_metric = current_metric
-                    best_val_rank = current_rank
-                    print(
-                        f"  New best validation rank: {best_val_rank} "
-                        f"({config.metric_to_optimize}={best_val_metric:.4f})"
-                    )
-                    save_checkpoint(
-                        policy_module,
-                        value_module,
-                        optimizer,
-                        scheduler,
-                        collected_frames,
-                        num_updates,
-                        config,
-                        True,
-                        best_val_metric,
-                        best_val_rank=best_val_rank,
-                    )
+            validate_current_policy()
 
         # Regular checkpoint saving
         checkpoint_due, next_checkpoint_update = advance_periodic_threshold(
@@ -1015,6 +1032,13 @@ def _train_torchrl(
             )
 
     # --- End of Training ---
+    # PPO KL early stopping makes the update counter intentionally variable.
+    # Threshold-crossing scheduling cannot guarantee that a finite run ends
+    # exactly on a validation threshold, so always score the final policy.
+    if should_run_final_validation(collected_frames, last_validation_frame):
+        print(f"Running mandatory final validation at frame {collected_frames}.")
+        validate_current_policy()
+
     pbar.close()
     collector.shutdown()
     print("Training finished.")

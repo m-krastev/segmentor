@@ -2774,3 +2774,38 @@ command or service, acceptance metrics, and outcome here.
   executed, deterministic trajectories already spent `95.69%` of states near
   an image boundary. The 64k screen must therefore distinguish a temporary
   untrained mode from a new boundary-following collapse.
+- `navigator-bomopi-gru-068-masked-64k-v1.service` completed all 65,536 frames
+  with exit status zero in 5m59s. Peak CUDA allocation/reservation was
+  `7,669.6/9,858.0 MiB`. TensorBoard:
+  `/home/matey/project/segmentor/checkpoints/navigator-bomopi-gru-068-masked-64k-v1/data/bomopi_resampled2_unique-v1/tensorboard/20260730-002703-956076`.
+- Held-out two-case deterministic gates:
+  - 16,896 frames: Dice `0.001097`, endpoint distance `197.590 mm`,
+    positive-GDT fraction `0`, recent unique-position fraction `0.046875`,
+    boundary-state fraction `0.94625`;
+  - 33,280 frames: Dice `0.006174`, endpoint distance `255.989 mm`,
+    positive-GDT fraction `0.0075`, recent unique-position fraction `0.007813`,
+    boundary-state fraction `0.975`;
+  - 49,664 frames: Dice `0.006110`, endpoint distance `261.558 mm`,
+    positive-GDT fraction `0.009375`, recent unique-position fraction
+    `0.027344`, boundary-state fraction `0.97`;
+  - a separate evaluation of the saved 65,536-frame final policy: Dice
+    `0.009334`, endpoint distance `240.737 mm`, positive-GDT fraction
+    `0.01625`, recent unique-position fraction `0.019531`, boundary-state
+    fraction `0.965625`.
+  Every gate retained action-executed fraction `1.0` and had zero endpoint
+  reaches and traversal successes.
+- Interpretation: exact action masking eliminated the invalid-action reward
+  exploit, but did not rescue the repaired Shin state/reward. The
+  deterministic policy replaced a stationary outward action with a tiny
+  executable cycle along the image boundary. The stochastic training batches
+  remained diverse, while deterministic validation collapsed, so continued
+  optimization of this unchanged objective is not justified by the 64k
+  evidence. Do not extend this checkpoint to 512k or 1M.
+- The run contained 639 PPO epochs rather than the nominal 640 because KL early
+  stopping is variable. Consequently the next periodic update threshold fell
+  just beyond the finite run and the original job emitted only three
+  validations. Added a mandatory end-of-run validation unless the exact final
+  frame was already scored; this also participates in best-checkpoint
+  selection. The final-policy metrics above were recovered with a separate
+  eval-only run because the training job predated this fix. Full Linux `uv`
+  Navigator suite after the scheduling change: 100 tests passed.

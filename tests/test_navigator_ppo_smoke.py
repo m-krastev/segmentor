@@ -17,6 +17,7 @@ from navigator.train import (
     deterministic_exploration_type,
     log_tensorboard,
     recurrent_minibatches,
+    should_run_final_validation,
     validation_rank,
 )
 
@@ -55,6 +56,11 @@ class NavigatorPpoSmokeTest(unittest.TestCase):
         due, next_threshold = advance_periodic_threshold(1207, next_threshold, 400)
         self.assertTrue(due)
         self.assertEqual(next_threshold, 1600)
+
+    def test_final_validation_runs_only_for_an_unscored_policy_state(self):
+        self.assertFalse(should_run_final_validation(0, None))
+        self.assertTrue(should_run_final_validation(65536, 49664))
+        self.assertFalse(should_run_final_validation(65536, 65536))
 
     def test_behavior_cloning_action_statistic_is_explicit(self):
         distribution = type(
