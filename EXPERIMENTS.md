@@ -2809,3 +2809,18 @@ command or service, acceptance metrics, and outcome here.
   selection. The final-policy metrics above were recovered with a separate
   eval-only run because the training job predated this fix. Full Linux `uv`
   Navigator suite after the scheduling change: 100 tests passed.
+- Final optimization diagnostics show that the boundary mode was selected from
+  a still-diffuse policy rather than a nearly deterministic learned
+  preference. Maximum action probability was only `0.01215`; the
+  entropy-loss magnitude `0.007162` at coefficient `0.001` implies about
+  `7.162` nats of raw entropy, or roughly 1,290 effective actions out of 2,196.
+  Logit standard deviation was `0.7093`, KL `0.00301`, policy loss `-0.0141`,
+  and value loss remained `6.4059`. The final training batch had zero GDT
+  reward, mean off-target reward `-0.4510`, revisit `-0.0768`, wall `-0.1277`,
+  and total mean reward `-0.8223`.
+- Recommended next controlled ablation: retain exact bounds-only masking and
+  the repaired metrics, but reduce the joint support from every integer vector
+  in the `13^3` cube to physically interpretable direction/length actions
+  (26 lattice directions times six step lengths, at most 156 categories).
+  This tests whether PPO can assign useful likelihood mass without changing
+  reward scales, observation channels, GT separation, or movement semantics.
