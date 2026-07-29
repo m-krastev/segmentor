@@ -70,6 +70,10 @@ class Config:
     # not annotation-free training.
     reward_supervised: bool = False
     observe_goal_distance: bool = False
+    # Explicit supervised-input baseline. This exposes the local GT
+    # segmentation patch to the policy and must never be described as
+    # annotation-free or image-only.
+    observe_segmentation: bool = False
     coverage_gated_goal_planner: bool = False
     # A 9 mm radius corresponds to an 18 mm diameter at the 1.5 mm nnU-Net
     # spacing, within the expected small-bowel caliber. Endpoint tolerance is a
@@ -331,6 +335,7 @@ class Config:
         if self.annotation_free:
             incompatible = {
                 "observe_goal_distance": self.observe_goal_distance,
+                "observe_segmentation": self.observe_segmentation,
                 "coverage_gated_goal_planner": self.coverage_gated_goal_planner,
                 "use_immediate_gdt_reward": self.use_immediate_gdt_reward,
                 "terminate_on_success": self.terminate_on_success,
@@ -413,7 +418,7 @@ class Config:
             # Current CT, four physically scaled image-filter responses, and
             # the agent's own cumulative path. A recurrent policy already
             # retains the previous encoded CT patch.
-            self.observation_channels = 6
+            self.observation_channels = 6 + int(self.observe_segmentation)
             # Time, normalized position (3), and previous direction (3).
             self.context_features = 7
         else:

@@ -22,6 +22,8 @@ TARGET_RECOVERY_REWARD_SCALE="${NAVIGATOR_TARGET_RECOVERY_REWARD_SCALE:-0.05}"
 ENT_COEF="${NAVIGATOR_ENT_COEF:-0.0005}"
 LR_ANNEAL_TIMESTEPS="${NAVIGATOR_LR_ANNEAL_TIMESTEPS:-0}"
 TARGET_KL="${NAVIGATOR_TARGET_KL:-0}"
+RELOAD_CHECKPOINT_PATH="${NAVIGATOR_RELOAD_CHECKPOINT_PATH:-}"
+OBSERVE_SEGMENTATION="${NAVIGATOR_OBSERVE_SEGMENTATION:-false}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -d "$DATA_DIR" ]]; then
@@ -35,7 +37,7 @@ export UV_NO_PROGRESS="${UV_NO_PROGRESS:-1}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache-navigator}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
-printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale=%s target_distance_radius_mm=%s recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s\n' \
+printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale=%s target_distance_radius_mm=%s recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s\n' \
   "$DATA_DIR" \
   "$TOTAL_TIMESTEPS" \
   "$PATCH_SIZE_MM" \
@@ -45,7 +47,26 @@ printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale
   "$TARGET_RECOVERY_REWARD_SCALE" \
   "$ENT_COEF" \
   "$LR_ANNEAL_TIMESTEPS" \
-  "$TARGET_KL"
+  "$TARGET_KL" \
+  "${RELOAD_CHECKPOINT_PATH:-none}" \
+  "$OBSERVE_SEGMENTATION"
+
+EXTRA_ARGS=()
+if [[ -n "$RELOAD_CHECKPOINT_PATH" ]]; then
+  EXTRA_ARGS+=(--reload-checkpoint-path "$RELOAD_CHECKPOINT_PATH")
+fi
+case "$OBSERVE_SEGMENTATION" in
+  true|1|yes)
+    EXTRA_ARGS+=(--observe-segmentation)
+    ;;
+  false|0|no)
+    EXTRA_ARGS+=(--no-observe-segmentation)
+    ;;
+  *)
+    echo "NAVIGATOR_OBSERVE_SEGMENTATION must be true or false" >&2
+    exit 2
+    ;;
+esac
 
 exec "$UV_BIN" run --no-sync python -O -m navigator \
   --data-dir "$DATA_DIR" \
@@ -117,4 +138,5 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --save-freq "$SAVE_FREQ" \
   --eval-interval "$EVAL_INTERVAL" \
   --checkpoint-dir "$CHECKPOINT_DIR" \
+  "${EXTRA_ARGS[@]}" \
   "$@"

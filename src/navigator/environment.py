@@ -467,7 +467,11 @@ class SmallBowelEnv(EnvBase):
         )
         segmentation_patch = (
             None
-            if self.config.clean_policy_inputs
+            if self.seg is None
+            or (
+                self.config.clean_policy_inputs
+                and not self.config.observe_segmentation
+            )
             else get_patch(
                 self.seg, self.current_pos_vox, self.config.patch_size_vox
             ).to(self.dtype)
@@ -536,14 +540,14 @@ class SmallBowelEnv(EnvBase):
                 self.current_pos_vox,
                 self.config.patch_size_vox,
             )
-            actor_state = torch.cat(
-                [
-                    current_ct_patch.unsqueeze(0),
-                    filter_patches,
-                    cum_path_patch.unsqueeze(0),
-                ],
-                dim=0,
-            )
+            actor_channels = [
+                current_ct_patch.unsqueeze(0),
+                filter_patches,
+                cum_path_patch.unsqueeze(0),
+            ]
+            if segmentation_patch is not None:
+                actor_channels.append(segmentation_patch.unsqueeze(0))
+            actor_state = torch.cat(actor_channels, dim=0)
             context = torch.cat(
                 [
                     torch.as_tensor(

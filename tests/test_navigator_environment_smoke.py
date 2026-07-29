@@ -904,6 +904,54 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
 
         self.assertEqual(Config().observation_channels, 5)
 
+    def test_reward_supervised_policy_can_opt_in_to_segmentation_channel(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            reward_supervised=True,
+            observe_segmentation=True,
+        )
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        end = (8, 8, 12)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[8, 8, 4:13] = 1
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter(
+                [self._make_subject(shape, start, end, segmentation)]
+            ),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            initial = environment._reset()
+            self.assertEqual(config.observation_channels, 7)
+            expected = get_patch(
+                environment.seg,
+                environment.current_pos_vox,
+                config.patch_size_vox,
+            ).to(environment.dtype)
+            torch.testing.assert_close(initial["actor"][0, -1], expected)
+        finally:
+            environment.close()
+
+        with self.assertRaisesRegex(ValueError, "observe_segmentation"):
+            Config(
+                annotation_free=True,
+                observe_segmentation=True,
+                use_immediate_gdt_reward=False,
+                terminate_on_success=False,
+                coverage_reward_scale=0,
+                gdt_reward_scale=0,
+                r_final=0,
+                r_val1=0,
+            )
+
     def test_coverage_gate_latches_mask_constrained_goal_planner(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(

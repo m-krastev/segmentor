@@ -2117,3 +2117,37 @@ command or service, acceptance metrics, and outcome here.
     cadence.
 - Effective settings and TensorBoard path were verified from the systemd log
   before training. Validation-ranked best checkpoints are retained throughout.
+- The run completed 1,024,000 frames in 1 hour 3 minutes 53 seconds. The
+  learning-rate freeze and entropy prevented the earlier collapse:
+  - final joint maximum action probability `0.0429` instead of `0.4412`;
+  - recent completed-training Dice `0.2062`;
+  - recent GDT shaping `+0.06084`;
+  - final value loss `0.694` instead of `3.017`.
+- Best held-out gate was 716,800 frames:
+  - mean Dice `0.170687` (pt14 `0.244338`, pt18 `0.097035`);
+  - endpoint distance 159.411 mm;
+  - zero endpoint reaches/traversals.
+  The retained model is `checkpoint_716800best.pth`. Final 1,024,000-frame Dice
+  regressed to `0.107433`, so the final model is not the champion.
+- Resume the exact best checkpoint with optimizer and scheduler state intact to
+  a total counter of 1,536,000 frames. It starts from collected frame 716,800
+  and update 2,800, adding 819,200 frames at the frozen 5e-6 learning rate.
+
+### M13: Authorized GT-mask-input baseline
+
+- At the four-hour gate, the image-only champion remained below the user's
+  conditional 20% threshold and had zero traversal. A supervised-input
+  baseline was therefore authorized and implemented as an explicit opt-in
+  `observe_segmentation` channel.
+- Contract:
+  - reward-supervised clean dynamics remain bounds-only;
+  - current CT, four image-derived filters, cumulative path, and one local GT
+    segmentation patch form seven observation channels;
+  - annotation-free mode rejects this flag;
+  - all output names include `gtmask`, and results must never be reported as
+    image-only or annotation-free.
+- CPU reward/environment suite passes 53/53 with an exact channel-content test.
+- Queue after the image-only continuation:
+  1. 102,400-frame supervised-input gate;
+  2. if its final checkpoint exists, resume it to 512,000 total frames with
+     validation every 51,200 frames.
