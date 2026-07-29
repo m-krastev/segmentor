@@ -2680,6 +2680,18 @@ command or service, acceptance metrics, and outcome here.
   hardware setting therefore restores minibatch `32`, sets recurrent sequence
   length `32`, and reduces only the rollout-wide GAE chunk from 1,024 to 512
   frames. Five PPO epochs and every task parameter remain unchanged.
+- The corrected third 4,096-frame CUDA smoke completed successfully in 31.6 s
+  (about 199 frames/s) with 7,532.7 MiB peak allocated and 9,236.0 MiB peak
+  reserved CUDA memory. It completed all five PPO epochs with final approximate
+  KL `0.001341`, confirming the 512-frame GAE chunk has substantial memory
+  headroom without clipping the registered PPO update count.
+- Final random-policy-scale reward components from that smoke were:
+  total mean `-1.0201`, off-target `-0.5630`, wall `-0.1782`, step `-0.1615`,
+  revisit `-0.0638`, invalid `-0.0208`, terminal `-0.0317`, and GDT
+  `-0.0011`. Off-target distance is initially the largest term, as expected,
+  but it is no longer the guarded contract's all-or-nothing `-0.6667` value;
+  the wall mean remains below the `0.4107` threshold that would overwhelm a
+  full 9-mm axial progress reward.
 - Verification in an isolated copy on the Linux CUDA host, using its existing
   `uv` environment:
   - shell syntax and reward audit passed;
