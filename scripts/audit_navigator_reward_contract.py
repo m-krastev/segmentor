@@ -25,7 +25,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--contract",
-        choices=("potential", "shin_normalized", "shin_normalized_guarded"),
+        choices=(
+            "potential",
+            "shin_normalized",
+            "shin_normalized_guarded",
+            "shin_normalized_repaired",
+        ),
         default="potential",
     )
     parser.add_argument("--max-step-mm", type=float, default=6.0 * sqrt(3.0))
@@ -41,7 +46,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def audit_shin_normalized(args: argparse.Namespace) -> None:
-    guarded = args.contract == "shin_normalized_guarded"
+    repaired = args.contract == "shin_normalized_repaired"
+    guarded = args.contract in {
+        "shin_normalized_guarded",
+        "shin_normalized_repaired",
+    }
     guarded_step = (
         -(1.0 - args.gamma) * SHIN_NORMALIZED_R_FINAL
         if guarded
@@ -67,13 +76,23 @@ def audit_shin_normalized(args: argparse.Namespace) -> None:
         "inside_established_revisit": (
             -SHIN_NORMALIZED_R_VAL1 + guarded_step
         ),
-        "outside_endpoint_overwrite": -SHIN_NORMALIZED_R_VAL1,
+        "outside_endpoint_overwrite": (
+            -SHIN_NORMALIZED_R_VAL1 + guarded_step
+            if repaired
+            else -SHIN_NORMALIZED_R_VAL1
+        ),
         "zero_movement": -SHIN_NORMALIZED_R_VAL1,
         "abrupt_new_maximum": -1.0,
         # Algorithm 1 checks only the endpoint. With a failed wall detector,
         # an inside-to-inside jump across background can retain this progress.
         "cross_loop_endpoint_inside_wall_zero": (
-            -SHIN_NORMALIZED_R_VAL1 if guarded else forward
+            (
+                -SHIN_NORMALIZED_R_VAL1
+                * min(1.5 / args.max_step_mm, 1.0)
+                + guarded_step
+            )
+            if repaired
+            else (-SHIN_NORMALIZED_R_VAL1 if guarded else forward)
         ),
         "goal_at_dice_010": shin_normalized_terminal_reward(
             0.10,

@@ -101,6 +101,7 @@ class SmallBowelEnv(EnvBase):
     gt_path_voxels: np.ndarray
     gt_path_vol: torch.Tensor
     cumulative_path_mask: torch.Tensor
+    policy_path_mask: torch.Tensor
     gdt: Optional[np.ndarray]
     reward_map: np.ndarray
     spacing: Optional[Spacing]
@@ -333,7 +334,10 @@ class SmallBowelEnv(EnvBase):
         self.wall_map = self.wall_transform(
             torch.from_numpy(wall_map).to(device=self.device, dtype=self.dtype)
         )
-        if self.config.clean_policy_inputs:
+        if (
+            self.config.clean_policy_inputs
+            and self.config.policy_observation_contract == "navigation_filters"
+        ):
             if image_features is None:
                 image_features = np.stack(
                     [
@@ -380,6 +384,13 @@ class SmallBowelEnv(EnvBase):
         else:
             self.target_distance_map = None
         self.cumulative_path_mask = torch.zeros(
+            self.image.shape, dtype=torch.uint8, device=self.device
+        )
+        # Separate actor-owned thin path state from both the physically
+        # dilated Dice tube and the NumPy revisit ledger. The repaired
+        # historical observation uses this map, including the initial seed,
+        # while revisit accounting intentionally starts empty.
+        self.policy_path_mask = torch.zeros(
             self.image.shape, dtype=torch.uint8, device=self.device
         )
         self._volume_shape_tensor = torch.as_tensor(
@@ -468,8 +479,15 @@ class SmallBowelEnv(EnvBase):
                 self.config.patch_size_vox,
             )
         )
+        actor_path_volume = (
+            self.policy_path_mask
+            if self.config.policy_observation_contract == "shin_068_repaired"
+            else self.cumulative_path_mask
+        )
         cum_path_patch = get_patch(
-            self.cumulative_path_mask, self.current_pos_vox, self.config.patch_size_vox
+            actor_path_volume,
+            self.current_pos_vox,
+            self.config.patch_size_vox,
         )
         segmentation_patch = (
             None
@@ -541,6 +559,24 @@ class SmallBowelEnv(EnvBase):
                 self.current_pos_vox,
                 self.config.patch_size_vox,
             )
+            if self.config.policy_observation_contract == "shin_068_repaired":
+                wall_patch = get_patch(
+                    self.wall_map,
+                    self.current_pos_vox,
+                    self.config.patch_size_vox,
+                )
+                actor_state = torch.stack(
+                    [
+                        current_ct_patch,
+                        wall_patch,
+                        cum_path_patch.to(self.dtype),
+                    ],
+                    dim=0,
+                )
+                return {
+                    "actor": actor_state,
+                    "context": previous_direction,
+                }
             filter_patches = get_patch(
                 self.image_features,
                 self.current_pos_vox,
@@ -847,6 +883,22 @@ class SmallBowelEnv(EnvBase):
                 self.current_target_mask[new_indices].sum().item()
             )
 
+    def _add_policy_path_segment(
+        self,
+        voxels: Coords | Tuple[np.ndarray, ...],
+    ) -> None:
+        """Insert only executed centerline voxels into the actor-owned path."""
+        if isinstance(voxels, tuple) and len(voxels) == 3 and all(
+            isinstance(axis, np.ndarray) for axis in voxels
+        ):
+            indices = tuple(
+                torch.as_tensor(axis, dtype=torch.long, device=self.device)
+                for axis in voxels
+            )
+            self.policy_path_mask[indices] = 1
+            return
+        self.policy_path_mask[tuple(int(value) for value in voxels)] = 1
+
     def get_tracking_history(self) -> np.ndarray:
         """Get the history of tracked positions."""
         return np.array(self.tracking_path_history)
@@ -1055,9 +1107,11 @@ class SmallBowelEnv(EnvBase):
         The paper's reward values are divided by ``r_val2=6``. Both variants
         evaluate binary revisitation on the undilated, agent-owned centerline
         tail; a dilated tube would penalize ordinary short forward actions.
-        The guarded variant additionally rejects background-crossing segments,
-        applies a discount-consistent step cost, and reserves positive terminal
-        reward for the registered endpoint-plus-Dice success criterion.
+        The guarded variant additionally rejects background-crossing segments.
+        The repaired variant instead applies a bounded physical distance cost
+        outside the endpoint-connected target, while gating shortcut GDT
+        credit. Both strict variants apply a discount-consistent step cost and
+        reserve positive terminal reward for endpoint-plus-Dice success.
         """
         reward = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         if not any(action_vox):
@@ -1074,9 +1128,12 @@ class SmallBowelEnv(EnvBase):
             return reward, ()
 
         segment = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
+        repaired = self.config.reward_contract == "shin_normalized_repaired"
+        guarded = self.config.reward_contract == "shin_normalized_guarded"
+        segment_on_target = self._segment_is_on_target(segment)
         if (
-            self.config.reward_contract == "shin_normalized_guarded"
-            and not self._segment_is_on_target(segment)
+            guarded
+            and not segment_on_target
         ):
             reward += self._reward_term(
                 "reward_off_target",
@@ -1084,15 +1141,17 @@ class SmallBowelEnv(EnvBase):
             )
             return reward, segment
 
-        next_gdt = float(self.gdt[next_pos_vox])
-        gdt_reward, next_maximum = shin_normalized_gdt_reward(
-            next_gdt,
-            float(self.max_gdt_achieved),
-            self.config.gdt_max_increase_theta,
-        )
-        self.max_gdt_achieved = next_maximum
+        gdt_reward = 0.0
+        if not repaired or segment_on_target:
+            next_gdt = float(self.gdt[next_pos_vox])
+            gdt_reward, next_maximum = shin_normalized_gdt_reward(
+                next_gdt,
+                float(self.max_gdt_achieved),
+                self.config.gdt_max_increase_theta,
+            )
+            self.max_gdt_achieved = next_maximum
         reward += self._reward_term("reward_gdt", gdt_reward)
-        if self.config.reward_contract == "shin_normalized_guarded":
+        if guarded or repaired:
             reward += self._reward_term(
                 "reward_step",
                 -(1.0 - self.config.gamma) * SHIN_NORMALIZED_R_FINAL,
@@ -1108,10 +1167,23 @@ class SmallBowelEnv(EnvBase):
                 -SHIN_NORMALIZED_R_VAL1,
             )
 
-        # Algorithm 1 assigns rather than adds the outside-segmentation
-        # penalty. Clear the prior components so telemetry still sums exactly
-        # to the scalar reward.
-        if not bool(self.seg[next_pos_vox]):
+        if repaired and not segment_on_target:
+            # Zero distance is the endpoint-connected target. Scaling by the
+            # maximum physical action displacement makes a one-voxel boundary
+            # mistake mild, but an action-length excursion reaches the paper's
+            # full r_val1 penalty. Positive GDT was gated above, so a shortcut
+            # across an adjacent loop remains strictly negative.
+            reward += self._reward_term(
+                "reward_off_target",
+                target_distance_state_penalty(
+                    self._segment_max_target_distance(segment),
+                    self.config.gdt_max_increase_theta,
+                    SHIN_NORMALIZED_R_VAL1,
+                ),
+            )
+        # Literal Algorithm 1 assigns rather than adds the endpoint-outside
+        # penalty. Clear prior components so telemetry still sums exactly.
+        elif not bool(self.seg[next_pos_vox]):
             reward = self._replace_reward_with_term(
                 "reward_off_target",
                 -SHIN_NORMALIZED_R_VAL1,
@@ -1275,6 +1347,7 @@ class SmallBowelEnv(EnvBase):
 
         # Initialize path tracking
         self.cumulative_path_mask.zero_()
+        self.policy_path_mask.zero_()
         self.cumulative_path_mask_pen[:] = 0
         self.current_target_mask = (
             None if self.config.annotation_free else self._get_target_mask()
@@ -1289,6 +1362,7 @@ class SmallBowelEnv(EnvBase):
         self.path_voxels = 0
         self.path_target_intersection = 0
         self._add_path_segment(self.current_pos_vox)
+        self._add_policy_path_segment(self.current_pos_vox)
         self.current_coverage = (
             0.0
             if self.config.annotation_free
@@ -1442,6 +1516,7 @@ class SmallBowelEnv(EnvBase):
             self.current_pos_vox = next_pos_vox
             if S:
                 self._add_path_segment(S)
+                self._add_policy_path_segment(S)
                 self.cumulative_path_mask_pen[S] = 1
                 if not self.config.annotation_free:
                     next_coverage = float(self._get_final_coverage())
@@ -1500,9 +1575,9 @@ class SmallBowelEnv(EnvBase):
             final_coverage = coverage_for_decision
             if self.config.reward_contract.startswith("shin_normalized"):
                 rewarded_goal = (
-                    solved_path
-                    if self.config.reward_contract == "shin_normalized_guarded"
-                    else at_goal
+                    at_goal
+                    if self.config.reward_contract == "shin_normalized"
+                    else solved_path
                 )
                 reward += self._reward_term(
                     "reward_terminal",

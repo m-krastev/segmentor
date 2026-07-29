@@ -2614,3 +2614,63 @@ command or service, acceptance metrics, and outcome here.
   registered `0.40` target. If the repaired historical geometry still fails,
   stop extending PPO budgets and pivot the main method to the proposed
   energy/spline or hybrid tracker.
+
+### M22: Repaired-068 implementation and preregistered 256k screen
+
+- Implemented `shin_normalized_repaired` inside the current Navigator rather
+  than restoring the historical branch. This retains the tested movement,
+  recurrent PPO likelihood, full terminal-segment bookkeeping, component
+  telemetry, and fixed start-to-end validation.
+- The repaired reward keeps normalized Shin new-maximum GDT, mean wall
+  response, and binary revisit on the prior undilated centerline tail. It:
+  - computes the GDT jump threshold from the executable physical diagonal:
+    `6 vox * 1.5 mm * sqrt(3) = 15.588 mm`;
+  - gates all positive GDT when an executed segment crosses the
+    endpoint-connected target boundary;
+  - replaces the guarded run's flat `-0.6667` off-target cliff with
+    `-(2/3) * min(max_segment_target_distance / 15.588 mm, 1)`;
+  - retains the discount-consistent per-step cost
+    `-(1-gamma)*(100/6)`, which is `-0.1667` at `gamma=0.99`;
+  - permits positive terminal reward only when both the endpoint and the
+    registered Dice threshold are reached.
+- Numerical failure-mode audit at the registered `gamma=0.99`, 800-step
+  horizon, and 15.588-mm physical diagonal:
+  - a new 6-mm inside-target advance returns `+0.2182` before wall response
+    (the registered 9-mm axial advance returns `+0.4107`);
+  - because the paper wall term is subtractive, a mean normalized wall
+    response above `0.4107` would make even that 9-mm axial advance negative;
+    wall-component telemetry must therefore be a go/no-go signal rather than
+    assuming the cached Meijering map is informative;
+  - a novel tangent move returns `-0.1667`;
+  - an established revisit returns `-0.8333`;
+  - a cross-loop action through a 1.5-mm background gap returns `-0.2308`
+    and receives zero GDT credit;
+  - a full-action-distance excursion returns up to `-0.8333`;
+  - forward/backward and established two-position cycles return `-0.4226`
+    and `-1.6667`, respectively, using the registered 9-mm advance;
+  - endpoint arrival at Dice `0.10` or `0.30` receives terminal components
+    `-15.0` and `-11.6667`; Dice `0.40` receives `+6.6667`;
+  - discounted zero-wall wandering to the horizon is `-4.8318` worse than
+    immediate failure, so delaying failure is not profitable.
+- Added `shin_068_repaired` policy observations: exactly normalized current CT,
+  the original wall response, and a separate undilated agent-owned centerline
+  map. The policy receives only previous movement direction as scalar context;
+  it receives no GT mask, GDT, goal direction/distance, absolute position, or
+  time fraction. The actor path includes the initial seed, while the separate
+  revisit ledger deliberately begins empty so the mandatory start is not a
+  false revisit.
+- Added the reproducible
+  `scripts/run_navigator_bomopi_068_repaired.sh` launcher:
+  60-mm (`40^3`) patch, 9-mm action (`6` vox), 6-mm path radius (`4` vox),
+  GRU plus factorized categorical action likelihood, `lr=1e-5`, `gamma=0.99`,
+  entropy `0.001`, minibatch `32`, five PPO epochs, 800-step horizon, and a
+  bounded 256k-frame screen.
+- Verification in an isolated copy on the Linux CUDA host, using its existing
+  `uv` environment:
+  - shell syntax and reward audit passed;
+  - focused reward/environment suite: 65 tests passed;
+  - complete `test_navigator_*.py` suite: 95 tests passed.
+- Preregistered gate remains unchanged: continue to 512k only if positive-GDT
+  action rate and final-window path diversity improve; by 1M require at least
+  one held-out endpoint reach and mean Dice near `0.40`, otherwise pivot away
+  from a pure PPO primary method.

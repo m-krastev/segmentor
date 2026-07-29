@@ -83,6 +83,21 @@ These commands freeze disjoint train/validation/test manifests, verify the
 validation oracle, and then run the 250k-step CUDA diagnostic with TensorBoard.
 The test manifest is not consumed by either training or validation.
 
+The bounded BOMOPI reproduction of the repaired historical `068dc4d`
+configuration is launched with:
+
+```bash
+NAVIGATOR_TRAIN_SCRIPT=scripts/run_navigator_bomopi_068_repaired.sh \
+  scripts/navigator_systemd.sh start navigator-bomopi-gru-068-repaired-256k-v1
+```
+
+It keeps the current GRU PPO implementation and fixed validation protocol, but
+uses the registered 60-mm patch, 9-mm action, 6-mm path radius, CT/wall/thin-path
+policy state, physically scaled GDT threshold, and strict endpoint-plus-Dice
+success. GT segmentation and GDT supervise its reward only; they are never
+policy inputs, so this is deployable without labels but not annotation-free
+training.
+
 #### Data Preprocessing for nnUNet
 
 To prepare data for nnUNet format:

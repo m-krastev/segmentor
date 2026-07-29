@@ -27,6 +27,7 @@ OBSERVE_SEGMENTATION="${NAVIGATOR_OBSERVE_SEGMENTATION:-false}"
 ACTION_DISTRIBUTION="${NAVIGATOR_ACTION_DISTRIBUTION:-factorized_categorical}"
 REVISIT_PENALTY_SCALE="${NAVIGATOR_REVISIT_PENALTY_SCALE:-0.01}"
 REWARD_CONTRACT="${NAVIGATOR_REWARD_CONTRACT:-potential}"
+POLICY_OBSERVATION_CONTRACT="${NAVIGATOR_POLICY_OBSERVATION_CONTRACT:-navigation_filters}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -d "$DATA_DIR" ]]; then
@@ -40,12 +41,13 @@ export UV_NO_PROGRESS="${UV_NO_PROGRESS:-1}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache-navigator}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
-printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_contract=%s potential_gdt_scale=%s potential_target_distance_radius_mm=%s potential_recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s potential_revisit_scale=%s\n' \
+printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_contract=%s policy_observation_contract=%s potential_gdt_scale=%s potential_target_distance_radius_mm=%s potential_recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s potential_revisit_scale=%s\n' \
   "$DATA_DIR" \
   "$TOTAL_TIMESTEPS" \
   "$PATCH_SIZE_MM" \
   "$BATCH_SIZE" \
   "$REWARD_CONTRACT" \
+  "$POLICY_OBSERVATION_CONTRACT" \
   "$GDT_REWARD_SCALE" \
   "$TARGET_DISTANCE_RADIUS_MM" \
   "$TARGET_RECOVERY_REWARD_SCALE" \
@@ -96,7 +98,7 @@ case "$REWARD_CONTRACT" in
       --episodic-cell-reward-scale 0.01
     )
     ;;
-  shin_normalized|shin_normalized_guarded)
+  shin_normalized|shin_normalized_guarded|shin_normalized_repaired)
     # These legacy scales are disabled: the named contract supplies only the
     # fixed normalized Algorithm-1 terms implemented by the environment.
     REWARD_ARGS=(
@@ -119,7 +121,7 @@ case "$REWARD_CONTRACT" in
     ;;
   *)
     echo \
-      "NAVIGATOR_REWARD_CONTRACT must be potential, shin_normalized, or shin_normalized_guarded" \
+      "NAVIGATOR_REWARD_CONTRACT must be potential, shin_normalized, shin_normalized_guarded, or shin_normalized_repaired" \
       >&2
     exit 2
     ;;
@@ -137,6 +139,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --no-annotation-free \
   --reward-supervised \
   --reward-contract "$REWARD_CONTRACT" \
+  --policy-observation-contract "$POLICY_OBSERVATION_CONTRACT" \
   --terminate-on-success \
   --no-observe-goal-distance \
   --no-coverage-gated-goal-planner \

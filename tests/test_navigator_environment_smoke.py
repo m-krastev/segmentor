@@ -850,6 +850,98 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         finally:
             environment.close()
 
+    def test_repaired_shin_gates_shortcut_credit_and_scales_off_target_distance(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=8,
+            reward_supervised=True,
+            reward_contract="shin_normalized_repaired",
+            policy_observation_contract="shin_068_repaired",
+            gamma=0.99,
+            terminate_on_success=False,
+        )
+        shape = (20, 20, 20)
+        start = (10, 10, 6)
+        end = (10, 10, 16)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[start] = 1
+        segmentation[10, 10, 8] = 1
+        segmentation[end] = 1
+        subject = self._make_subject(shape, start, end, segmentation)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([subject]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            reset = environment._reset()
+            self.assertEqual(
+                reset["actor"].shape,
+                torch.Size([1, 3, *config.patch_size_vox]),
+            )
+            self.assertEqual(reset["context"].shape, torch.Size([1, 3]))
+            self.assertEqual(int(reset["actor"][0, 2].sum().item()), 1)
+            self.assertEqual(int(environment.cumulative_path_mask_pen.sum()), 0)
+
+            shortcut = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(environment.current_pos_vox, (10, 10, 8))
+            self.assertEqual(shortcut["info", "reward_gdt"].item(), 0.0)
+            self.assertLess(shortcut["info", "reward_off_target"].item(), 0.0)
+            self.assertGreater(
+                shortcut["info", "reward_off_target"].item(),
+                -2.0 / 3.0,
+            )
+            self.assertAlmostEqual(
+                shortcut["info", "reward_step"].item(),
+                -(1.0 - config.gamma) * (100.0 / 6.0),
+                places=6,
+            )
+            self.assertEqual(int(shortcut["actor"][0, 2].sum().item()), 3)
+            self.assertLess(shortcut["reward"].item(), 0.0)
+            self.assertAlmostEqual(
+                sum(
+                    shortcut["info", key].item()
+                    for key in REWARD_COMPONENT_INFO_KEYS
+                ),
+                shortcut["reward"].item(),
+                places=6,
+            )
+        finally:
+            environment.close()
+
+    def test_repaired_observation_contract_is_strictly_image_and_agent_owned(self):
+        config = Config(
+            reward_supervised=True,
+            reward_contract="shin_normalized_repaired",
+            policy_observation_contract="shin_068_repaired",
+        )
+        self.assertEqual(config.observation_channels, 3)
+        self.assertEqual(config.context_features, 3)
+        self.assertTrue(config.needs_target_distance)
+        with self.assertRaisesRegex(ValueError, "cannot include"):
+            Config(
+                reward_supervised=True,
+                reward_contract="shin_normalized_repaired",
+                policy_observation_contract="shin_068_repaired",
+                observe_segmentation=True,
+            )
+        with self.assertRaisesRegex(ValueError, "policy_observation_contract"):
+            Config(policy_observation_contract="mystery_state")
+        with self.assertRaisesRegex(ValueError, "clean policy inputs"):
+            Config(policy_observation_contract="shin_068_repaired")
+
     def test_guarded_shin_makes_low_coverage_endpoint_a_failure(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         shape = (20, 20, 20)

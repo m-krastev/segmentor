@@ -74,6 +74,13 @@ class Config:
     # segmentation patch to the policy and must never be described as
     # annotation-free or image-only.
     observe_segmentation: bool = False
+    # ``navigation_filters`` is the current six-channel image-only state:
+    # CT, four multiscale filter responses, and the dilated path tube.
+    # ``shin_068_repaired`` is the controlled historical ablation: CT, the
+    # original Meijering wall response, and an undilated centerline path. It
+    # also removes absolute position/time from context and retains only the
+    # explicitly allowed previous movement direction.
+    policy_observation_contract: str = "navigation_filters"
     coverage_gated_goal_planner: bool = False
     # A 9 mm radius corresponds to an 18 mm diameter at the 1.5 mm nnU-Net
     # spacing, within the expected small-bowel caliber. Endpoint tolerance is a
@@ -92,8 +99,11 @@ class Config:
     # ``shin_normalized`` is an explicit, unit-normalized implementation of
     # Shin & Summers (MICCAI 2022) Algorithm 1. The ``_guarded`` variant also
     # rejects background-crossing segments and requires the registered Dice
-    # threshold for positive terminal reward. Both use GT segmentation/GDT in
-    # the reward and therefore can never be described as annotation-free.
+    # threshold for positive terminal reward. ``shin_normalized_repaired``
+    # preserves that strict terminal condition but replaces the binary
+    # off-target cliff with a physical distance penalty and gates GDT credit
+    # for background-crossing segments. All Shin contracts use GT
+    # segmentation/GDT in the reward and can never be called annotation-free.
     reward_contract: str = "potential"
     # Keep dense penalties on the same scale as one step of GDT progress. Large
     # per-step costs make deliberate early termination optimal.
@@ -250,10 +260,11 @@ class Config:
             "potential",
             "shin_normalized",
             "shin_normalized_guarded",
+            "shin_normalized_repaired",
         }:
             raise ValueError(
                 "reward_contract must be one of: potential, shin_normalized, "
-                "shin_normalized_guarded"
+                "shin_normalized_guarded, shin_normalized_repaired"
             )
         if self.annotation_free and self.reward_contract.startswith(
             "shin_normalized"
@@ -299,6 +310,30 @@ class Config:
         ):
             raise ValueError(
                 "navigation_filter_scales_mm must contain positive values"
+            )
+        if self.policy_observation_contract not in {
+            "navigation_filters",
+            "shin_068_repaired",
+        }:
+            raise ValueError(
+                "policy_observation_contract must be one of: "
+                "navigation_filters, shin_068_repaired"
+            )
+        if (
+            self.policy_observation_contract == "shin_068_repaired"
+            and self.observe_segmentation
+        ):
+            raise ValueError(
+                "shin_068_repaired policy observations cannot include the GT "
+                "segmentation channel"
+            )
+        if (
+            self.policy_observation_contract == "shin_068_repaired"
+            and not (self.annotation_free or self.reward_supervised)
+        ):
+            raise ValueError(
+                "shin_068_repaired policy observations require clean policy "
+                "inputs via reward_supervised or annotation_free mode"
             )
         if self.behavior_cloning_epochs < 0:
             raise ValueError("behavior_cloning_epochs must be non-negative")
@@ -447,12 +482,17 @@ class Config:
         )
         self.clean_policy_inputs = self.annotation_free or self.reward_supervised
         if self.clean_policy_inputs:
-            # Current CT, four physically scaled image-filter responses, and
-            # the agent's own cumulative path. A recurrent policy already
-            # retains the previous encoded CT patch.
-            self.observation_channels = 6 + int(self.observe_segmentation)
-            # Time, normalized position (3), and previous direction (3).
-            self.context_features = 7
+            if self.policy_observation_contract == "shin_068_repaired":
+                # CT, original wall response, and undilated centerline path;
+                # context is only the preceding movement direction.
+                self.observation_channels = 3
+                self.context_features = 3
+            else:
+                # Current CT, four physically scaled image-filter responses,
+                # and the agent's own cumulative path.
+                self.observation_channels = 6 + int(self.observe_segmentation)
+                # Time, normalized position (3), and previous direction (3).
+                self.context_features = 7
         else:
             self.observation_channels = 5 + int(self.observe_goal_distance)
             self.context_features = 12
@@ -464,11 +504,14 @@ class Config:
             raise ValueError("goal_action_prior must be non-negative")
         self.gdt_max_increase_theta = self.max_step_vox * self.voxel_size_mm * math.sqrt(3)
         self.needs_target_distance = (
-            self.reward_contract == "potential"
-            and bool(
-                self.target_recovery_reward_scale
-                or self.target_distance_penalty_scale
-                or self.gate_positive_shaping_on_target_segment
+            self.reward_contract == "shin_normalized_repaired"
+            or (
+                self.reward_contract == "potential"
+                and bool(
+                    self.target_recovery_reward_scale
+                    or self.target_distance_penalty_scale
+                    or self.gate_positive_shaping_on_target_segment
+                )
             )
         )
 

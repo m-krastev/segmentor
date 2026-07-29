@@ -443,13 +443,6 @@ class NNUNetActualDataset(Dataset):
             "gt_path": data.get("gt_path"),
         }
         if self.config.reward_supervised:
-            native_image = np.transpose(data["image"], (2, 1, 0))
-            native_features = load_or_compute_navigation_filter_bank(
-                native_image,
-                data["image_affine"],
-                patient_dir / "cache",
-                self.config,
-            )
             seed_xyz = np.asarray(
                 np.loadtxt(self.seed_dir / f"{case_id}.txt", dtype=int),
                 dtype=int,
@@ -464,10 +457,21 @@ class NNUNetActualDataset(Dataset):
                     f"External seed for {case_id} is outside the reward-supervision mask"
                 )
             result["start_coord"] = seed_zyx
-            result["image_features"] = np.transpose(
-                native_features,
-                (0, 3, 2, 1),
-            )
+            if (
+                self.config.policy_observation_contract
+                == "navigation_filters"
+            ):
+                native_image = np.transpose(data["image"], (2, 1, 0))
+                native_features = load_or_compute_navigation_filter_bank(
+                    native_image,
+                    data["image_affine"],
+                    patient_dir / "cache",
+                    self.config,
+                )
+                result["image_features"] = np.transpose(
+                    native_features,
+                    (0, 3, 2, 1),
+                )
         return result
 
 
@@ -589,7 +593,10 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
         wall_map_nii_save = nib.Nifti1Image(wall_map_np, result["image_affine"])
         nib.save(wall_map_nii_save, wall_map_cache_path)
     result["wall_map"] = wall_map_np
-    if config.clean_policy_inputs:
+    if (
+        config.clean_policy_inputs
+        and config.policy_observation_contract == "navigation_filters"
+    ):
         result["image_features"] = load_or_compute_navigation_filter_bank(
             image_np,
             image_nii.affine,

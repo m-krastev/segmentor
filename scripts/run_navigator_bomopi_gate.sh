@@ -22,4 +22,4 @@ export NAVIGATOR_DATA_DIR="$DATA_DIR"
 "$UV_BIN" run --no-sync python -O scripts/preflight_navigator_bomopi.py \
   --data-dir "$DATA_DIR"
 
-exec "$PROJECT_ROOT/scripts/train_navigator_bomopi.sh"
+exec "$PROJECT_ROOT/scripts/train_navigator_bomopi.sh" "$@"
