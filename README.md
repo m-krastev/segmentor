@@ -96,7 +96,8 @@ uses the registered 60-mm patch, 9-mm action, 6-mm path radius, CT/wall/thin-pat
 policy state, physically scaled GDT threshold, and strict endpoint-plus-Dice
 success. GT segmentation and GDT supervise its reward only; they are never
 policy inputs, so this is deployable without labels but not annotation-free
-training.
+training. PPO minibatches are 16 because the paper's 32-sample minibatch does
+not fit a 40-cubed 3-D encoder on the 15.5-GiB test GPU.
 
 #### Data Preprocessing for nnUNet
 

@@ -2663,8 +2663,14 @@ command or service, acceptance metrics, and outcome here.
   `scripts/run_navigator_bomopi_068_repaired.sh` launcher:
   60-mm (`40^3`) patch, 9-mm action (`6` vox), 6-mm path radius (`4` vox),
   GRU plus factorized categorical action likelihood, `lr=1e-5`, `gamma=0.99`,
-  entropy `0.001`, minibatch `32`, five PPO epochs, 800-step horizon, and a
+  entropy `0.001`, minibatch `16`, five PPO epochs, 800-step horizon, and a
   bounded 256k-frame screen.
+- The first 4k CUDA smoke with the paper's minibatch `32` failed during the
+  first GroupNorm forward pass: PyTorch held 10.42 GiB and requested another
+  3.91 GiB with only 3.84 GiB free on the 15.50-GiB GPU. This was a real
+  capacity miss rather than substantial allocator fragmentation (318 MiB was
+  reserved but unallocated). The launcher therefore uses minibatch `16`; no
+  task geometry, rollout, reward, or horizon parameter was reduced.
 - Verification in an isolated copy on the Linux CUDA host, using its existing
   `uv` environment:
   - shell syntax and reward audit passed;
