@@ -2692,6 +2692,9 @@ command or service, acceptance metrics, and outcome here.
   but it is no longer the guarded contract's all-or-nothing `-0.6667` value;
   the wall mean remains below the `0.4107` threshold that would overwhelm a
   full 9-mm axial progress reward.
+- Started the preregistered screen as
+  `navigator-bomopi-gru-068-repaired-256k-v1.service`. Its TensorBoard run is
+  `/home/matey/project/segmentor/checkpoints/navigator-bomopi-gru-068-repaired-256k-v1/data/bomopi_resampled2_unique-v1/tensorboard/20260729-211757-953642`.
 - Verification in an isolated copy on the Linux CUDA host, using its existing
   `uv` environment:
   - shell syntax and reward audit passed;
