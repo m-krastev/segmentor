@@ -2151,3 +2151,60 @@ command or service, acceptance metrics, and outcome here.
   1. 102,400-frame supervised-input gate;
   2. if its final checkpoint exists, resume it to 512,000 total frames with
      validation every 51,200 frames.
+
+### M14: Image-only continuation and stopping result
+
+- Resumed the image-only champion at 716,800 collected frames, preserving its
+  optimizer, frozen 5e-6 learning rate, GRU state handling, reward, split, and
+  32-cubed observations. The continuation ran to a total counter of 1,536,000
+  frames.
+- Held-out Dice at the continuation gates was:
+  - 768.0k: `0.162786`;
+  - 819.2k: `0.134305`;
+  - 870.4k: `0.027259`;
+  - 921.6k: `0.118093`;
+  - 972.8k: `0.102330`;
+  - 1,024.0k: `0.100316`;
+  - 1,075.2k: `0.038958`;
+  - 1,126.4k: `0.046638`;
+  - 1,177.6k: `0.089087`;
+  - 1,228.8k: `0.080503`;
+  - 1,280.0k: `0.079509`;
+  - 1,331.2k: `0.059964`;
+  - 1,382.4k: `0.066989`;
+  - 1,433.6k: `0.065536`;
+  - 1,484.8k: `0.086043`;
+  - 1,536.0k: `0.054322`.
+- No gate reached the endpoint or completed a traversal. Continued optimization
+  from the selected state therefore did not beat the 716.8k image-only
+  champion (`0.170687` Dice); the image-only policy remains below the
+  preregistered 0.40 Dice/traversal target.
+
+### M15: Supervised GT-mask-input learning curve
+
+- The explicitly supervised seven-channel baseline changes only the policy
+  observation by adding a local GT small-bowel mask. It is an annotation-using
+  diagnostic and must not be presented as an image-only result.
+- At 102,400 frames:
+  - mean Dice `0.176511` (pt14 `0.196363`, pt18 `0.156659`);
+  - mean endpoint distance `40.819 mm` (55.399, 26.239);
+  - zero endpoint reaches and traversals.
+- Resuming the exact 102.4k state to 512,000 total frames produced:
+  - 153.6k: Dice `0.143622`;
+  - 204.8k: Dice `0.073084`;
+  - 256.0k: Dice `0.177084`;
+  - 307.2k: Dice `0.185085`;
+  - 358.4k: Dice `0.165645`;
+  - 409.6k: Dice `0.224446`;
+  - 460.8k: Dice `0.149742`;
+  - 512.0k: Dice **`0.298841`** (pt14 `0.336345`, pt18 `0.261337`).
+- At 512k the mean endpoint distance was `33.694 mm` (40.305, 27.083),
+  both validation returns were positive (10.326, 22.804), but neither case
+  reached the exact 3-mm endpoint or completed a traversal. This is real
+  supervised-input progress, not success under the registered criterion.
+- A second state-preserving continuation was run from 512k to 1,024,000 total
+  frames with validation every 51,200 frames. It completed in 32m13s without
+  OOM; peak CUDA memory was 13,406.5 MiB allocated / 14,004.0 MiB reserved.
+  The final console summary was approximately `0.06` mean Dice and zero
+  success. Per-gate JSON ranking and best-checkpoint trajectory audit remain
+  required before selecting or extending this run.
