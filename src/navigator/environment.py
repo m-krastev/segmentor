@@ -32,9 +32,14 @@ from torch.utils.data import DataLoader
 
 from .config import Config
 from .rewards import (
+    SHIN_NORMALIZED_R_FINAL,
+    SHIN_NORMALIZED_R_VAL1,
+    SHIN_NORMALIZED_R_VAL2,
     coverage_potential_reward,
     gdt_progress_reward,
     is_path_success,
+    shin_normalized_gdt_reward,
+    shin_normalized_terminal_reward,
     target_distance_state_penalty,
     target_recovery_potential_reward,
     terminal_outcome_reward,
@@ -778,6 +783,18 @@ class SmallBowelEnv(EnvBase):
             np.asarray(self.cumulative_path_mask_pen[tail], dtype=np.float32).mean()
         )
 
+    def _segment_was_revisited(self, segment: Tuple) -> bool:
+        """Return binary prior occupancy on the undilated segment tail."""
+        if not segment or len(segment[0]) <= 1:
+            return False
+        tail = tuple(axis[1:] for axis in segment)
+        return bool(np.asarray(self.cumulative_path_mask_pen[tail]).any())
+
+    def _replace_reward_with_term(self, key: str, value) -> torch.Tensor:
+        """Implement a reward overwrite while keeping component logs exact."""
+        self._reset_step_reward_components()
+        return self._reward_term(key, value)
+
     def _get_target_mask(self) -> torch.Tensor:
         """Return the binary structure that the current episode must trace."""
         return self.seg.bool()
@@ -885,6 +902,11 @@ class SmallBowelEnv(EnvBase):
 
         if self.config.annotation_free:
             return self._calculate_annotation_free_reward(action_vox, next_pos_vox)
+        if self.config.reward_contract.startswith("shin_normalized"):
+            return self._calculate_shin_normalized_reward(
+                action_vox,
+                next_pos_vox,
+            )
 
         rt = torch.tensor(0.0, device=self.device, dtype=self.dtype)
         # --- 1. Invalid movement penalty ---
@@ -1022,6 +1044,79 @@ class SmallBowelEnv(EnvBase):
                 self._claim_episodic_cell_reward(next_pos_vox),
             )
         return rt, S
+
+    def _calculate_shin_normalized_reward(
+        self,
+        action_vox: Coords,
+        next_pos_vox: Coords,
+    ) -> Tuple[torch.Tensor, Tuple]:
+        """Return unit-normalized Shin & Summers Algorithm-1 reward.
+
+        The paper's reward values are divided by ``r_val2=6``. Both variants
+        evaluate binary revisitation on the undilated, agent-owned centerline
+        tail; a dilated tube would penalize ordinary short forward actions.
+        The guarded variant additionally rejects background-crossing segments,
+        applies a discount-consistent step cost, and reserves positive terminal
+        reward for the registered endpoint-plus-Dice success criterion.
+        """
+        reward = torch.tensor(0.0, device=self.device, dtype=self.dtype)
+        if not any(action_vox):
+            reward += self._reward_term(
+                "reward_invalid",
+                -SHIN_NORMALIZED_R_VAL1,
+            )
+            return reward, ()
+        if not self._is_valid_pos(next_pos_vox):
+            reward += self._reward_term(
+                "reward_invalid",
+                -SHIN_NORMALIZED_R_VAL2,
+            )
+            return reward, ()
+
+        segment = line_nd(self.current_pos_vox, next_pos_vox, endpoint=True)
+        if (
+            self.config.reward_contract == "shin_normalized_guarded"
+            and not self._segment_is_on_target(segment)
+        ):
+            reward += self._reward_term(
+                "reward_off_target",
+                -SHIN_NORMALIZED_R_VAL1,
+            )
+            return reward, segment
+
+        next_gdt = float(self.gdt[next_pos_vox])
+        gdt_reward, next_maximum = shin_normalized_gdt_reward(
+            next_gdt,
+            float(self.max_gdt_achieved),
+            self.config.gdt_max_increase_theta,
+        )
+        self.max_gdt_achieved = next_maximum
+        reward += self._reward_term("reward_gdt", gdt_reward)
+        if self.config.reward_contract == "shin_normalized_guarded":
+            reward += self._reward_term(
+                "reward_step",
+                -(1.0 - self.config.gamma) * SHIN_NORMALIZED_R_FINAL,
+            )
+
+        wall_response = self.wall_map[segment].mean()
+        reward += self._reward_term("reward_wall", -wall_response)
+        self.wall_gradient += wall_response
+
+        if self._segment_was_revisited(segment):
+            reward += self._reward_term(
+                "reward_revisit",
+                -SHIN_NORMALIZED_R_VAL1,
+            )
+
+        # Algorithm 1 assigns rather than adds the outside-segmentation
+        # penalty. Clear the prior components so telemetry still sums exactly
+        # to the scalar reward.
+        if not bool(self.seg[next_pos_vox]):
+            reward = self._replace_reward_with_term(
+                "reward_off_target",
+                -SHIN_NORMALIZED_R_VAL1,
+            )
+        return reward, segment
 
     def _calculate_annotation_free_reward(
         self,
@@ -1350,20 +1445,21 @@ class SmallBowelEnv(EnvBase):
                 self.cumulative_path_mask_pen[S] = 1
                 if not self.config.annotation_free:
                     next_coverage = float(self._get_final_coverage())
-                    coverage_reward = coverage_potential_reward(
-                        self.current_coverage,
-                        next_coverage,
-                        self.config.coverage_reward_scale,
-                    )
-                    if (
-                        coverage_reward <= 0
-                        or not self.config.gate_positive_shaping_on_target_segment
-                        or self._segment_is_on_target(S)
-                    ):
-                        reward += self._reward_term(
-                            "reward_coverage",
-                            coverage_reward,
+                    if self.config.reward_contract == "potential":
+                        coverage_reward = coverage_potential_reward(
+                            self.current_coverage,
+                            next_coverage,
+                            self.config.coverage_reward_scale,
                         )
+                        if (
+                            coverage_reward <= 0
+                            or not self.config.gate_positive_shaping_on_target_segment
+                            or self._segment_is_on_target(S)
+                        ):
+                            reward += self._reward_term(
+                                "reward_coverage",
+                                coverage_reward,
+                            )
                     self.current_coverage = next_coverage
 
         # Invalid actions leave the agent in place. Treating them as terminal
@@ -1386,7 +1482,11 @@ class SmallBowelEnv(EnvBase):
                 self.config.success_coverage_threshold,
             )
         )
-        if solved_path and self.config.terminate_on_success:
+        reached_contract_goal = at_goal and (
+            self.config.reward_contract.startswith("shin_normalized")
+            or solved_path
+        )
+        if reached_contract_goal and self.config.terminate_on_success:
             terminated, termination_reason = True, TReason.GOAL_REACHED
         elif self.current_step_count >= self.config.max_episode_steps:
             # The horizon is part of this finite task: failing to reach the goal is terminal,
@@ -1398,7 +1498,20 @@ class SmallBowelEnv(EnvBase):
         final_coverage = 0
         if done and not self.config.annotation_free:
             final_coverage = coverage_for_decision
-            if self.config.terminal_failure_penalty >= 0:
+            if self.config.reward_contract.startswith("shin_normalized"):
+                rewarded_goal = (
+                    solved_path
+                    if self.config.reward_contract == "shin_normalized_guarded"
+                    else at_goal
+                )
+                reward += self._reward_term(
+                    "reward_terminal",
+                    shin_normalized_terminal_reward(
+                        float(final_coverage),
+                        rewarded_goal,
+                    ),
+                )
+            elif self.config.terminal_failure_penalty >= 0:
                 reward += self._reward_term(
                     "reward_terminal",
                     terminal_outcome_reward(

@@ -7,6 +7,8 @@ The helpers here deliberately make every positive signal finite:
 * terminal success requires both the endpoint and meaningful path coverage.
 """
 
+import math
+
 
 def is_path_success(reached_goal: bool, coverage: float, threshold: float) -> bool:
     """Return whether an episode solved the path-tracing task."""
@@ -125,3 +127,44 @@ def terminal_outcome_reward(
     if is_path_success(reached_goal, coverage, threshold):
         return float(success_bonus)
     return -float(failure_penalty)
+
+
+# Shin & Summers (MICCAI 2022), Algorithm 1, divided by r_val2=6.
+SHIN_NORMALIZED_R_VAL1 = 4.0 / 6.0
+SHIN_NORMALIZED_R_VAL2 = 1.0
+SHIN_NORMALIZED_R_FINAL = 100.0 / 6.0
+
+
+def shin_normalized_gdt_reward(
+    next_gdt: float,
+    maximum_gdt: float,
+    maximum_delta: float,
+) -> tuple[float, float]:
+    """Return Algorithm-1 GDT reward and the updated historical maximum.
+
+    Unlike a signed potential difference, the paper rewards only a new
+    all-episode maximum. Backward movement is neutral here and must be made
+    unattractive by the wall/revisit/terminal terms.
+    """
+    if maximum_delta <= 0:
+        raise ValueError("maximum_delta must be positive")
+    if not math.isfinite(next_gdt) or next_gdt <= maximum_gdt:
+        return 0.0, float(maximum_gdt)
+    delta = float(next_gdt) - float(maximum_gdt)
+    reward = (
+        -SHIN_NORMALIZED_R_VAL2
+        if delta > maximum_delta
+        else delta / float(maximum_delta)
+    )
+    return float(reward), float(next_gdt)
+
+
+def shin_normalized_terminal_reward(
+    coverage: float,
+    reached_goal: bool,
+) -> float:
+    """Return the paper's normalized coverage-dependent terminal reward."""
+    bounded_coverage = min(max(float(coverage), 0.0), 1.0)
+    if reached_goal:
+        return bounded_coverage * SHIN_NORMALIZED_R_FINAL
+    return (bounded_coverage - 1.0) * SHIN_NORMALIZED_R_FINAL

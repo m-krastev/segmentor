@@ -672,6 +672,260 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "revisit_penalty_scale"):
             Config(revisit_penalty_scale=-0.01)
 
+    def test_shin_normalized_contract_rejects_cycles_and_logs_exact_terms(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=8,
+            reward_supervised=True,
+            reward_contract="shin_normalized",
+            observe_segmentation=True,
+            coverage_reward_scale=50.0,
+            step_penalty=10.0,
+            terminate_on_success=False,
+        )
+        shape = (20, 20, 20)
+        start = (10, 10, 6)
+        end = (10, 10, 16)
+        segmentation = np.ones(shape, dtype=np.uint8)
+        subject = self._make_subject(shape, start, end, segmentation)
+        subject["wall_map"][:] = 0.25
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([subject]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+
+        def action(z: float):
+            return TensorDict(
+                {"action": torch.tensor([[0.5, 0.5, z]], device=device)},
+                batch_size=torch.Size([1]),
+                device=device,
+            )
+
+        try:
+            environment._reset()
+            # Subject loading normalizes a constant nonzero wall volume to
+            # one. Set the post-load response explicitly so this test checks
+            # reward arithmetic rather than preprocessing normalization.
+            environment.wall_map.fill_(0.25)
+            forward = environment._step(action(1.0))
+            backward = environment._step(action(0.0))
+            expected_forward = 2.0 / np.sqrt(12.0) - 0.25
+            self.assertAlmostEqual(
+                forward["reward"].item(),
+                expected_forward,
+                places=5,
+            )
+            self.assertAlmostEqual(
+                backward["reward"].item(),
+                -0.25 - 2.0 / 3.0,
+                places=5,
+            )
+            self.assertLess(
+                forward["reward"].item() + backward["reward"].item(),
+                0.0,
+            )
+            self.assertEqual(
+                forward["info", "reward_coverage"].item(),
+                0.0,
+            )
+            self.assertEqual(
+                forward["info", "reward_step"].item(),
+                0.0,
+            )
+            for transition in (forward, backward):
+                self.assertAlmostEqual(
+                    sum(
+                        transition["info", key].item()
+                        for key in REWARD_COMPONENT_INFO_KEYS
+                    ),
+                    transition["reward"].item(),
+                    places=6,
+                )
+        finally:
+            environment.close()
+
+    def test_shin_outside_segmentation_overwrites_other_terms(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=8,
+            reward_supervised=True,
+            reward_contract="shin_normalized",
+            terminate_on_success=False,
+        )
+        shape = (20, 20, 20)
+        start = (10, 10, 6)
+        end = (10, 10, 16)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[10, 10, 4:18] = 1
+        subject = self._make_subject(shape, start, end, segmentation)
+        subject["wall_map"][:] = 0.75
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([subject]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            environment._reset()
+            transition = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[1.0, 0.5, 0.5]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertAlmostEqual(transition["reward"].item(), -2.0 / 3.0)
+            self.assertAlmostEqual(
+                transition["info", "reward_off_target"].item(),
+                -2.0 / 3.0,
+            )
+            self.assertAlmostEqual(
+                sum(
+                    transition["info", key].item()
+                    for key in REWARD_COMPONENT_INFO_KEYS
+                ),
+                transition["reward"].item(),
+                places=6,
+            )
+        finally:
+            environment.close()
+
+    def test_guarded_shin_rejects_background_crossing_segment(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=1,
+            max_episode_steps=8,
+            reward_supervised=True,
+            reward_contract="shin_normalized_guarded",
+            terminate_on_success=False,
+        )
+        shape = (20, 20, 20)
+        start = (10, 10, 6)
+        end = (10, 10, 16)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[start] = 1
+        segmentation[10, 10, 8] = 1
+        segmentation[end] = 1
+        subject = self._make_subject(shape, start, end, segmentation)
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([subject]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            environment._reset()
+            transition = environment._step(
+                TensorDict(
+                    {"action": torch.tensor([[0.5, 0.5, 1.0]], device=device)},
+                    batch_size=torch.Size([1]),
+                    device=device,
+                )
+            )
+            self.assertEqual(environment.current_pos_vox, (10, 10, 8))
+            self.assertAlmostEqual(transition["reward"].item(), -2.0 / 3.0)
+            self.assertEqual(transition["info", "reward_gdt"].item(), 0.0)
+            self.assertEqual(transition["info", "reward_wall"].item(), 0.0)
+            self.assertEqual(transition["info", "reward_step"].item(), 0.0)
+            self.assertAlmostEqual(
+                transition["info", "reward_off_target"].item(),
+                -2.0 / 3.0,
+            )
+        finally:
+            environment.close()
+
+    def test_guarded_shin_makes_low_coverage_endpoint_a_failure(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        shape = (20, 20, 20)
+        start = (10, 10, 6)
+        end = (10, 10, 8)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[10, 10, 4:17] = 1
+
+        def run(contract: str):
+            environment = SmallBowelEnv(
+                config=Config(
+                    device=str(device),
+                    patch_size_mm=8,
+                    voxel_size_mm=1.0,
+                    max_step_displacement_mm=2,
+                    cumulative_path_radius_mm=0,
+                    max_episode_steps=8,
+                    reward_supervised=True,
+                    reward_contract=contract,
+                    success_coverage_threshold=0.9,
+                    terminate_on_success=True,
+                ),
+                dataset_iterator=iter(
+                    [self._make_subject(shape, start, end, segmentation)]
+                ),
+                num_episodes_per_sample=1,
+                device=device,
+            )
+            try:
+                environment._reset()
+                return environment._step(
+                    TensorDict(
+                        {
+                            "action": torch.tensor(
+                                [[0.5, 0.5, 1.0]],
+                                device=device,
+                            )
+                        },
+                        batch_size=torch.Size([1]),
+                        device=device,
+                    )
+                )
+            finally:
+                environment.close()
+
+        literal = run("shin_normalized")
+        guarded = run("shin_normalized_guarded")
+        self.assertTrue(literal["terminated"].item())
+        self.assertTrue(guarded["terminated"].item())
+        self.assertEqual(literal["info", "final_success"].item(), 0.0)
+        self.assertEqual(guarded["info", "final_success"].item(), 0.0)
+        self.assertGreater(literal["info", "reward_terminal"].item(), 0.0)
+        self.assertLess(guarded["info", "reward_terminal"].item(), 0.0)
+        self.assertAlmostEqual(
+            guarded["info", "reward_step"].item(),
+            -(1.0 - 0.999) * (100.0 / 6.0),
+            places=6,
+        )
+        self.assertGreater(literal["reward"].item(), 0.0)
+        self.assertLess(guarded["reward"].item(), 0.0)
+
+    def test_shin_contract_configuration_is_explicitly_supervised(self):
+        with self.assertRaisesRegex(ValueError, "reward_contract"):
+            Config(reward_contract="paperish")
+        with self.assertRaisesRegex(ValueError, "GT segmentation"):
+            Config(
+                annotation_free=True,
+                reward_contract="shin_normalized",
+                use_immediate_gdt_reward=False,
+                terminate_on_success=False,
+                coverage_reward_scale=0,
+                gdt_reward_scale=0,
+                r_final=0,
+                r_val1=0,
+            )
+
     def test_max_step_gdt_normalization_is_subject_length_invariant(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = Config(
@@ -813,6 +1067,10 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             Config(lr_anneal_timesteps=-1)
         with self.assertRaisesRegex(ValueError, "target_kl"):
             Config(target_kl=-0.01)
+        with self.assertRaisesRegex(ValueError, "gamma"):
+            Config(gamma=0)
+        with self.assertRaisesRegex(ValueError, "gamma"):
+            Config(gamma=1.01)
 
     def test_episodic_cell_reward_configuration_must_be_valid(self):
         with self.assertRaisesRegex(ValueError, "episodic_cell_reward_scale"):

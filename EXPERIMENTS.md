@@ -2264,3 +2264,172 @@ command or service, acceptance metrics, and outcome here.
 - Dilation remains segment-local: `_add_path_segment` expands only the current
   executed line by the fixed physical-radius offsets and unions those voxels
   into the cumulative mask. It never redilates the accumulated mask.
+
+### M18: Normalized Shin reward contract
+
+- Add an opt-in `reward_contract` so this ablation cannot silently change prior
+  experiments. `shin_normalized` implements Algorithm 1 from Shin and Summers
+  (MICCAI 2022) after division by `r_val2=6`:
+  - new historical-maximum GDT progress: `delta_gdt / theta`;
+  - abrupt new maximum: `-1`;
+  - mean wall response: `-[0, 1]`;
+  - binary revisit and zero movement: `-4/6`;
+  - outside-segmentation assignment/overwrite: `-4/6`;
+  - terminal scale: `100/6`.
+- The cumulative-path overlap check intentionally uses the undilated executed
+  centerline tail and excludes the mandatory current voxel. This preserves the
+  user's registered revisitation semantics; a 6- or 9-mm cumulative cylinder
+  around the previous endpoint would classify ordinary short forward movement
+  as a revisit in the present voxel-grid implementation.
+- A reproducible pre-training audit is available as:
+
+  `PYTHONPATH=src uv run --no-sync python scripts/audit_navigator_reward_contract.py --contract shin_normalized`
+
+- With the current 6-mm axis limit, `theta=6*sqrt(3)=10.392 mm`. The literal
+  normalized reward gives:
+  - unseen in-bowel 6-mm progress: `+0.577350`;
+  - first 6-mm forward/back cycle: `-0.089316`;
+  - established two-position cycle: `-1.333333`;
+  - novel in-bowel tangent motion with no detected wall: `0`;
+  - a wall response of `0.25`: `-0.25`;
+  - outside endpoint, revisit, or zero action: `-0.666667`;
+  - abrupt new maximum: `-1`;
+  - horizon failure at Dice `0.30`: `-11.666667`.
+- Another literal paper-level weakness is delayed failure under discounting. Novel
+  in-bowel tangent motion with a zero wall response earns exactly zero, so at
+  `gamma=0.999` delaying a Dice-0.30 failure until step 2,048 discounts its
+  start-state contribution from `-11.666667` to `-1.504878`, an apparent
+  improvement of `+10.161789`.
+- The same audit exposed two unacceptable literal failure modes:
+  - Algorithm 1 checks only the endpoint segmentation. An inside-to-inside
+    cross-loop jump can keep the `+0.577350` progress reward when the
+    Meijering wall response is zero or weak.
+  - Reaching the endpoint receives a positive terminal reward at any nonzero
+    coverage: Dice `0.10 -> +1.666667`, Dice `0.30 -> +5.000000`. This
+    conflicts with the registered endpoint-plus-`0.40`-Dice success criterion.
+- Add and select `shin_normalized_guarded` for training. It retains the
+  normalized dense scales but makes three explicit anti-hacking corrections:
+  - any background voxel on the complete executed segment overwrites the step
+    with `-0.666667` and cannot advance the historical GDT maximum;
+  - endpoint arrival below Dice `0.40` takes the failure terminal branch.
+    Hence Dice `0.10 -> -15.000000`, Dice `0.30 -> -11.666667`, and Dice
+    `0.40 -> +6.666667`.
+  - each valid step costs `(1-gamma)*(100/6)`. At `gamma=0.999`, this is
+    `-0.016667`: full 6-mm progress remains `+0.560684`, novel tangent motion
+    is `-0.016667`, a first forward/back cycle is `-0.122650`, and established
+    oscillation is `-1.366667` per cycle. Delaying the same Dice-0.30 failure
+    to step 2,048 now has return `-16.023869`, which is `-4.340536` worse than
+    failing immediately.
+- The strict evaluation metric remains unchanged. This is an explicitly
+  supervised-input/reward diagnostic (GT segmentation policy channel plus GT
+  segmentation/GDT reward), never an image-only or annotation-free result.
+- Matched planned gate:
+  - unit:
+    `navigator-bomopi-gru-p32-gtmask-shin-norm-guarded-102k-v1.service`;
+  - from scratch, seed 42, factorized categorical GRU, 32-cubed voxel patch
+    (48 mm at 1.5-mm spacing), 6-mm axis displacement, 2,048-step horizon;
+  - 102,400 frames, validation on only pt14 and pt18;
+  - all previous potential/coverage/recovery/distance/step/episodic shaping
+    disabled by the launcher for this named contract.
+- Pre-launch local checks:
+  - guarded and literal numerical audits pass their cycle assertions;
+  - all 20 dependency-free reward-helper unit tests pass under `uv`;
+  - Python syntax, shell syntax, and `git diff --check` pass;
+  - 63 reward/environment integration tests and 19 PPO, annotation-separation,
+    metric, and preflight regression tests pass under `uv` on `commander`.
+- Launched from scratch at 2026-07-29 19:09 Europe/Sofia:
+  - unit:
+    `navigator-bomopi-gru-p32-gtmask-shin-norm-guarded-102k-v1.service`;
+  - invocation: `e6cde9dc2c754562b30b5ae2b923302f`;
+  - TensorBoard:
+    `/home/matey/project/segmentor/checkpoints/navigator-bomopi-gru-p32-gtmask-shin-norm-guarded-102k-v1/data/bomopi_resampled2_unique-v1/tensorboard/20260729-190933-950936`;
+  - startup verified the intended 15 training cases and only pt14/pt18 for
+    validation, seven policy channels including the explicitly supervised GT
+    mask, the guarded reward contract, and zero legacy reward scales;
+  - initial CUDA allocation was approximately 13.0 GiB on the 16-GiB 5070 Ti.
+- First held-out gate at 25.6k frames:
+  - mean Dice `0.120673` (pt14 `0.171466`, pt18 `0.069880`);
+  - mean endpoint distance `195.542 mm` (154.558, 236.525);
+  - both episodes reached the 2,048-step horizon, with no endpoint reach or
+    traversal;
+  - the matched prior-reward run had lower Dice (`0.083770`) but better endpoint
+    distance (`140.967 mm`) at the same gate. This is only an early coverage
+    improvement, not evidence of traversal.
+
+### M19: Historical March-May 2025 implementation audit
+
+- Audit the initial Navigator lineage (`beb605e` through `7fbbe82`) and
+  `notebooks/grl_pathtracking.py` against the paper. The strongest conclusion
+  is that the failed runs were not controlled verbatim reproductions: several
+  independent environment and PPO faults were active at different commits.
+- Movement/distribution mismatches were severe and changed repeatedly:
+  - `e313bf8` and `4873d2a` sampled a `TanhNormal` action in `[-1,1]`, then the
+    environment applied the Beta-style mapping `2*a-1`, producing an asymmetric
+    effective range `[-3,1] * max_step`;
+  - `dbf7c9d` used `(a+1)*max_step`, so movement was nonnegative on every axis;
+  - the mapping became briefly coherent for the voxel-scaled `TanhNormal` in
+    `9ebc38e`; but
+  - `b0a25f7` sampled an already voxel-scaled `TanhNormal` action and scaled it
+    a second time with `(2*a-1)*max_step`, commonly producing enormous
+    out-of-bounds jumps.
+  The Beta distribution and matching `[0,1] -> [-max,max]` transform were not
+  simultaneously coherent until `7fbbe82` on 2025-05-02.
+- Reward arithmetic made nearly all ordinary movement bad even in `7fbbe82`:
+  - the cumulative path was initialized as a 6-mm sphere;
+  - `line_nd` included the mandatory current voxel; therefore
+    `cumulative_path_mask[S].sum().bool()` was true on virtually every action;
+  - each action consequently paid `-4` revisitation;
+  - the code also doubled the paper wall term to `-12*mean(wall)`;
+  - a 1.5-mm axial advance at the configured scale earned only about `+0.866`
+    GDT before the unavoidable `-4` and wall terms.
+  PPO was therefore asked to distinguish degrees of negative return rather
+  than receiving the intended positive signal for valid progress.
+- GDT/action units were inconsistent:
+  - early configurations used only 2-mm maximum axis displacement, which floors
+    to one 1.5-mm voxel rather than the paper's 10-mm action;
+  - early `theta` formulas used `sqrt(3)*(d/spacing)^2`, squaring the step
+    rather than computing `sqrt(3*d^2)`;
+  - `7fbbe82` used `theta=sqrt(3*6^2)=10.392` while its GDT was measured in mm
+    and a 9-mm-per-axis diagonal can advance 15.588 mm. Legitimate diagonals
+    could therefore be classified as abrupt GDT jumps and penalized.
+- Path bookkeeping was also unstable:
+  - before `b0a25f7`, only endpoints rather than every crossed segment voxel
+    were reliably marked;
+  - `b0a25f7` then repeatedly dilated the entire accumulated mask after every
+    step, causing old visits to grow with episode length rather than expanding
+    only the new segment;
+  - fixed-name `wall_map.nii`, `gdt_start.nii`, and `gdt_end.nii` caches meant
+    corrected code could silently keep using artifacts produced by an older
+    broken implementation.
+- The claimed paper-like commit `7fbbe82` introduced a PPO minibatch indexing
+  bug: its inner loop iterated with `_` but sliced `batch_data[i:i+batch_size]`
+  using the outer collector index. Most of every 512-frame rollout was ignored
+  while a small overlapping slice was optimized repeatedly.
+- The standalone `notebooks/grl_pathtracking.py` did preserve Beta likelihoods
+  correctly, so its main problem was not PPO's probability ratio. It still had
+  the always-on `-4` revisit term, computed a millimetre-valued GDT against
+  voxel-valued `theta=11.547` for a nominal 10-mm action, actually executed at
+  most 9 mm because of flooring, terminated immediately on leaving the
+  segmentation, and used only a 1M-frame budget with a 1,024-step horizon and
+  batch size 128. It therefore was also not the paper's environment/training
+  contract despite having the correct distribution family.
+- Training exposure and hyperparameters were not matched either:
+  - 32,768 episodes were assigned to one subject before switching, whereas the
+    paper collected from four scans in parallel;
+  - learning rate was `3e-5` rather than `1e-5`, batch size 128 rather than 32,
+    maximum action 9 rather than 10 mm, and horizon 1,024 rather than 800.
+- Dataset mismatch remains a separate paper-level limitation even after code
+  fixes. Shin's wall signal assumed oral-contrast CT with a bright lumen and
+  demonstrated that removing wall components reduced performance. The BOMOPI
+  Meijering responses are mostly black, so the main signal intended to prevent
+  cross-loop shortcuts is absent. Moreover, a segmentation-derived GDT can
+  itself shortcut wherever adjacent bowel loops touch or the annotation
+  bridges them.
+- Overall attribution:
+  1. action mapping/distribution mismatches and unconditional revisit penalties
+     are sufficient to explain the earliest failures;
+  2. path dilation/caching and the later PPO minibatch bug prevented the
+     May-2025 "verbatim" version from being a valid reproduction;
+  3. even a correct reproduction may not transfer to BOMOPI without a useful
+     wall representation or a topology-preserving target because the paper's
+     image/annotation assumptions differ.

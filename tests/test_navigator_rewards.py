@@ -1,9 +1,13 @@
 import unittest
 
 from navigator.rewards import (
+    SHIN_NORMALIZED_R_FINAL,
+    SHIN_NORMALIZED_R_VAL1,
     coverage_potential_reward,
     gdt_progress_reward,
     is_path_success,
+    shin_normalized_gdt_reward,
+    shin_normalized_terminal_reward,
     target_distance_state_penalty,
     target_recovery_potential_reward,
     terminal_outcome_reward,
@@ -60,6 +64,32 @@ class GdtProgressRewardTests(unittest.TestCase):
 
     def test_implausible_jump_is_penalized(self):
         self.assertEqual(gdt_progress_reward(11.0, 10.0, 6.0), -6.0)
+
+
+class ShinNormalizedRewardTests(unittest.TestCase):
+    def test_only_new_maximum_gdt_is_rewarded(self):
+        reward, maximum = shin_normalized_gdt_reward(6.0, 4.0, 4.0)
+        self.assertEqual(reward, 0.5)
+        self.assertEqual(maximum, 6.0)
+        reward, maximum = shin_normalized_gdt_reward(5.0, maximum, 4.0)
+        self.assertEqual(reward, 0.0)
+        self.assertEqual(maximum, 6.0)
+
+    def test_abrupt_new_maximum_is_penalized_and_recorded(self):
+        reward, maximum = shin_normalized_gdt_reward(9.0, 4.0, 4.0)
+        self.assertEqual(reward, -1.0)
+        self.assertEqual(maximum, 9.0)
+
+    def test_terminal_reward_matches_paper_normalization(self):
+        self.assertAlmostEqual(
+            shin_normalized_terminal_reward(0.4, True),
+            0.4 * SHIN_NORMALIZED_R_FINAL,
+        )
+        self.assertAlmostEqual(
+            shin_normalized_terminal_reward(0.4, False),
+            -0.6 * SHIN_NORMALIZED_R_FINAL,
+        )
+        self.assertAlmostEqual(SHIN_NORMALIZED_R_VAL1, 2.0 / 3.0)
 
 
 class TargetRecoveryPotentialRewardTests(unittest.TestCase):

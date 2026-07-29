@@ -26,6 +26,7 @@ RELOAD_CHECKPOINT_PATH="${NAVIGATOR_RELOAD_CHECKPOINT_PATH:-}"
 OBSERVE_SEGMENTATION="${NAVIGATOR_OBSERVE_SEGMENTATION:-false}"
 ACTION_DISTRIBUTION="${NAVIGATOR_ACTION_DISTRIBUTION:-factorized_categorical}"
 REVISIT_PENALTY_SCALE="${NAVIGATOR_REVISIT_PENALTY_SCALE:-0.01}"
+REWARD_CONTRACT="${NAVIGATOR_REWARD_CONTRACT:-potential}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -d "$DATA_DIR" ]]; then
@@ -39,11 +40,12 @@ export UV_NO_PROGRESS="${UV_NO_PROGRESS:-1}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache-navigator}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
-printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s gdt_scale=%s target_distance_radius_mm=%s recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s revisit_scale=%s\n' \
+printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_contract=%s potential_gdt_scale=%s potential_target_distance_radius_mm=%s potential_recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s potential_revisit_scale=%s\n' \
   "$DATA_DIR" \
   "$TOTAL_TIMESTEPS" \
   "$PATCH_SIZE_MM" \
   "$BATCH_SIZE" \
+  "$REWARD_CONTRACT" \
   "$GDT_REWARD_SCALE" \
   "$TARGET_DISTANCE_RADIUS_MM" \
   "$TARGET_RECOVERY_REWARD_SCALE" \
@@ -72,6 +74,57 @@ case "$OBSERVE_SEGMENTATION" in
     ;;
 esac
 
+case "$REWARD_CONTRACT" in
+  potential)
+    REWARD_ARGS=(
+      --use-immediate-gdt-reward
+      --gate-positive-shaping-on-target-segment
+      --coverage-reward-scale 50
+      --gdt-reward-scale "$GDT_REWARD_SCALE"
+      --gdt-progress-normalization max_step
+      --target-recovery-reward-scale "$TARGET_RECOVERY_REWARD_SCALE"
+      --target-distance-penalty-scale 0.1
+      --target-distance-penalty-radius-mm "$TARGET_DISTANCE_RADIUS_MM"
+      --step-penalty 0.01
+      --revisit-penalty-scale "$REVISIT_PENALTY_SCALE"
+      --wall-penalty-scale 0
+      --r-val1 0
+      --r-val2 1
+      --r-zero-mov 1
+      --terminal-success-bonus 50
+      --terminal-failure-penalty 0
+      --episodic-cell-reward-scale 0.01
+    )
+    ;;
+  shin_normalized|shin_normalized_guarded)
+    # These legacy scales are disabled: the named contract supplies only the
+    # fixed normalized Algorithm-1 terms implemented by the environment.
+    REWARD_ARGS=(
+      --no-use-immediate-gdt-reward
+      --no-gate-positive-shaping-on-target-segment
+      --coverage-reward-scale 0
+      --gdt-reward-scale 0
+      --target-recovery-reward-scale 0
+      --target-distance-penalty-scale 0
+      --step-penalty 0
+      --revisit-penalty-scale 0
+      --wall-penalty-scale 0
+      --r-val1 0
+      --r-val2 0
+      --r-zero-mov 0
+      --terminal-success-bonus 0
+      --terminal-failure-penalty -1
+      --episodic-cell-reward-scale 0
+    )
+    ;;
+  *)
+    echo \
+      "NAVIGATOR_REWARD_CONTRACT must be potential, shin_normalized, or shin_normalized_guarded" \
+      >&2
+    exit 2
+    ;;
+esac
+
 exec "$UV_BIN" run --no-sync python -O -m navigator \
   --data-dir "$DATA_DIR" \
   --device cuda \
@@ -83,11 +136,10 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --validation-output-dir "$VALIDATION_OUTPUT_DIR" \
   --no-annotation-free \
   --reward-supervised \
-  --use-immediate-gdt-reward \
+  --reward-contract "$REWARD_CONTRACT" \
   --terminate-on-success \
   --no-observe-goal-distance \
   --no-coverage-gated-goal-planner \
-  --gate-positive-shaping-on-target-segment \
   --separate-actor-critic-losses \
   --memory-model gru \
   --memory-hidden-size 256 \
@@ -107,22 +159,7 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --allowed-area-radius-mm 0 \
   --goal-action-prior 0 \
   --success-coverage-threshold 0.40 \
-  --coverage-reward-scale 50 \
-  --gdt-reward-scale "$GDT_REWARD_SCALE" \
-  --gdt-progress-normalization max_step \
-  --target-recovery-reward-scale "$TARGET_RECOVERY_REWARD_SCALE" \
-  --target-distance-penalty-scale 0.1 \
-  --target-distance-penalty-radius-mm "$TARGET_DISTANCE_RADIUS_MM" \
-  --step-penalty 0.01 \
-  --revisit-penalty-scale "$REVISIT_PENALTY_SCALE" \
-  --wall-penalty-scale 0 \
-  --r-val1 0 \
-  --r-val2 1 \
-  --r-zero-mov 1 \
-  --terminal-success-bonus 50 \
-  --terminal-failure-penalty 0 \
   --intrinsic-novelty-reward-scale 0 \
-  --episodic-cell-reward-scale 0.01 \
   --episodic-cell-size-mm 6 \
   --curvature-penalty-scale 0 \
   --navigation-filter-scales-mm 3 6 9 \
@@ -143,5 +180,6 @@ exec "$UV_BIN" run --no-sync python -O -m navigator \
   --save-freq "$SAVE_FREQ" \
   --eval-interval "$EVAL_INTERVAL" \
   --checkpoint-dir "$CHECKPOINT_DIR" \
+  "${REWARD_ARGS[@]}" \
   "${EXTRA_ARGS[@]}" \
   "$@"

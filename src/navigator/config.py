@@ -88,6 +88,13 @@ class Config:
     navigation_filter_scales_mm: Tuple[float, ...] = (3.0, 6.0, 9.0)
 
     # --- Reward Hyperparameters ---
+    # ``potential`` is the calibrated reward used by the current experiments.
+    # ``shin_normalized`` is an explicit, unit-normalized implementation of
+    # Shin & Summers (MICCAI 2022) Algorithm 1. The ``_guarded`` variant also
+    # rejects background-crossing segments and requires the registered Dice
+    # threshold for positive terminal reward. Both use GT segmentation/GDT in
+    # the reward and therefore can never be described as annotation-free.
+    reward_contract: str = "potential"
     # Keep dense penalties on the same scale as one step of GDT progress. Large
     # per-step costs make deliberate early termination optimal.
     r_val1: float = 0.25
@@ -239,6 +246,22 @@ class Config:
             raise ValueError("success_coverage_threshold must be between 0 and 1")
         if self.coverage_reward_scale < 0:
             raise ValueError("coverage_reward_scale must be non-negative")
+        if self.reward_contract not in {
+            "potential",
+            "shin_normalized",
+            "shin_normalized_guarded",
+        }:
+            raise ValueError(
+                "reward_contract must be one of: potential, shin_normalized, "
+                "shin_normalized_guarded"
+            )
+        if self.annotation_free and self.reward_contract.startswith(
+            "shin_normalized"
+        ):
+            raise ValueError(
+                "shin_normalized reward uses GT segmentation and GDT and is "
+                "incompatible with annotation_free mode"
+            )
         if self.gdt_reward_scale < 0:
             raise ValueError("gdt_reward_scale must be non-negative")
         if self.gdt_progress_normalization not in {
@@ -285,6 +308,8 @@ class Config:
             raise ValueError("lr_anneal_timesteps must be non-negative")
         if self.target_kl < 0:
             raise ValueError("target_kl must be non-negative")
+        if not 0 < self.gamma <= 1:
+            raise ValueError("gamma must be in (0, 1]")
         if self.behavior_cloning_batch_size < 1:
             raise ValueError("behavior_cloning_batch_size must be positive")
         if not 0 <= self.behavior_cloning_max_policy_probability <= 1:
@@ -438,10 +463,13 @@ class Config:
         if self.goal_action_prior < 0:
             raise ValueError("goal_action_prior must be non-negative")
         self.gdt_max_increase_theta = self.max_step_vox * self.voxel_size_mm * math.sqrt(3)
-        self.needs_target_distance = bool(
-            self.target_recovery_reward_scale
-            or self.target_distance_penalty_scale
-            or self.gate_positive_shaping_on_target_segment
+        self.needs_target_distance = (
+            self.reward_contract == "potential"
+            and bool(
+                self.target_recovery_reward_scale
+                or self.target_distance_penalty_scale
+                or self.gate_positive_shaping_on_target_segment
+            )
         )
 
 
