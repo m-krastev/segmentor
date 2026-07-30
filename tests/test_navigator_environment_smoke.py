@@ -57,6 +57,18 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
             )
             torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
+    def test_boundary_patch_matches_constant_padding_geometry(self):
+        volume = torch.arange(3 * 4 * 5, dtype=torch.float32).reshape(3, 4, 5)
+        actual = get_patch(volume, (0, 0, 0), (4, 4, 4), pad_value=-7)
+        expected = torch.full((4, 4, 4), -7, dtype=torch.float32)
+        expected[2:4, 2:4, 2:4] = volume[:2, :2, :2]
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+        actual = get_patch(volume, (2, 3, 4), (3, 3, 3), pad_value=-9)
+        expected = torch.full((3, 3, 3), -9, dtype=torch.float32)
+        expected[:2, :2, :2] = volume[1:3, 2:4, 3:5]
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
     def test_annotation_free_transitions_are_invariant_to_labels_and_endpoint(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         config = self._annotation_free_config(device)

@@ -3250,3 +3250,18 @@ command or service, acceptance metrics, and outcome here.
   main method toward explicit route planning/energy minimization. If it passes,
   use it only to justify replacing the GT mask with a learned/self-supervised
   image representation.
+- The first 4,096-frame smoke verified the exact seven-channel configuration,
+  fresh initialization, and intended reward/action settings. Training completed
+  all 4,096 frames, but validation OOMed on pt18 while allocating a 100-MiB
+  boundary-padded filter volume. PyTorch still held 14.10 GiB from training and
+  the preceding 2,048-step pt14 rollout; this is a validation memory-lifetime
+  defect, not evidence against the supervised policy.
+- Implement two accuracy-neutral memory repairs before retrying:
+  - `get_patch` now allocates only the requested fixed-size output and copies
+    the in-volume intersection when a patch crosses a boundary, exactly
+    equivalent to constant-padding the complete volume and then slicing;
+  - validation moves the retained path-mask report artifact to CPU and deletes
+    each full 2,048-step GPU rollout before loading the next subject.
+  Exact interior, low-boundary, high-boundary, multichannel, and supervised
+  channel regressions pass. The complete remote Navigator suite passes under
+  `uv`: `104 passed`, four subtests passed, 18 warnings.

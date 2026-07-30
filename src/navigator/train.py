@@ -291,7 +291,9 @@ def validation_loop_torchrl(
                     endpoint_reached = float(independent_metrics.endpoint_reached)
 
                     paths.append(path)
-                    path_masks.append(tracking_env.get_tracking_mask())
+                    # Keep only the small report artifact, not a second GPU
+                    # copy of the complete patient mask.
+                    path_masks.append(tracking_env.get_tracking_mask().cpu())
                     intermediate_results.append(
                         (
                             reward,
@@ -307,6 +309,12 @@ def validation_loop_torchrl(
                             boundary_state_fraction,
                         )
                     )
+                    # A 2,048-step rollout contains every 3-D observation.
+                    # Release it before resetting onto the next validation
+                    # subject instead of retaining both subjects on the GPU.
+                    del rollout, tensordict
+                    if device.type == "cuda":
+                        torch.cuda.empty_cache()
                 except Exception as e:
                     raise RuntimeError(
                         f"Validation failed for subject {i}; refusing to report "
@@ -364,6 +372,8 @@ def validation_loop_torchrl(
             )
 
     val_env.close()  # Close the validation environment
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
 
     if len(val_results["coverage"]) != num_val_subjects:
         raise RuntimeError(

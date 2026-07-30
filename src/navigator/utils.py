@@ -297,48 +297,75 @@ def get_patch(
     Returns:
         A patch of the specified size centered at center_vox
     """
-    center_z, center_y, center_x = center_vox
+    center_z, center_y, center_x = (int(value) for value in center_vox)
     pz, py, px = patch_size_vox
     h_pz, h_py, h_px = pz // 2, py // 2, px // 2
     depth, height, width = volume.shape[-3:]
-    pad_z = max(0, h_pz - center_z) + max(0, center_z + (pz - h_pz) - depth)
-    pad_y = max(0, h_py - center_y) + max(0, center_y + (py - h_py) - height)
-    pad_x = max(0, h_px - center_x) + max(0, center_x + (px - h_px) - width)
-    padded_volume = volume
-    if pad_z > 0 or pad_y > 0 or pad_x > 0:
-        padding = (
-            max(0, h_px - center_x),
-            max(0, center_x + (px - h_px) - width),
-            max(0, h_py - center_y),
-            max(0, center_y + (py - h_py) - height),
-            max(0, h_pz - center_z),
-            max(0, center_z + (pz - h_pz) - depth),
-        )
-        padded_volume = F.pad(volume, padding, mode="constant", value=pad_value)
-        center_z += max(0, h_pz - center_z)
-        center_y += max(0, h_py - center_y)
-        center_x += max(0, h_px - center_x)
     start_z, start_y, start_x = center_z - h_pz, center_y - h_py, center_x - h_px
     end_z, end_y, end_x = start_z + pz, start_y + py, start_x + px
-    patch = padded_volume[
-        ...,
-        start_z:end_z,
-        start_y:end_y,
-        start_x:end_x,
-    ]
-    target_shape = (*volume.shape[:-3], *patch_size_vox)
-    if patch.shape != target_shape:
-        new_patch = torch.full(target_shape, pad_value, dtype=patch.dtype, device=patch.device)
-        copy_z = min(patch.shape[-3], target_shape[-3])
-        copy_y = min(patch.shape[-2], target_shape[-2])
-        copy_x = min(patch.shape[-1], target_shape[-1])
-        new_patch[..., :copy_z, :copy_y, :copy_x] = patch[
+
+    if (
+        start_z >= 0
+        and start_y >= 0
+        and start_x >= 0
+        and end_z <= depth
+        and end_y <= height
+        and end_x <= width
+    ):
+        return volume[
             ...,
-            :copy_z,
-            :copy_y,
-            :copy_x,
+            start_z:end_z,
+            start_y:end_y,
+            start_x:end_x,
         ]
-        patch = new_patch
+
+    # Padding a complete multi-channel patient volume for every boundary step
+    # can allocate hundreds of MiB even though the caller needs only one local
+    # patch. Copy the intersecting source region into the fixed-size output
+    # instead; this is exactly equivalent to constant-padding then slicing.
+    target_shape = (*volume.shape[:-3], *patch_size_vox)
+    patch = torch.full(
+        target_shape,
+        pad_value,
+        dtype=volume.dtype,
+        device=volume.device,
+    )
+    src_start_z, src_start_y, src_start_x = (
+        max(0, start_z),
+        max(0, start_y),
+        max(0, start_x),
+    )
+    src_end_z, src_end_y, src_end_x = (
+        min(depth, end_z),
+        min(height, end_y),
+        min(width, end_x),
+    )
+    if (
+        src_start_z >= src_end_z
+        or src_start_y >= src_end_y
+        or src_start_x >= src_end_x
+    ):
+        return patch
+
+    dst_start_z, dst_start_y, dst_start_x = (
+        src_start_z - start_z,
+        src_start_y - start_y,
+        src_start_x - start_x,
+    )
+    dst_end_z = dst_start_z + (src_end_z - src_start_z)
+    dst_end_y = dst_start_y + (src_end_y - src_start_y)
+    dst_end_x = dst_start_x + (src_end_x - src_start_x)
+    patch[
+        ...,
+        dst_start_z:dst_end_z,
+        dst_start_y:dst_end_y,
+        dst_start_x:dst_end_x,
+    ] = volume[
+        ...,
+        src_start_z:src_end_z,
+        src_start_y:src_end_y,
+        src_start_x:src_end_x,
+    ]
     return patch
 
 
