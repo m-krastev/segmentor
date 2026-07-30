@@ -7,12 +7,21 @@ import argparse
 from dataclasses import fields
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import torch
 from tensordict import TensorDict
 from torch.utils.data import Subset
 from torchrl.envs.utils import ExplorationType
+
+# A worktree can intentionally share a uv environment whose editable install
+# points at another checkout. Prefer the source tree adjacent to this script so
+# an evaluation always reconstructs the checkpoint with the code being audited.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from navigator.config import Config
 from navigator.dataset import SmallBowelDataset
