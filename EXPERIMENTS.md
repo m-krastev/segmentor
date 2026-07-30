@@ -2963,3 +2963,13 @@ command or service, acceptance metrics, and outcome here.
   Reject immediately as premature collapse if maximum action probability
   exceeds `0.25` alongside low diversity or boundary cycling. The endpoint
   and `0.40` Dice definitions remain unchanged.
+- The managed 4,096-frame smoke completed with exit status zero in 39s.
+  Invalid actions remained exactly zero, KL was `0.001731`, and the entropy
+  loss fell as intended from about `0.005` to `0.000499`. Maximum action
+  probability was only `0.01211`, so reduced entropy pressure did not produce
+  premature concentration.
+- Smoke validation was scientifically poor—Dice `0.008700`, endpoint
+  `159.973 mm`, positive GDT `0.003125`, diversity `0.013672`, and boundary
+  residence `0.84`—but an untrained deterministic mode is not the registered
+  comparison. The smoke passes only the technical gate for the fresh 64k
+  screen.
