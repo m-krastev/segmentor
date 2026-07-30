@@ -183,6 +183,7 @@ def validation_loop_torchrl(
     global_step: int | None = None,
 ):
     """Validation loop adapted for TorchRL env and modules."""
+    device = torch.device(device or config.device)
     actor_module.eval()  # Set actor to evaluation mode
     val_results = defaultdict(list)
 
