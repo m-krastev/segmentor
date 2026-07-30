@@ -3319,3 +3319,39 @@ command or service, acceptance metrics, and outcome here.
   Dice at least `0.40`, traversal success at least `0.50`, and at least one
   pt14 traversal; otherwise stop this supervised PPO continuation and address
   decoding/planning rather than add more frames.
+- The exact continuation restored 256,000 frames / 2,500 updates and completed
+  512,000 total frames in 23m06s. Peak CUDA allocation/reservation was
+  `14,639.8/14,806 MiB`; all actions executed and the final model plus all
+  registered gates were saved.
+- Deterministic gates remained incomplete:
+  - 307,200: Dice `0.281099`, endpoint `57.38 mm`, diversity `0.17773`;
+  - 410,624: Dice `0.228237`, endpoint `49.87 mm`, diversity `0.04297`;
+  - 512,000: Dice `0.234988`, endpoint `100.85 mm`, diversity `0.05469`.
+  No deterministic episode reached an endpoint or traversed. The pt14/pt18
+  asymmetry changed between gates rather than converging monotonically.
+- Fixed three-seed stochastic results also regress after the 256k champion:
+  - 256k: Dice `0.420629`, endpoint `30.58 mm`, traversal `2/6`;
+  - 410,624: Dice `0.392909`, endpoint `35.49 mm`, traversal `0/6`;
+  - 512k: Dice `0.405908`, endpoint `41.98 mm`, traversal `0/6`.
+  At 410,624 and 512k neither pt14 nor pt18 reaches the endpoint in any fixed
+  rollout. Thus the continuation fails both the `>=0.50` traversal-rate and
+  pt14-success gates. Retain the 256k checkpoint as the traversal-first
+  supervised champion and stop this PPO line.
+- Continued PPO sharply concentrated the categorical policy without improving
+  completion. Maximum action probability rose from a final-ten mean `0.06256`
+  at 256k to `0.31261` at 512k (maximum `0.36608`), while final-ten value loss
+  rose to `1.2911`. Training still looked superficially healthy: final-ten
+  diversity `0.98322`, reversals `0.00587`, coverage reward `+0.08080`, GDT
+  reward `+0.01313`, maximum KL `0.02578`, and zero invalid actions. This is
+  over-specialization of a locally profitable stochastic policy, not an
+  invalid-action, boundary, or two-point-cycle exploit.
+- Scientific conclusion from the upper bound:
+  - local GT anatomy removes the image-only pt18 failure and permits real
+    joint Dice/endpoint traversal, proving movement, likelihood, and the
+    2,048-step task are executable;
+  - pure PPO does not make that success reliable or transfer it to pt14;
+  - deterministic categorical mode is not a valid proxy for expected
+    performance, but sampling alone is also not a reliable deployable decoder;
+  - further work should change closed-loop decoding/planning or introduce
+    explicit route supervision, while the primary annotation-free path must
+    replace the privileged GT channel rather than conceal it.
