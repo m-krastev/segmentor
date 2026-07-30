@@ -3355,3 +3355,44 @@ command or service, acceptance metrics, and outcome here.
   - further work should change closed-loop decoding/planning or introduce
     explicit route supervision, while the primary annotation-free path must
     replace the privileged GT channel rather than conceal it.
+
+### M28: Cross-patient image-filter signal audit
+
+- Before spending more frames on image-only PPO, audit whether its five
+  image-derived channels contain a stable bowel/background distinction across
+  the two held-out patients. `scripts/audit_navigator_filter_signal.py` samples
+  up to 100,000 bowel voxels and an equal number of non-bowel voxels within
+  30 mm of bowel for pt14 and pt18. It reports per-channel ROC AUC and fits a
+  five-channel standardized logistic model on one patient before evaluating it
+  unchanged on the other.
+- Ground-truth segmentation is used only to label this offline diagnostic. It
+  is never passed to the policy, used to train a replacement representation,
+  or used to tune an environment observation. The audit therefore measures
+  information and transfer; it does not produce an annotation-free model.
+- Direction-free single-channel AUCs show substantial within-patient signal:
+
+  | channel | pt14 | pt18 |
+  | --- | ---: | ---: |
+  | clipped CT | 0.865846 | 0.620469 |
+  | dark tubularity | 0.702547 | 0.707311 |
+  | bright tubularity | 0.786327 | 0.536060 |
+  | band pass | 0.700759 | 0.627068 |
+  | gradient | 0.730097 | 0.582987 |
+
+  The dark-tubularity response is mostly zero inside bowel
+  (`68.1%/59.0%` for pt14/pt18) but less often zero in the surrounding shell
+  (`24.7%/29.7%`), so its useful direction is consistently negative. In
+  contrast, the direct polarity of bright tubularity, band pass, and gradient
+  changes or nearly disappears on pt18.
+- Cross-patient transfer is weak despite balancing the classes and exposing all
+  five channels: training on pt14 and testing on pt18 gives AUC `0.530584`;
+  training on pt18 and testing on pt14 gives `0.593630`; mean cross-patient AUC
+  is only `0.562107`. This is barely above random ranking and is consistent
+  with the observed image-only pt18 failure.
+- Conclusion: movement and the compact categorical policy are no longer the
+  primary blocker. The current handcrafted filter bank has patient-specific
+  signal but does not provide a stable cross-patient bowel representation.
+  More PPO on the same observations is not justified by this evidence. The
+  next bounded experiment must alter the annotation-free representation or
+  use an explicit image-derived energy/planner; it must not use the supervised
+  upper bound's GT channel or choose transforms from held-out labels.
