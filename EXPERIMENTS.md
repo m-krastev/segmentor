@@ -3396,3 +3396,30 @@ command or service, acceptance metrics, and outcome here.
   next bounded experiment must alter the annotation-free representation or
   use an explicit image-derived energy/planner; it must not use the supervised
   upper bound's GT channel or choose transforms from held-out labels.
+- The bidirectional two-case audit is intentionally pessimistic because the
+  actual policy learned from 15 patients, not one. Pool the exact seeded
+  training split (25,000 bowel and 25,000 local-shell samples per patient) and
+  fit once before opening pt14/pt18. The pooled model has training AUC
+  `0.854088`, test AUC `0.897297` on pt14, and only `0.555567` on pt18. Thus
+  the features transfer very well to pt14 but fail specifically on pt18,
+  matching the image-only PPO result rather than indicating a universal lack
+  of image signal.
+- Training-case-only direction checks are perfectly consistent across all 15
+  subjects: direct CT, bright-tubularity, band-pass, and gradient AUC are above
+  `0.5` in every subject, while dark-tubularity AUC is below `0.5` in every
+  subject. Held-out subset diagnostics show the exceptional pt18 shift:
+  CT-only AUC is `0.613767`, inverse dark-only AUC is `0.705065`, but
+  band-pass and gradient reverse to `0.377009/0.416953`. On pt14 the same
+  channels score `0.864568/0.702031/0.699363/0.723592`.
+- This audit also exposes an unrun causal control. The failed image-only run
+  used the three-channel `shin_068_repaired` state (CT, dark response, thin
+  path), while the successful supervised run simultaneously changed to seven
+  channels (CT, all four filters, dilated path, GT mask). The gain therefore
+  cannot yet be attributed only to GT. Register
+  `scripts/run_navigator_bomopi_filters_compact_cov500_gdt1_256k.sh` as the
+  exact six-channel no-GT control: same fresh seed, compact actions, GRU,
+  reward, schedule, and validation; remove only the segmentation channel from
+  the supervised upper bound. Require a 4,096-frame CUDA smoke before the
+  256k run. Score the same six fixed stochastic episodes at 256k; any real
+  traversal would overturn the stronger claim that privileged perception was
+  necessary, while failure preserves the pt18 representation diagnosis.

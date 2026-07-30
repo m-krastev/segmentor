@@ -24,11 +24,46 @@ CHANNEL_NAMES = (
     "gradient",
 )
 
+COHORT_FEATURE_SUBSETS = {
+    "ct_only": ("ct_clipped",),
+    "dark_only": ("dark_tubularity",),
+    "bright_only": ("bright_tubularity",),
+    "band_only": ("band_pass",),
+    "gradient_only": ("gradient",),
+    "ct_dark": ("ct_clipped", "dark_tubularity"),
+    "ct_dark_bright": (
+        "ct_clipped",
+        "dark_tubularity",
+        "bright_tubularity",
+    ),
+    "without_gradient": (
+        "ct_clipped",
+        "dark_tubularity",
+        "bright_tubularity",
+        "band_pass",
+    ),
+    "all": CHANNEL_NAMES,
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--case-id", action="append", required=True)
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        help="Legacy two-case bidirectional audit (specify exactly twice)",
+    )
+    parser.add_argument(
+        "--train-case-id",
+        action="append",
+        help="Case pooled into the cohort-level logistic training set",
+    )
+    parser.add_argument(
+        "--test-case-id",
+        action="append",
+        help="Held-out case scored by the cohort-level logistic model",
+    )
     parser.add_argument("--voxel-size-mm", type=float, default=1.5)
     parser.add_argument("--shell-radius-mm", type=float, default=30.0)
     parser.add_argument("--max-samples-per-class", type=int, default=100_000)
@@ -128,14 +163,31 @@ def load_case(
 
 def main() -> None:
     args = parse_args()
-    if len(args.case_id) != 2:
-        raise ValueError("Specify exactly two cases for the cross-case audit")
+    legacy_case_ids = args.case_id or []
+    train_case_ids = args.train_case_id or []
+    test_case_ids = args.test_case_id or []
+    if legacy_case_ids:
+        if len(legacy_case_ids) != 2:
+            raise ValueError("Specify exactly two --case-id values")
+        if train_case_ids or test_case_ids:
+            raise ValueError(
+                "--case-id cannot be combined with --train-case-id or --test-case-id"
+            )
+    elif not train_case_ids or not test_case_ids:
+        raise ValueError(
+            "Specify either two --case-id values or non-empty train/test case lists"
+        )
+    if len(set(legacy_case_ids + train_case_ids + test_case_ids)) != len(
+        legacy_case_ids + train_case_ids + test_case_ids
+    ):
+        raise ValueError("Case IDs must be unique across all requested splits")
     if args.voxel_size_mm <= 0 or args.shell_radius_mm <= 0:
         raise ValueError("voxel and shell scales must be positive")
     if args.max_samples_per_class < 1:
         raise ValueError("max_samples_per_class must be positive")
 
     rng = np.random.default_rng(args.seed)
+    requested_case_ids = legacy_case_ids or train_case_ids + test_case_ids
     cases = [
         load_case(
             args.data_dir,
@@ -145,11 +197,30 @@ def main() -> None:
             max_samples_per_class=args.max_samples_per_class,
             rng=rng,
         )
-        for case_id in args.case_id
+        for case_id in requested_case_ids
     ]
 
+    if legacy_case_ids:
+        train_test_groups = [
+            ([cases[0]], [cases[1]]),
+            ([cases[1]], [cases[0]]),
+        ]
+    else:
+        train_cases = cases[: len(train_case_ids)]
+        test_cases = cases[len(train_case_ids) :]
+        train_test_groups = [(train_cases, test_cases)]
+
     cross_case = []
-    for train_case, test_case in (cases, cases[::-1]):
+    fitted_models = []
+    for train_cases, test_cases in train_test_groups:
+        train_features = np.concatenate(
+            [case["features"] for case in train_cases],
+            axis=0,
+        )
+        train_labels = np.concatenate(
+            [case["labels"] for case in train_cases],
+            axis=0,
+        )
         model = make_pipeline(
             StandardScaler(),
             LogisticRegression(
@@ -157,21 +228,86 @@ def main() -> None:
                 random_state=args.seed,
             ),
         )
-        model.fit(train_case["features"], train_case["labels"])
-        probabilities = model.predict_proba(test_case["features"])[:, 1]
-        cross_case.append(
+        model.fit(train_features, train_labels)
+        train_probabilities = model.predict_proba(train_features)[:, 1]
+        coefficients = model.named_steps["logisticregression"].coef_[0]
+        fitted_models.append(
             {
-                "train_case": train_case["case_id"],
-                "test_case": test_case["case_id"],
-                "auc": float(
-                    roc_auc_score(test_case["labels"], probabilities)
+                "train_cases": [case["case_id"] for case in train_cases],
+                "sample_count": int(len(train_labels)),
+                "training_auc": float(
+                    roc_auc_score(train_labels, train_probabilities)
                 ),
+                "standardized_coefficients": {
+                    name: float(value)
+                    for name, value in zip(CHANNEL_NAMES, coefficients)
+                },
             }
         )
+        for test_case in test_cases:
+            probabilities = model.predict_proba(test_case["features"])[:, 1]
+            cross_case.append(
+                {
+                    "train_cases": [case["case_id"] for case in train_cases],
+                    "test_case": test_case["case_id"],
+                    "auc": float(
+                        roc_auc_score(test_case["labels"], probabilities)
+                    ),
+                }
+            )
+
+    subset_ablation = []
+    if not legacy_case_ids:
+        train_features = np.concatenate(
+            [case["features"] for case in train_cases],
+            axis=0,
+        )
+        train_labels = np.concatenate(
+            [case["labels"] for case in train_cases],
+            axis=0,
+        )
+        for subset_name, subset_channels in COHORT_FEATURE_SUBSETS.items():
+            channel_indices = [
+                CHANNEL_NAMES.index(channel_name)
+                for channel_name in subset_channels
+            ]
+            model = make_pipeline(
+                StandardScaler(),
+                LogisticRegression(
+                    max_iter=500,
+                    random_state=args.seed,
+                ),
+            )
+            model.fit(train_features[:, channel_indices], train_labels)
+            test_results = []
+            for test_case in test_cases:
+                probabilities = model.predict_proba(
+                    test_case["features"][:, channel_indices]
+                )[:, 1]
+                test_results.append(
+                    {
+                        "test_case": test_case["case_id"],
+                        "auc": float(
+                            roc_auc_score(test_case["labels"], probabilities)
+                        ),
+                    }
+                )
+            subset_ablation.append(
+                {
+                    "name": subset_name,
+                    "channels": subset_channels,
+                    "test_results": test_results,
+                    "mean_test_auc": float(
+                        np.mean([result["auc"] for result in test_results])
+                    ),
+                }
+            )
 
     payload = {
         "data_dir": str(args.data_dir),
-        "case_ids": args.case_id,
+        "case_ids": requested_case_ids,
+        "train_case_ids": train_case_ids or None,
+        "test_case_ids": test_case_ids or None,
         "voxel_size_mm": args.voxel_size_mm,
         "shell_radius_mm": args.shell_radius_mm,
         "channel_names": CHANNEL_NAMES,
@@ -183,6 +319,8 @@ def main() -> None:
             }
             for case in cases
         ],
+        "models": fitted_models,
+        "cohort_feature_subset_ablation": subset_ablation,
         "cross_case_logistic_regression": cross_case,
         "mean_cross_case_auc": float(
             np.mean([result["auc"] for result in cross_case])
