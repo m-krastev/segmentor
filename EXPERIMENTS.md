@@ -3082,3 +3082,49 @@ command or service, acceptance metrics, and outcome here.
   success. Pt14 boundary residence was `0.96973` while pt18 was `0.00293`, so
   the fresh 64k screen must establish whether this is an untrained mode or
   another deterministic boundary failure.
+- `navigator-bomopi-gru-compact-cov500-64k-v1.service` completed successfully
+  in 6m27s with `9,389.3/10,612 MiB` peak CUDA allocation/reservation.
+  Deterministic held-out gates were:
+  - 16,384: Dice `0.011853`, endpoint `236.90 mm`, diversity `0.02734`,
+    boundary residence `0.85254`;
+  - 32,768: Dice `0.017330`, endpoint `264.56 mm`, diversity `0.08203`,
+    boundary residence `0.98535`;
+  - 49,152: Dice `0.001874`, endpoint `157.85 mm`, diversity `0.10352`,
+    boundary residence `0.50`;
+  - 65,536: Dice `0.031391`, endpoint `228.95 mm`, diversity `0.10742`,
+    boundary residence `0.88135`.
+  Every gate executed all actions but reached zero endpoints and completed
+  zero traversals. The deterministic result misses both preregistered
+  continuation alternatives.
+- Training did not share the deterministic boundary collapse. Across the
+  complete screen, stochastic recent-position diversity averaged `0.9901`,
+  boundary residence `0.1341`, coverage reward `+0.01434`, and invalid actions
+  exactly zero. Final maximum action probability was only `0.01948`; raw
+  entropy remained about `4.943` of `5.050` nats. The entropy-loss magnitude
+  remained roughly one quarter of the actor-loss magnitude.
+- A separately named stochastic diagnostic used the unchanged final policy,
+  exactly pt14/pt18, and three preregistered independent seeds (`101`, `202`,
+  `303`), with no checkpoint selection or optimizer updates. Across six
+  episodes:
+  - mean Dice `0.105487`;
+  - mean endpoint distance `118.598 mm`;
+  - recent diversity `0.99414` and boundary residence `0.12004`;
+  - zero endpoint reaches and zero traversals.
+  Per-seed mean Dice was approximately `0.1032`, `0.1242`, and `0.0890`.
+  This passes both numerical continuation alternatives and establishes that
+  the corrected reward improves expected stochastic behavior, while the
+  categorical argmax remains a poor representative of the learned policy.
+- Register one state-preserving concentration test:
+  `scripts/run_navigator_bomopi_compact_cov500_lowent_256k.sh`. Resume the
+  exact 64k policy, critic, optimizer, and scheduler; freeze learning rate at
+  its existing `5e-6` floor; change only entropy coefficient
+  `0.001 -> 0.0001`; and continue to 256,000 total frames. Validate only near
+  128k, 192k, and the mandatory 256k final state. The earlier low-entropy
+  ablation used the rejected reward and does not answer this
+  stronger-advantage setting.
+- Acceptance requires deterministic mean Dice above `0.05` or endpoint
+  distance below `150 mm` without boundary/short-cycle collapse, and at least
+  one held-out endpoint reach by 256k. Also repeat the fixed three-seed
+  stochastic diagnostic at the final checkpoint: it must retain mean Dice
+  above `0.10` while improving endpoint distance. Otherwise stop rather than
+  extend to 1M.
