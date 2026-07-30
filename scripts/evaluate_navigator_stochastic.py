@@ -36,6 +36,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--rollout-seed", type=int, action="append", required=True)
     parser.add_argument("--expected-case-id", action="append")
+    parser.add_argument(
+        "--selection",
+        choices=("stochastic", "mode"),
+        default="stochastic",
+        help="Sample from the policy or use its deterministic categorical mode.",
+    )
     return parser.parse_args()
 
 
@@ -143,10 +149,11 @@ def main() -> None:
 
     # This process-local override cannot affect training or checkpoint
     # selection. Each call below executes exactly one independently seeded
-    # stochastic rollout per held-out subject.
-    train_module.deterministic_exploration_type = (
-        lambda _: ExplorationType.RANDOM
-    )
+    # rollout per held-out subject.
+    if args.selection == "stochastic":
+        train_module.deterministic_exploration_type = (
+            lambda _: ExplorationType.RANDOM
+        )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     payloads = []
     for rollout_seed in args.rollout_seed:
@@ -163,7 +170,11 @@ def main() -> None:
 
     summary = {
         "checkpoint": str(args.checkpoint),
-        "selection": "stochastic_sample",
+        "selection": (
+            "stochastic_sample"
+            if args.selection == "stochastic"
+            else "deterministic_mode"
+        ),
         "rollout_seeds": args.rollout_seed,
         "validation_cases": val_case_ids,
         "num_rollouts": len(payloads),
@@ -226,7 +237,11 @@ def main() -> None:
         ),
         "rollouts": payloads,
     }
-    summary_path = args.output_dir / "stochastic_summary.json"
+    summary_path = args.output_dir / (
+        "stochastic_summary.json"
+        if args.selection == "stochastic"
+        else "deterministic_summary.json"
+    )
     summary_path.write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps({key: value for key, value in summary.items() if key != "rollouts"}, indent=2))
 
