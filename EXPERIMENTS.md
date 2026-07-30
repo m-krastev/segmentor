@@ -3512,3 +3512,28 @@ command or service, acceptance metrics, and outcome here.
   diversity `0.09961`, boundary residence `0.93262`, and zero success. This is
   not efficacy evidence, but the technical smoke gate passes. Promote the
   exact fresh 256k ablation.
+- The fresh two-channel run completed 256,000 frames in 20m53s. All 500
+  updates completed five PPO epochs; invalid actions remained exactly zero,
+  maximum KL was `0.011661`, final-ten value loss `0.27463`, stochastic
+  diversity `0.99115`, and maximum action probability only `0.02707`.
+  Training peak allocation/reservation was `7,014.4/9,344 MiB`; complete
+  validation raised reservation to `11,208 MiB`.
+- Deterministic mode fails at every gate:
+  - 102,400: Dice `0.003190`, endpoint `172.59 mm`, boundary `0.99365`;
+  - 204,800: Dice `0.011268`, endpoint `211.08 mm`, boundary `0.33911`;
+  - 256,000: Dice `0.003200`, endpoint `216.98 mm`, boundary `0.97705`.
+  All gates have zero endpoint/traversal success. The policy's categorical
+  mode repeatedly becomes a boundary direction even though stochastic
+  training remains diverse.
+- Fixed stochastic seeds 101/202/303 also reject the hypothesis: mean Dice
+  `0.122273`, endpoint `188.60 mm`, diversity `0.99284`, boundary residence
+  `0.24601`, and zero endpoint/traversal successes. Pt14 Dice is
+  `0.15996-0.19390`; pt18 Dice is `0.03060-0.13227` with endpoint errors
+  `227.10-243.29 mm`. This misses every preregistered promotion condition and
+  is substantially worse than the six-channel control.
+- Conclusion: consistent voxel-level bowel/background ranking is insufficient
+  for directional path control. Forcing PPO to use dark-tubularity discards
+  spatial/intensity cues without solving the pt18 shift. Stop this line at
+  256k. The next method must learn or construct a spatial bowel-likelihood
+  field/energy and plan through it; it should not be another subset of the
+  same four filters or another PPO reward-scale ablation.
