@@ -3499,3 +3499,16 @@ command or service, acceptance metrics, and outcome here.
   `>=0.20` with pt18 endpoint error `<=80 mm` and overall mean Dice above the
   six-channel control's `0.23654`. Otherwise reject the forced invariant cue
   and do not add more PPO frames.
+- The fresh 4,096-frame CUDA smoke confirms
+  `policy_observation_contract=navigation_dark_path`,
+  `observation_channels=2`, the exact seeded split, no reload, and no GT
+  observation. All eight updates completed all five epochs; maximum KL was
+  `0.007519`, final value loss `0.51055`, invalid actions exactly zero, and
+  stochastic diversity `0.99271`. Training peak allocation/reservation was
+  only `7,014.4/7,858 MiB`; complete-process reservation reached
+  `10,900 MiB`, leaving substantially more memory headroom than the
+  six/seven-channel states.
+- Untrained mode validation is Dice `0.006102`, endpoint `216.24 mm`,
+  diversity `0.09961`, boundary residence `0.93262`, and zero success. This is
+  not efficacy evidence, but the technical smoke gate passes. Promote the
+  exact fresh 256k ablation.
