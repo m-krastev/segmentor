@@ -9,7 +9,12 @@ from torchrl.envs.utils import ExplorationType
 from torchrl.modules import set_recurrent_mode
 
 from navigator.config import Config
-from navigator.models import FeasibleCategorical, create_ppo_modules
+from navigator.models import (
+    DirectionMarginalFeasibleCategorical,
+    ExpectedDisplacementFeasibleCategorical,
+    FeasibleCategorical,
+    create_ppo_modules,
+)
 from navigator.models.actor import ActorNetwork
 from navigator.pretrain import _behavior_cloning_action
 from navigator.train import (
@@ -45,6 +50,53 @@ class NavigatorPpoSmokeTest(unittest.TestCase):
         self.assertTrue(torch.isin(samples, torch.tensor([0, 2])).all())
         with self.assertRaisesRegex(ValueError, "at least one"):
             FeasibleCategorical(logits, torch.zeros_like(mask))
+
+    def test_direction_marginal_mode_preserves_joint_likelihoods(self):
+        probabilities = torch.tensor(
+            [[0.26, 0.40, 0.04, 0.25, 0.01, 0.04]]
+        )
+        logits = probabilities.log()
+        mask = torch.ones_like(logits, dtype=torch.bool)
+        joint = FeasibleCategorical(logits, mask)
+        marginal = DirectionMarginalFeasibleCategorical(
+            logits,
+            mask,
+            directions_per_length=3,
+        )
+
+        # Joint MAP is direction 1 at length 0. Direction 0 has more total
+        # mass over lengths and selects its length-0 action.
+        self.assertEqual(joint.mode.item(), 1)
+        self.assertEqual(marginal.mode.item(), 0)
+        torch.testing.assert_close(marginal.probs, joint.probs)
+        for action in range(probabilities.shape[-1]):
+            torch.testing.assert_close(
+                marginal.log_prob(torch.tensor([action])),
+                joint.log_prob(torch.tensor([action])),
+            )
+
+    def test_projected_mean_mode_preserves_joint_likelihoods(self):
+        probabilities = torch.tensor([[0.34, 0.33, 0.33]])
+        logits = probabilities.log()
+        mask = torch.ones_like(logits, dtype=torch.bool)
+        displacements = ((-1, 0, 0), (1, 0, 0), (2, 0, 0))
+        joint = FeasibleCategorical(logits, mask)
+        projected_mean = ExpectedDisplacementFeasibleCategorical(
+            logits,
+            mask,
+            action_displacements=displacements,
+        )
+
+        # Joint MAP moves -1. The expected displacement is +0.65, whose
+        # nearest feasible action is +1.
+        self.assertEqual(joint.mode.item(), 0)
+        self.assertEqual(projected_mean.mode.item(), 1)
+        torch.testing.assert_close(projected_mean.probs, joint.probs)
+        for action in range(probabilities.shape[-1]):
+            torch.testing.assert_close(
+                projected_mean.log_prob(torch.tensor([action])),
+                joint.log_prob(torch.tensor([action])),
+            )
 
     def test_periodic_threshold_cannot_be_skipped(self):
         due, next_threshold = advance_periodic_threshold(399, 400, 400)

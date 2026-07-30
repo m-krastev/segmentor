@@ -42,23 +42,113 @@ class NavigatorVisualEncoder(nn.Module):
             nn.GELU(),
         )
 
-    def forward(self, observation: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
-        batch_shape = observation.shape[:-4]
+    def encode_spatial(self, observation: torch.Tensor) -> torch.Tensor:
+        """Return the shared convolutional feature map before spatial pooling."""
+
         if observation.dim() > 5:
             observation = observation.flatten(0, -5)
-            context = context.flatten(0, -2)
 
         features = self.conv1(observation)
         features = self.pool1(features)
         features = self.conv2(features)
         features = self.pool2(features)
         features = self.conv3(features)
+        return features
+
+    def spatial_state_dict(self) -> dict[str, torch.Tensor]:
+        """Return only parameters trained by image-space pretraining."""
+
+        return {
+            name: value
+            for name, value in self.state_dict().items()
+            if name.startswith(("conv1.", "conv2.", "conv3."))
+        }
+
+    def load_spatial_checkpoint(self, checkpoint_path: str) -> None:
+        """Load image-only convolutional weights with safe channel expansion."""
+
+        checkpoint = torch.load(
+            checkpoint_path,
+            map_location="cpu",
+            weights_only=True,
+        )
+        source_state = checkpoint.get("spatial_encoder_state_dict", checkpoint)
+        if not isinstance(source_state, dict):
+            raise ValueError(
+                "Visual encoder checkpoint must contain a state dictionary"
+            )
+
+        target_state = self.state_dict()
+        adapted_state = {}
+        for name, source in source_state.items():
+            if name not in target_state:
+                raise ValueError(f"Unexpected pretrained encoder parameter: {name}")
+            target = target_state[name]
+            if source.shape == target.shape:
+                adapted_state[name] = source
+                continue
+            if (
+                name == "conv1.conv.weight"
+                and source.dim() == target.dim() == 5
+                and source.shape[0] == target.shape[0]
+                and source.shape[2:] == target.shape[2:]
+                and source.shape[1] <= target.shape[1]
+            ):
+                expanded = torch.zeros_like(target)
+                expanded[:, : source.shape[1]].copy_(source)
+                adapted_state[name] = expanded
+                continue
+            raise ValueError(
+                f"Incompatible pretrained encoder parameter {name}: "
+                f"{tuple(source.shape)} != {tuple(target.shape)}"
+            )
+
+        missing, unexpected = self.load_state_dict(adapted_state, strict=False)
+        non_project_missing = [
+            name
+            for name in missing
+            if not name.startswith("project.")
+        ]
+        if non_project_missing or unexpected:
+            raise ValueError(
+                "Incomplete pretrained spatial encoder state: "
+                f"missing={non_project_missing}, unexpected={unexpected}"
+            )
+
+    def forward(self, observation: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
+        batch_shape = observation.shape[:-4]
+        if observation.dim() > 5:
+            context = context.flatten(0, -2)
+
+        features = self.encode_spatial(observation)
         features = self.spatial_pool(features)
         features = self.project(torch.cat([features.flatten(-4), context], dim=-1))
 
         if len(batch_shape) > 1:
             features = features.view(*batch_shape, -1)
         return features
+
+
+class NavigatorDenoisingAutoencoder(nn.Module):
+    """Pretrain Navigator's spatial encoder on label-free image reconstruction."""
+
+    def __init__(self, input_channels: int = 5):
+        super().__init__()
+        self.encoder = NavigatorVisualEncoder(
+            input_channels=input_channels,
+            context_features=0,
+            output_features=256,
+        )
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose3d(64, 32, kernel_size=2, stride=2),
+            ConvBlock(32, 32, kernel_size=3, padding=1, num_groups=8),
+            nn.ConvTranspose3d(32, 16, kernel_size=2, stride=2),
+            ConvBlock(16, 16, kernel_size=3, padding=1, num_groups=8),
+            nn.Conv3d(16, input_channels, kernel_size=1),
+        )
+
+    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+        return self.decoder(self.encoder.encode_spatial(observation))
 
 
 class RecurrentBetaHead(nn.Module):

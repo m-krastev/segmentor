@@ -29,6 +29,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--case-id", action="append", required=True)
+    parser.add_argument(
+        "--start-voxel",
+        type=int,
+        nargs=3,
+        metavar=("X", "Y", "Z"),
+        help="Explicit image-only/user-supplied start for one case",
+    )
     parser.add_argument("--voxel-size-mm", type=float, default=1.5)
     parser.add_argument("--hessian-scale-mm", type=float, default=6.0)
     parser.add_argument("--hessian-strength-percentile", type=float, default=95.0)
@@ -553,6 +560,12 @@ def evaluate_case(args: argparse.Namespace, case_id: str) -> dict:
         dtype=int,
     ).reshape(2, 3)
     start, endpoint = start_end
+    start_source = "cached_anatomical_landmark"
+    if args.start_voxel is not None:
+        start = np.asarray(args.start_voxel, dtype=int)
+        start_source = "explicit_override"
+    if np.any(start < 0) or np.any(start >= np.asarray(image.shape)):
+        raise ValueError(f"{case_id}: start voxel is outside the image")
     if args.initial_axis_sign:
         plan = plan_energy_beam(
             image,
@@ -683,6 +696,7 @@ def evaluate_case(args: argparse.Namespace, case_id: str) -> dict:
     return {
         "case_id": case_id,
         "start": start.tolist(),
+        "start_source": start_source,
         "endpoint_for_audit_only": endpoint.tolist(),
         **{
             key: value
@@ -708,6 +722,8 @@ def main() -> None:
     args = parse_args()
     if len(set(args.case_id)) != len(args.case_id):
         raise ValueError("Case IDs must be unique")
+    if args.start_voxel is not None and len(args.case_id) != 1:
+        raise ValueError("--start-voxel requires exactly one --case-id")
     positive_values = (
         args.voxel_size_mm,
         args.hessian_scale_mm,

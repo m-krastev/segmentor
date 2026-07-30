@@ -42,10 +42,19 @@ def parse_args() -> argparse.Namespace:
         default="stochastic",
         help="Sample from the policy or use its deterministic categorical mode.",
     )
+    parser.add_argument(
+        "--categorical-deterministic-decoding",
+        choices=("joint_mode", "direction_marginal_mode", "projected_mean"),
+        help="Optional mode decoder override; sampling is unchanged",
+    )
     return parser.parse_args()
 
 
-def config_from_checkpoint(saved: dict, output_dir: Path) -> Config:
+def config_from_checkpoint(
+    saved: dict,
+    output_dir: Path,
+    categorical_deterministic_decoding: str | None = None,
+) -> Config:
     initializable = {field.name for field in fields(Config) if field.init}
     values = {
         key: value
@@ -60,8 +69,15 @@ def config_from_checkpoint(saved: dict, output_dir: Path) -> Config:
             "track_wandb": False,
             "track_tensorboard": False,
             "eval_only": True,
+            # The complete policy state below already contains the encoder.
+            # Evaluation must not depend on the original initialization file.
+            "visual_encoder_checkpoint": None,
         }
     )
+    if categorical_deterministic_decoding is not None:
+        values["categorical_deterministic_decoding"] = (
+            categorical_deterministic_decoding
+        )
     return Config(**values)
 
 
@@ -125,15 +141,42 @@ def main() -> None:
         map_location="cpu",
         weights_only=False,
     )
-    config = config_from_checkpoint(checkpoint["config"], args.output_dir)
+    config = config_from_checkpoint(
+        checkpoint["config"],
+        args.output_dir,
+        args.categorical_deterministic_decoding,
+    )
     seed_everything(config.seed)
     dataset = SmallBowelDataset(config.data_dir, config)
-    indices = np.arange(len(dataset))
-    if config.shuffle_dataset:
-        np.random.shuffle(indices)
-    train_size = int(len(dataset) * config.train_val_split)
-    val_indices = indices[train_size:]
-    val_case_ids = [dataset.subjects[index]["id"] for index in val_indices]
+    if config.val_case_ids_file:
+        val_case_ids = [
+            line.strip()
+            for line in Path(config.val_case_ids_file).read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        if not val_case_ids or len(val_case_ids) != len(set(val_case_ids)):
+            raise ValueError("Validation manifest must contain unique case IDs")
+        index_by_id = {
+            subject["id"]: index for index, subject in enumerate(dataset.subjects)
+        }
+        missing = set(val_case_ids) - set(index_by_id)
+        if missing:
+            raise ValueError(
+                f"Validation manifest contains unknown subjects: {sorted(missing)}"
+            )
+        val_indices = np.asarray(
+            [index_by_id[case_id] for case_id in val_case_ids],
+            dtype=int,
+        )
+    else:
+        indices = np.arange(len(dataset))
+        if config.shuffle_dataset:
+            np.random.shuffle(indices)
+        train_size = int(len(dataset) * config.train_val_split)
+        val_indices = indices[train_size:]
+        val_case_ids = [
+            dataset.subjects[index]["id"] for index in val_indices
+        ]
     if args.expected_case_id:
         expected = sorted(args.expected_case_id)
         if sorted(val_case_ids) != expected:

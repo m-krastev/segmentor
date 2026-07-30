@@ -26,6 +26,10 @@ class Config:
     # --- Dataset Parameters ---
     train_val_split: float = 0.8  # Fraction of data to use for training
     shuffle_dataset: bool = True  # Whether to shuffle dataset before splitting
+    # Optional immutable split for either dataset backend. Both files are
+    # required together and contain one subject ID per line.
+    train_case_ids_file: Optional[str] = None
+    val_case_ids_file: Optional[str] = None
     nnunet_raw_dir: Optional[str] = None
     nnunet_cache_dir: str = "results/navigator_nnunet/cache"
     nnunet_case_ids_file: Optional[str] = None
@@ -169,6 +173,10 @@ class Config:
     behavior_cloning_batch_size: int = 64
     behavior_cloning_max_policy_probability: float = 1.0
     behavior_cloning_action_statistic: str = "mean"
+    # Optional label-free image-pretraining checkpoint for the shared
+    # recurrent visual encoder. The policy-only path channel is zero-initialized
+    # when a five-channel image encoder expands to six channels.
+    visual_encoder_checkpoint: Optional[str] = None
     # Recurrent policies share one visual encoder between actor and critic.
     # "s5" is a dependency-free diagonal S5-style state-space baseline.
     memory_model: str = "none"
@@ -188,6 +196,10 @@ class Config:
     # "direction_length" separates 26 lattice directions and integer
     # Chebyshev lengths, avoiding thousands of near-duplicate headings.
     categorical_action_support: str = "dense"
+    # Joint mode is ordinary categorical MAP. Direction-marginal mode groups
+    # lengths per direction. Projected mean uses the expected displacement's
+    # nearest feasible action. PPO sampling/likelihoods remain unchanged.
+    categorical_deterministic_decoding: str = "joint_mode"
     # Write the code to force the agent to always move
     # num_episodes_per_sample: int = 32
     total_timesteps: int = 10_000_000
@@ -376,6 +388,10 @@ class Config:
             )
         if self.memory_model not in {"none", "gru", "s5"}:
             raise ValueError("memory_model must be one of: none, gru, s5")
+        if self.visual_encoder_checkpoint and self.memory_model == "none":
+            raise ValueError(
+                "visual_encoder_checkpoint requires a shared recurrent encoder"
+            )
         if self.memory_hidden_size < 1:
             raise ValueError("memory_hidden_size must be positive")
         if self.memory_num_layers < 1:
@@ -423,6 +439,34 @@ class Config:
                 "categorical_action_support must be either dense or "
                 "direction_length"
             )
+        if self.categorical_deterministic_decoding not in {
+            "joint_mode",
+            "direction_marginal_mode",
+            "projected_mean",
+        }:
+            raise ValueError(
+                "categorical_deterministic_decoding must be joint_mode, "
+                "direction_marginal_mode, or projected_mean"
+            )
+        if (
+            self.categorical_deterministic_decoding
+            == "direction_marginal_mode"
+            and (
+                self.categorical_action_support != "direction_length"
+                or self.action_distribution != "masked_categorical"
+            )
+        ):
+            raise ValueError(
+                "direction_marginal_mode requires a masked direction_length "
+                "categorical policy"
+            )
+        if (
+            self.categorical_deterministic_decoding == "projected_mean"
+            and self.action_distribution != "masked_categorical"
+        ):
+            raise ValueError(
+                "projected_mean requires a masked categorical policy"
+            )
         if (
             self.categorical_action_support != "dense"
             and self.action_distribution
@@ -437,6 +481,16 @@ class Config:
         if self.annotation_free and self.reward_supervised:
             raise ValueError(
                 "annotation_free and reward_supervised are mutually exclusive"
+            )
+        if bool(self.train_case_ids_file) != bool(self.val_case_ids_file):
+            raise ValueError(
+                "train_case_ids_file and val_case_ids_file are required together"
+            )
+        if (self.train_case_ids_file or self.val_case_ids_file) and (
+            self.nnunet_train_case_ids_file or self.nnunet_val_case_ids_file
+        ):
+            raise ValueError(
+                "Generic and legacy nnU-Net split manifests cannot be combined"
             )
         if self.annotation_free:
             incompatible = {

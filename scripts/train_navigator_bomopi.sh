@@ -31,6 +31,9 @@ CATEGORICAL_ACTION_SUPPORT="${NAVIGATOR_CATEGORICAL_ACTION_SUPPORT:-dense}"
 REVISIT_PENALTY_SCALE="${NAVIGATOR_REVISIT_PENALTY_SCALE:-0.01}"
 REWARD_CONTRACT="${NAVIGATOR_REWARD_CONTRACT:-potential}"
 POLICY_OBSERVATION_CONTRACT="${NAVIGATOR_POLICY_OBSERVATION_CONTRACT:-navigation_filters}"
+TRAIN_CASE_IDS_FILE="${NAVIGATOR_TRAIN_CASE_IDS_FILE:-}"
+VAL_CASE_IDS_FILE="${NAVIGATOR_VAL_CASE_IDS_FILE:-}"
+VISUAL_ENCODER_CHECKPOINT="${NAVIGATOR_VISUAL_ENCODER_CHECKPOINT:-}"
 
 cd "$PROJECT_ROOT"
 if [[ ! -d "$DATA_DIR" ]]; then
@@ -68,6 +71,21 @@ printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_co
 EXTRA_ARGS=()
 if [[ -n "$RELOAD_CHECKPOINT_PATH" ]]; then
   EXTRA_ARGS+=(--reload-checkpoint-path "$RELOAD_CHECKPOINT_PATH")
+fi
+if [[ -n "$VISUAL_ENCODER_CHECKPOINT" ]]; then
+  EXTRA_ARGS+=(--visual-encoder-checkpoint "$VISUAL_ENCODER_CHECKPOINT")
+fi
+if [[ -n "$TRAIN_CASE_IDS_FILE" || -n "$VAL_CASE_IDS_FILE" ]]; then
+  if [[ -z "$TRAIN_CASE_IDS_FILE" || -z "$VAL_CASE_IDS_FILE" ]]; then
+    echo \
+      "NAVIGATOR_TRAIN_CASE_IDS_FILE and NAVIGATOR_VAL_CASE_IDS_FILE are required together" \
+      >&2
+    exit 2
+  fi
+  EXTRA_ARGS+=(
+    --train-case-ids-file "$TRAIN_CASE_IDS_FILE"
+    --val-case-ids-file "$VAL_CASE_IDS_FILE"
+  )
 fi
 case "$OBSERVE_SEGMENTATION" in
   true|1|yes)

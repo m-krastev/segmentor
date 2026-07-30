@@ -75,38 +75,51 @@ def main():
             print(f"Error initializing wandb: {e}. Wandb tracking disabled.")
             config.track_wandb = False  # Disable tracking if init fails
 
+    generic_split = bool(
+        config.train_case_ids_file or config.val_case_ids_file
+    )
+    legacy_nnunet_split = bool(
+        config.nnunet_train_case_ids_file
+        or config.nnunet_val_case_ids_file
+    )
+    explicit_train_ids = explicit_val_ids = None
+    if generic_split or legacy_nnunet_split:
+        train_manifest = (
+            config.train_case_ids_file
+            if generic_split
+            else config.nnunet_train_case_ids_file
+        )
+        val_manifest = (
+            config.val_case_ids_file
+            if generic_split
+            else config.nnunet_val_case_ids_file
+        )
+        if not train_manifest or not val_manifest:
+            raise ValueError(
+                "Both train and validation case-ID manifests are required."
+            )
+        if config.nnunet_case_ids_file:
+            raise ValueError(
+                "--nnunet-case-ids-file cannot be combined with explicit "
+                "train/validation manifests."
+            )
+        explicit_train_ids = read_case_ids(train_manifest)
+        explicit_val_ids = read_case_ids(val_manifest)
+        overlap = set(explicit_train_ids) & set(explicit_val_ids)
+        if overlap:
+            raise ValueError(
+                f"Train/validation manifests overlap: {sorted(overlap)}"
+            )
+        print(
+            "Using immutable split: "
+            f"{len(explicit_train_ids)} train / "
+            f"{len(explicit_val_ids)} validation"
+        )
+
     if config.nnunet_raw_dir:
         case_ids = None
-        explicit_train_ids = explicit_val_ids = None
-        has_explicit_split = bool(
-            config.nnunet_train_case_ids_file or config.nnunet_val_case_ids_file
-        )
-        if has_explicit_split:
-            if not (
-                config.nnunet_train_case_ids_file
-                and config.nnunet_val_case_ids_file
-            ):
-                raise ValueError(
-                    "Both --nnunet-train-case-ids-file and "
-                    "--nnunet-val-case-ids-file are required."
-                )
-            if config.nnunet_case_ids_file:
-                raise ValueError(
-                    "--nnunet-case-ids-file cannot be combined with explicit "
-                    "train/validation manifests."
-                )
-            explicit_train_ids = read_case_ids(config.nnunet_train_case_ids_file)
-            explicit_val_ids = read_case_ids(config.nnunet_val_case_ids_file)
-            overlap = set(explicit_train_ids) & set(explicit_val_ids)
-            if overlap:
-                raise ValueError(
-                    f"Train/validation manifests overlap: {sorted(overlap)}"
-                )
+        if explicit_train_ids is not None:
             case_ids = explicit_train_ids + explicit_val_ids
-            print(
-                "Using immutable nnU-Net split: "
-                f"{len(explicit_train_ids)} train / {len(explicit_val_ids)} validation"
-            )
         if config.nnunet_case_ids_file:
             case_ids = read_case_ids(config.nnunet_case_ids_file)
             print(
@@ -130,10 +143,17 @@ def main():
     os.makedirs(config.checkpoint_dir, exist_ok=True)
 
     # --- Dataset Splitting and Iterators ---
-    if config.nnunet_raw_dir and explicit_train_ids is not None:
+    if explicit_train_ids is not None:
         index_by_id = {
             subject["id"]: index for index, subject in enumerate(dataset.subjects)
         }
+        missing_ids = (
+            set(explicit_train_ids) | set(explicit_val_ids)
+        ) - set(index_by_id)
+        if missing_ids:
+            raise ValueError(
+                f"Split manifests contain unknown subjects: {sorted(missing_ids)}"
+            )
         train_indices = np.asarray(
             [index_by_id[case_id] for case_id in explicit_train_ids],
             dtype=int,

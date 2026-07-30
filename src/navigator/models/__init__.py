@@ -29,6 +29,8 @@ from ..config import Config
 __all__ = [
     "ActorNetwork",
     "CriticNetwork",
+    "DirectionMarginalFeasibleCategorical",
+    "ExpectedDisplacementFeasibleCategorical",
     "FeasibleCategorical",
     "NavigatorVisualEncoder",
     "create_ppo_modules",
@@ -117,6 +119,87 @@ class FeasibleCategorical(Categorical):
             raise ValueError("Every state must expose at least one feasible action")
         self.action_mask = action_mask
         super().__init__(logits=logits.masked_fill(~action_mask, -torch.inf))
+
+
+class DirectionMarginalFeasibleCategorical(FeasibleCategorical):
+    """Use direction-marginal mass only for deterministic decoding.
+
+    Sampling, entropy, and log-probability are inherited unchanged. The mode
+    selects the direction with the most total probability over step lengths,
+    then that direction's conditional MAP length.
+    """
+
+    def __init__(
+        self,
+        logits: torch.Tensor,
+        action_mask: torch.Tensor,
+        directions_per_length: int,
+    ):
+        super().__init__(logits, action_mask)
+        if (
+            directions_per_length < 1
+            or logits.shape[-1] % directions_per_length
+        ):
+            raise ValueError(
+                "Action count must be divisible by directions_per_length"
+            )
+        self.directions_per_length = directions_per_length
+
+    @property
+    def mode(self) -> torch.Tensor:
+        grouped_probabilities = self.probs.unflatten(
+            -1,
+            (-1, self.directions_per_length),
+        )
+        direction = grouped_probabilities.sum(dim=-2).argmax(dim=-1)
+        gather_index = direction[..., None, None].expand(
+            *direction.shape,
+            grouped_probabilities.shape[-2],
+            1,
+        )
+        conditional_length_probability = torch.gather(
+            grouped_probabilities,
+            dim=-1,
+            index=gather_index,
+        ).squeeze(-1)
+        length = conditional_length_probability.argmax(dim=-1)
+        return length * self.directions_per_length + direction
+
+
+class ExpectedDisplacementFeasibleCategorical(FeasibleCategorical):
+    """Project the expected displacement onto the feasible action support."""
+
+    def __init__(
+        self,
+        logits: torch.Tensor,
+        action_mask: torch.Tensor,
+        action_displacements,
+    ):
+        super().__init__(logits, action_mask)
+        displacements = torch.as_tensor(
+            action_displacements,
+            dtype=logits.dtype,
+            device=logits.device,
+        )
+        if displacements.shape != (logits.shape[-1], 3):
+            raise ValueError(
+                "action_displacements must have shape (action_count, 3)"
+            )
+        self.action_displacements = displacements
+
+    @property
+    def mode(self) -> torch.Tensor:
+        expected_displacement = (
+            self.probs.unsqueeze(-1) * self.action_displacements
+        ).sum(dim=-2)
+        squared_error = (
+            self.action_displacements - expected_displacement.unsqueeze(-2)
+        ).square().sum(dim=-1)
+        squared_error = squared_error.masked_fill(
+            ~self.action_mask,
+            torch.inf,
+        )
+        return squared_error.argmin(dim=-1)
 
 
 # --- TorchRL Modules ---
@@ -223,12 +306,19 @@ def _create_recurrent_ppo_modules(
 ):
     """Create a shared-encoder recurrent actor and critic."""
 
+    visual_encoder = NavigatorVisualEncoder(
+        input_channels=input_channels,
+        context_features=config.context_features,
+        output_features=config.memory_hidden_size,
+    )
+    if config.visual_encoder_checkpoint:
+        visual_encoder.load_spatial_checkpoint(config.visual_encoder_checkpoint)
+        print(
+            "Loaded pretrained visual encoder from "
+            f"{config.visual_encoder_checkpoint}"
+        )
     encoder = TensorDictModule(
-        NavigatorVisualEncoder(
-            input_channels=input_channels,
-            context_features=config.context_features,
-            output_features=config.memory_hidden_size,
-        ),
+        visual_encoder,
         in_keys=["actor", "context"],
         out_keys=["memory_input"],
     )
@@ -259,6 +349,7 @@ def _create_recurrent_ppo_modules(
         raise ValueError(f"Unsupported memory model: {config.memory_model}")
 
     common = TensorDictSequential(encoder, memory)
+    distribution_kwargs = {}
     if config.action_distribution == "beta":
         parameter_module = TensorDictModule(
             RecurrentBetaHead(
@@ -294,7 +385,24 @@ def _create_recurrent_ppo_modules(
             device=device,
         )
         if config.action_distribution == "masked_categorical":
-            distribution_class = FeasibleCategorical
+            if (
+                config.categorical_deterministic_decoding
+                == "direction_marginal_mode"
+            ):
+                distribution_class = DirectionMarginalFeasibleCategorical
+                distribution_kwargs = {
+                    "directions_per_length": (
+                        config.categorical_action_count
+                        // config.max_step_vox
+                    )
+                }
+            elif config.categorical_deterministic_decoding == "projected_mean":
+                distribution_class = ExpectedDisplacementFeasibleCategorical
+                distribution_kwargs = {
+                    "action_displacements": config.action_displacements
+                }
+            else:
+                distribution_class = FeasibleCategorical
             distribution_in_keys = ["logits", "action_mask"]
         else:
             distribution_class = Categorical
@@ -323,6 +431,7 @@ def _create_recurrent_ppo_modules(
         in_keys=distribution_in_keys,
         out_keys=["action"],
         distribution_class=distribution_class,
+        distribution_kwargs=distribution_kwargs,
         return_log_prob=True,
         default_interaction_type=InteractionType.RANDOM,
     )
