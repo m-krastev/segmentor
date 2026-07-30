@@ -3265,3 +3265,15 @@ command or service, acceptance metrics, and outcome here.
   Exact interior, low-boundary, high-boundary, multichannel, and supervised
   channel regressions pass. The complete remote Navigator suite passes under
   `uv`: `104 passed`, four subtests passed, 18 warnings.
+- The fresh `smoke4k-v2` rerun completed all 4,096 training frames and both
+  held-out 2,048-step validations in 46.5s. Training peak CUDA telemetry was
+  `10,645.7/12,014 MiB` allocated/reserved; complete-process validation peak
+  was `14,590/14,828 MiB`. One 20-MiB expandable-segment mapping warning
+  remained during validation, but no allocation failed and the final
+  checkpoint/metrics were saved.
+- Technical promotion gate passes: seven policy channels, no reload, all five
+  PPO epochs, KL `0.00464`, value loss `0.4087`, exactly zero invalid actions,
+  and stochastic training diversity `0.9891`. Untrained deterministic smoke
+  quality is Dice `0.03672`, endpoint error `192.59 mm`, diversity `0.03516`,
+  boundary residence `0.3840`, and zero endpoint/traversal success; this is not
+  treated as learned evidence.
