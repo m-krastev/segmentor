@@ -128,6 +128,13 @@ NAVIGATOR_TRAIN_SCRIPT=scripts/run_navigator_bomopi_068_masked_compact_256k.sh \
   scripts/navigator_systemd.sh start navigator-bomopi-gru-068-masked-compact-256k-v1
 ```
 
+The entropy-scale ablation is a separate fresh run:
+
+```bash
+NAVIGATOR_TRAIN_SCRIPT=scripts/run_navigator_bomopi_068_masked_compact_lowent_64k.sh \
+  scripts/navigator_systemd.sh start navigator-bomopi-gru-068-masked-compact-lowent-64k-v1
+```
+
 #### Data Preprocessing for nnUNet
 
 To prepare data for nnUNet format:

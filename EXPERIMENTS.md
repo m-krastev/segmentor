@@ -2906,3 +2906,60 @@ command or service, acceptance metrics, and outcome here.
   `total_timesteps` value from silently making cosine annealing rise after
   resume. Continue beyond 256k only with a held-out positive-GDT increase and
   sustained Dice/diversity, and never without an endpoint reach by 1M.
+- `navigator-bomopi-gru-068-masked-compact-256k-v1.service` resumed exactly
+  from 65,536 frames/640 PPO epochs, held learning rate at `5e-6`, and
+  completed 256,000 frames with exit status zero in 17m25s. Mandatory final
+  validation ran at frame 256,000; peak CUDA allocation/reservation was
+  `7,590.5/12,450 MiB`.
+- The continuation was highly non-monotonic:
+  - its best checkpoint was 81,920 frames: Dice `0.069358`, endpoint
+    `186.960 mm`, positive GDT `0.011875`, diversity `0.134766`, boundary
+    residence `0.003125`;
+  - intermediate Dice then ranged from `0.010686` to `0.039336`, with endpoint
+    distance ranging from `42.5` to `240.3 mm` and boundary residence from
+    `0.0012` to `0.9019`;
+  - the 256,000-frame final policy had Dice `0.036279`, endpoint
+    `92.573 mm`, positive GDT `0.0225`, diversity `0.011719`, and boundary
+    residence `0.45375`. Neither case reached its endpoint at any gate.
+- The final policy's two paths each occupied only three unique positions in
+  the last 256 steps. The reproducibly re-evaluated best checkpoint also
+  failed end-to-end: pt14 had 157 unique positions over 801 states and 52 in
+  the last 256; pt18 had 271 overall but only 17 in the last 256. Its Dice
+  (`0.09263`/`0.04608`) therefore reflects the accumulated dilated partial
+  route before terminal cycling, not traversal.
+- Optimization remained diffuse. At the best 81,920 checkpoint, maximum action
+  probability was `0.01361`, logit standard deviation `0.2863`, and raw
+  entropy approximately `4.9538` of the `5.0499`-nat maximum. At 256k,
+  maximum probability was still `0.01789`, raw entropy `4.9420`, value loss
+  had worsened to `8.155`, and invalid actions remained exactly zero.
+  Compact support creates better candidate modes, but PPO with this entropy
+  scale does not stabilize them.
+- Decision: do not extend this run unchanged to 1M. It missed the required
+  endpoint reach and remains far below the `0.40` Dice target despite a
+  transient `0.069` best checkpoint.
+
+### M25: Preregistered compact categorical entropy-scale ablation
+
+- The `0.001` coefficient from the continuous-action reference is not
+  dimensionless with respect to a 156-way categorical. At the best compact
+  checkpoint its entropy loss was `-0.004954`, about 34% of the magnitude of
+  policy loss `-0.014636`; at 256k it was `-0.004942` versus policy loss
+  `-0.008491`. The policy retained roughly 142 effective actions and its
+  deterministic mode changed drastically between validation gates.
+- Run one fresh, otherwise identical compact 64k screen with
+  `ent_coef=0.0001`. This makes the initial maximum entropy contribution about
+  `0.000505`, an order of magnitude smaller, without removing stochastic PPO
+  exploration. It changes no reward, input, data split, mask, action support,
+  likelihood, movement, horizon, or success metric.
+- Reproducible launcher:
+  `scripts/run_navigator_bomopi_068_masked_compact_lowent_64k.sh`.
+  A 4,096-frame smoke must retain finite KL and zero invalid actions before the
+  64k run.
+- Desired evidence is stable concentration, not merely a sharper bad mode:
+  maximum action probability should rise above `0.03` while raw entropy stays
+  above `3.0` nats; recent diversity should remain above `0.10`; boundary
+  residence below `0.80`; positive-GDT fraction at least `0.02`; and at least
+  two consecutive held-out gates should improve Dice or endpoint distance.
+  Reject immediately as premature collapse if maximum action probability
+  exceeds `0.25` alongside low diversity or boundary cycling. The endpoint
+  and `0.40` Dice definitions remain unchanged.
