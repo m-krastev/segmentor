@@ -3571,3 +3571,128 @@ command or service, acceptance metrics, and outcome here.
   include spatial tube orientation/continuity and probably conservative
   online appearance adaptation; its audit should measure directional
   alignment and connected traversal, not only voxel ROC AUC.
+
+### M31: Label-free Hessian orientation and energy tracking
+
+- Test whether clipped CT contains a usable local direction field before
+  spending more PPO frames. `scripts/audit_navigator_hessian_orientation.py`
+  compares the minimum-absolute-eigenvalue Hessian axis against local PCA
+  tangents of the audit-only bowel skeleton. Planning inputs never include the
+  skeleton, segmentation, endpoint, GDT, or Dice.
+- A straight synthetic tube gives exactly zero median angular error. Across all
+  17 BOMOPI cases, the 6-mm Hessian has mean absolute cosine `0.69759`, median
+  angle `33.48 deg`, `45.96%` within 30 degrees, and `60.06%` within 45
+  degrees, versus the unoriented random-axis baselines `0.5`, `60 deg`,
+  `13.40%`, and `29.29%`. The top half by axis-gap confidence improves to
+  cosine `0.74855`, median `27.76 deg`, and `52.48%` within 30 degrees.
+  Three and 9 mm are weaker (`42.94/37.86 deg` median). Held-out pt14/pt18
+  retain real but imperfect 6-mm signal (`35.92/38.88 deg` median).
+  Artifact:
+  `/home/matey/project/segmentor/results/navigator_bomopi/hessian-orientation-train15-test2.json`.
+- `scripts/evaluate_navigator_hessian_streamline.py` integrates the continuous
+  6-mm axis in floating-point voxel coordinates, aligns its sign to the
+  previous move, uses midpoint integration, plans both initial orientations,
+  and selects without labels. It fails on pt14/pt18: mean Dice `0.03045`,
+  endpoint `105.13 mm`, and zero traversal. Step-size/momentum diagnostics
+  (`1.5/3.0 mm`, momentum `0.75/0.9`) do not repair it. The field follows
+  other tubular anatomy, so sub-voxel integration is not the remaining
+  blocker. Artifact:
+  `/home/matey/project/segmentor/results/navigator_bomopi/hessian-streamline-6mm-step4.5-v1.json`.
+- Implement `scripts/evaluate_navigator_hessian_energy_beam.py` as a
+  label-free continuous beam tracker. It uses clipped CT Hessians, the cached
+  image-only dark response, one supplied start seed, 26 physical unit
+  directions, continuous positions, trilinear sampling, a 60-degree turn
+  limit, and post-planning audit metrics. Target and endpoint files are opened
+  only after planning. The two unoriented seed-axis branches are searched
+  independently, then selected by image energy.
+- The first synthetic test exposed two invalid objective details:
+  - a global visited set let one beam branch penalize another. Revisit memory
+    is now path-local, full-episode by default, and contains every undilated
+    voxel rasterized along each 4.5-mm segment;
+  - all-positive terms forced paths to grow forever. A stop action is now the
+    best-scoring prefix under an explicit per-step cost. On a finite bright
+    synthetic tube, the selected branch follows `[4,16,16]` to `[34,16,16]`
+    in ten moves and stops rather than turning into background. This behavior
+    is covered by `tests/test_navigator_hessian_energy_beam.py`.
+- Reject two reward-hacking variants before real validation:
+  - `dark_weight * (1-dark)` is nearly a constant positive reward because the
+    Meijering cache is black over most of the volume. V5 drives its selected
+    mean dark penalty to only `0.03-0.05` while following wrong anatomy and
+    obtains mean training Dice only `0.05472`;
+  - direct positive CT reward leaves a synthetic bright background instead of
+    following a dark tube. Static seed-CT similarity is also disabled because
+    M30 shows it reverses across subjects and pt11's later on-bowel CT differs
+    strongly from its seed. Default CT and seed-CT weights are therefore zero.
+- Ratios alone also reward numerical structure in nearly flat regions. Add a
+  deterministic subject-specific 95th-percentile scale for the middle
+  absolute Hessian eigenvalue, estimated from up to 200,000 image voxels.
+  Multiply axis and transverse-balance evidence by clipped normalized
+  strength, add `0.25 * strength`, retain `-2 * dark`, `-1 * revisit`, and a
+  `-1.75` step cost. On the three calibration cases pt1/pt11/pt6 with beam 32:
+  - 512 moves: mean Dice `0.20192`, endpoint `125.81 mm`
+    (`0.22631/0.24148/0.13797`);
+  - 1,024 moves: mean Dice `0.24791`, endpoint `104.28 mm`
+    (`0.31037/0.24197/0.19140`);
+  - 2,048 moves: mean Dice `0.29583`, endpoint `63.96 mm`
+    (`0.39167/0.23280/0.26301`).
+  No case reaches the strict 3-mm endpoint or traversal gate. Prefix Dice
+  generally improves with horizon for pt1/pt6, while pt11 peaks at `0.26636`
+  near 768 moves and then accumulates false positives.
+- Audit every proposed discriminator numerically on training paths:
+  - Hessian bright polarity separates selected on/off-bowel points strongly
+    for pt1 (`78.0/24.4%` both-negative) and pt6 (`95.3/23.7%`), less so for
+    pt11 (`93.6/70.8%`). Hard gating improves pt1 at 512 moves
+    (`0.226 -> 0.354`) but makes pt6 collapse (`0.138 -> 0.0028`); a soft
+    centered polarity term also fails to improve mean Dice. Polarity remains
+    an optional ablation and defaults to unsigned/zero weight.
+  - Fixed 3-mm Hessians improve pt1/pt11 to `0.29667/0.28172` but collapse pt6
+    to `0.00507`; 9 mm gives mean `0.17559`; 6 mm remains the safest mean.
+    Image score cannot select a scale because the catastrophic pt6 3-mm path
+    has the highest score. Multiscale pairwise axis consensus is also
+    non-discriminative on/off bowel, and minimum strength reverses on pt6.
+  - Concatenating both 2,048-step seed branches increases false-positive
+    volume and lowers mean Dice from `0.29583` to `0.27241`; retain
+    image-energy branch selection.
+- Increasing beam width from 32 to 128 is the first search-only improvement.
+  At 512 moves it raises mean Dice `0.20192 -> 0.22237` and reduces final
+  endpoint error `125.81 -> 49.16 mm`. At 1,024 moves it reaches mean Dice
+  `0.32827`, final endpoint `84.44 mm`, and mean minimum-over-path endpoint
+  `13.79 mm`: pt1 `0.39867`, pt11 `0.32755`, pt6 `0.25860`. Pt11 passes
+  within `4.44 mm` of the endpoint but does not meet the 3-mm gate. Artifact:
+  `/home/matey/project/segmentor/results/navigator_bomopi/hessian-energy-beam-train3-width128-1024-v14.json`.
+- The width-128, 2,048-step promotion
+  (`navigator-energy-width128-2048-v15.service`) completes successfully, but
+  does not justify the longer horizon. Mean Dice is `0.33004`, only `0.00176`
+  above 1,024, while pt1/pt11 regress to `0.35604/0.28503`, pt6 improves to
+  `0.34904`, and final endpoint error worsens to `148.42 mm`. Energy-prefix
+  means decline in all three cases and cannot distinguish the useful pt6
+  extension from the harmful pt1/pt11 extensions. Freeze width 128 and 1,024
+  steps as the parsimonious held-out configuration; do not select a per-case
+  prefix using GT. Artifact:
+  `/home/matey/project/segmentor/results/navigator_bomopi/hessian-energy-beam-train3-width128-2048-v15.json`.
+- Launch exactly one frozen evaluation on pt14/pt18 as
+  `navigator-energy-heldout-width128-1024-v16.service`. No further objective,
+  scale, horizon, or beam-width tuning may use these two cases.
+- The frozen service exits successfully, but held-out performance rejects the
+  handcrafted energy as a deployable solution: mean Dice is `0.10061`, final
+  endpoint error `95.75 mm`, minimum-over-path endpoint error `23.87 mm`, and
+  there are zero endpoint hits or traversals. Pt14 reaches Dice `0.20038` with
+  final/minimum endpoint `57.78/19.75 mm`; pt18 reaches only `0.000852` with
+  `133.71/27.99 mm`.
+- This is not a branch-selection technicality that can be repaired after
+  seeing held-out labels. On pt18, image energy strongly selects the negative
+  branch (score `495.11`, Dice `0.000852`) over the alternative (score
+  `365.61`, Dice `0.06019`). Both fail, and selecting the latter from Dice
+  would be an oracle. Artifact:
+  `/home/matey/project/segmentor/results/navigator_bomopi/hessian-energy-beam-heldout2-width128-1024-v16.json`.
+- Conclusion: continuous movement, segment-rasterized full-path revisit,
+  bidirectional search, robust Hessian magnitude, and a fourfold wider beam
+  materially improve the three development subjects, proving that the
+  original movement/search defects were real. They do not solve the
+  cross-patient representation problem already exposed by M28-M30. Do not
+  tune this energy on pt14/pt18 or claim the `>=0.40`/full-traversal goal.
+  Preserve it as a reproducible negative baseline and possible proposal
+  generator. The next research stage must learn a patient-robust
+  annotation-free representation (or explicitly relax the no-annotation
+  constraint for training); more handcrafted weights, horizon, or PPO frames
+  over the same channels are not supported by these results.
