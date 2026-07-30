@@ -3537,3 +3537,37 @@ command or service, acceptance metrics, and outcome here.
   256k. The next method must learn or construct a spatial bowel-likelihood
   field/energy and plan through it; it should not be another subset of the
   same four filters or another PPO reward-scale ablation.
+
+### M30: Seed-conditioned image-likelihood audit
+
+- Test a label-free, patient-adaptive alternative before implementing an
+  energy planner. `scripts/audit_navigator_seed_likelihood.py` constructs a
+  feature prototype from the supplied start seed using clipped CT and the
+  cached image-only filter bank. Per-channel deviations are normalized by
+  subject-specific 10th-90th percentile ranges. It then reports how well
+  negative prototype distance ranks bowel above a 30-mm local background
+  shell.
+- GT segmentation is used only to sample/report ROC AUC and to verify the
+  audit seed. It is not used in the prototype or score. The BOMOPI cached
+  start itself was derived from annotations; a deployable tracker would
+  require the equivalent externally supplied start seed already assumed by
+  the annotation-free loader.
+- A nominal 3-mm seed ball is not safe on these cached starts: only `45.5%`
+  of its 33 voxels are target on pt14 and `54.5%` on pt18. The resulting
+  CT+dark score is strong on those validation cases (`0.768/0.830` AUC) but
+  has training mean/minimum AUC only `0.597/0.132`. This is a contaminated
+  prototype, not a reliable bowel-likelihood field.
+- Restricting the prototype to the exact guaranteed seed voxel removes that
+  contamination and yields CT+dark AUC `0.80011/0.81586` on pt14/pt18.
+  However, the 15-case training mean/minimum remain only `0.61825/0.14146`.
+  It reverses on pt11, pt6, and pt2 (`0.1415/0.2554/0.2951`) while reaching
+  `0.79-0.86` on several others. Dark-only exact-seed similarity is more
+  stable but weak (training mean/minimum `0.57776/0.32577`; held-out
+  `0.70151/0.70654`).
+- Conclusion: subject conditioning can repair pt18's global distribution
+  shift, but one static seed appearance does not represent intensity/content
+  changes along the entire bowel. Do not expose this scalar as a replacement
+  GT channel or plan globally from it. A viable annotation-free energy must
+  include spatial tube orientation/continuity and probably conservative
+  online appearance adaptation; its audit should measure directional
+  alignment and connected traversal, not only voxel ROC AUC.
