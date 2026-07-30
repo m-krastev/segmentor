@@ -3171,3 +3171,53 @@ command or service, acceptance metrics, and outcome here.
   endpoint error below `75 mm`, and a final fixed-seed stochastic mean Dice
   at least `0.20` with endpoint error below `120 mm`. If no endpoint is reached
   by 512k, stop this pure PPO line rather than run it to 1M.
+- `navigator-bomopi-gru-compact-cov500-gdt1-512k-v1.service` resumed the exact
+  256,000-frame / 2,500-update state and completed successfully in 22m03s.
+  The effective configuration retained coverage `500`, entropy `0.0001`,
+  learning rate `5e-6`, image-only policy observations, and changed only GDT
+  `0.1 -> 1.0`. Invalid actions remained exactly zero; maximum observed KL was
+  `0.02133`, all registered PPO epochs completed, and stochastic training
+  diversity remained high (final-ten mean `0.98918`). Peak CUDA usage was
+  `9,391.9 MiB` allocated and `13,414 MiB` reserved. A non-fatal 20 MiB
+  expandable-segment mapping warning occurred during final validation, as in
+  the preceding 256k run, but both cases and the final checkpoint completed.
+- Deterministic held-out gates were:
+  - 307,200: Dice `0.053576`, endpoint `128.84 mm`, diversity `0.05664`,
+    boundary residence `0.00098`;
+  - 410,112: Dice `0.072309`, endpoint `122.13 mm`, diversity `0.22070`,
+    boundary residence `0.00049`;
+  - 512,000: Dice `0.036879`, endpoint `169.78 mm`, diversity `0.05469`,
+    boundary residence `0.11914`.
+  Every case executed all actions, but no gate reached an endpoint or completed
+  a traversal. The final pt14 result was Dice `0.07163` / endpoint
+  `92.28 mm`; pt18 regressed to Dice `0.00213` / endpoint `247.28 mm` with
+  `0.2373` boundary residence. This fails every preregistered deterministic
+  gate and rules out extending this exact reward continuation to 1M.
+- The final-ten stochastic training means were total reward `+0.01617`,
+  GDT reward `+0.00663`, coverage reward `+0.04050`, target-distance reward
+  `-0.02007`, and value loss `0.41991`. Maximum action probability increased
+  from roughly `0.03` early in the continuation to a final-ten mean `0.06021`
+  (maximum `0.07917`), but the stronger mode was not a coherent endpoint route.
+- The fixed final stochastic diagnostic, using seeds `101`, `202`, and `303`
+  on exactly pt14/pt18, produced:
+  - mean Dice `0.255286`;
+  - mean endpoint distance `138.390 mm`;
+  - diversity `0.99349`, boundary residence `0.02962`;
+  - zero endpoint reaches and zero traversals across all six episodes.
+  Pt14 Dice was `0.45609/0.48094/0.43615` with endpoint distances
+  `87.39/116.06/99.18 mm`; pt18 Dice was `0.06794/0.02533/0.06527` with
+  endpoint distances `151.22/218.12/158.35 mm`. Compared with the 256k
+  checkpoint, expected Dice improved (`0.22692 -> 0.25529`) and endpoint error
+  improved modestly (`149.95 -> 138.39 mm`), but the preregistered
+  `<120 mm` endpoint gate and mandatory endpoint reach both fail. The dominant
+  remaining failure is case generalization plus diffuse/non-coherent action
+  selection, not invalid movement or a universal inability to cover bowel.
+- The first standalone stochastic-evaluation attempt imported Navigator from
+  the shared uv environment's editable checkout rather than this execution
+  worktree. It failed before any rollout because the stale `Config` signature
+  rejected current fields. `scripts/evaluate_navigator_stochastic.py` now
+  prepends its adjacent repository `src` directory before importing Navigator.
+  A remote `uv` import/CLI smoke passed, and the six reported episodes were
+  generated only after that fix. Training was unaffected because the managed
+  BOMOPI launcher already exports the execution worktree's `src` through
+  `PYTHONPATH`.
