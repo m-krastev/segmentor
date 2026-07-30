@@ -76,6 +76,9 @@ class Config:
     observe_segmentation: bool = False
     # ``navigation_filters`` is the current six-channel image-only state:
     # CT, four multiscale filter responses, and the dilated path tube.
+    # ``navigation_dark_path`` is the domain-robustness ablation: only the raw
+    # dark-tubularity response and the dilated path tube. It removes CT and the
+    # three filter channels whose held-out polarity can change.
     # ``shin_068_repaired`` is the controlled historical ablation: CT, the
     # original Meijering wall response, and an undilated centerline path. It
     # also removes absolute position/time from context and retains only the
@@ -319,27 +322,31 @@ class Config:
             )
         if self.policy_observation_contract not in {
             "navigation_filters",
+            "navigation_dark_path",
             "shin_068_repaired",
         }:
             raise ValueError(
                 "policy_observation_contract must be one of: "
-                "navigation_filters, shin_068_repaired"
+                "navigation_filters, navigation_dark_path, shin_068_repaired"
             )
         if (
-            self.policy_observation_contract == "shin_068_repaired"
+            self.policy_observation_contract
+            in {"navigation_dark_path", "shin_068_repaired"}
             and self.observe_segmentation
         ):
             raise ValueError(
-                "shin_068_repaired policy observations cannot include the GT "
-                "segmentation channel"
+                f"{self.policy_observation_contract} policy observations "
+                "cannot include the GT segmentation channel"
             )
         if (
-            self.policy_observation_contract == "shin_068_repaired"
+            self.policy_observation_contract
+            in {"navigation_dark_path", "shin_068_repaired"}
             and not (self.annotation_free or self.reward_supervised)
         ):
             raise ValueError(
-                "shin_068_repaired policy observations require clean policy "
-                "inputs via reward_supervised or annotation_free mode"
+                f"{self.policy_observation_contract} policy observations "
+                "require clean policy inputs via reward_supervised or "
+                "annotation_free mode"
             )
         if self.behavior_cloning_epochs < 0:
             raise ValueError("behavior_cloning_epochs must be non-negative")
@@ -531,6 +538,11 @@ class Config:
                 # context is only the preceding movement direction.
                 self.observation_channels = 3
                 self.context_features = 3
+            elif self.policy_observation_contract == "navigation_dark_path":
+                # Raw dark-tubularity response and the agent's own cumulative
+                # path; retain the standard label-free navigation context.
+                self.observation_channels = 2
+                self.context_features = 7
             else:
                 # Current CT, four physically scaled image-filter responses,
                 # and the agent's own cumulative path.

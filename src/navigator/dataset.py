@@ -459,7 +459,7 @@ class NNUNetActualDataset(Dataset):
             result["start_coord"] = seed_zyx
             if (
                 self.config.policy_observation_contract
-                == "navigation_filters"
+                in {"navigation_filters", "navigation_dark_path"}
             ):
                 native_image = np.transpose(data["image"], (2, 1, 0))
                 native_features = load_or_compute_navigation_filter_bank(
@@ -595,7 +595,8 @@ def load_subject_data(subject_data: Dict[str, Any], config: Config, **cache) -> 
     result["wall_map"] = wall_map_np
     if (
         config.clean_policy_inputs
-        and config.policy_observation_contract == "navigation_filters"
+        and config.policy_observation_contract
+        in {"navigation_filters", "navigation_dark_path"}
     ):
         result["image_features"] = load_or_compute_navigation_filter_bank(
             image_np,

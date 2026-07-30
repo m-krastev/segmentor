@@ -3467,3 +3467,35 @@ command or service, acceptance metrics, and outcome here.
   caused the upper-bound success. Do not continue this six-channel PPO policy
   to 512k. The next representation experiment must address the pt18 domain
   shift explicitly rather than add frames or reward terms.
+
+### M29: Dark-tubularity domain-robustness ablation
+
+- The 15-case audit shows that dark-tubularity is the only filter whose useful
+  direction remains unchanged on the exceptional pt18 validation subject:
+  inverse AUC is `0.70506` on pt18 and `0.70203` on pt14. The six-channel
+  policy can ignore this weaker invariant cue in favor of easier CT/gradient
+  correlations that reverse on pt18.
+- Add the explicit `navigation_dark_path` policy-observation contract. It
+  exposes only the raw versioned dark-tubularity patch and the agent-owned
+  dilated cumulative path patch. It retains label-free time, absolute
+  position, and previous-direction context, but removes CT, bright
+  tubularity, band-pass, and gradient. GT segmentation input is rejected by
+  configuration validation. Dataset loading still computes the same cached
+  image-only filter bank; no target label is used to construct either policy
+  channel.
+- This ablation is selected using pt18 validation behavior and therefore
+  diagnoses domain robustness rather than providing an unbiased final test.
+  Any eventual research claim requires a frozen, untouched patient test set.
+- Register
+  `scripts/run_navigator_bomopi_darkpath_compact_cov500_gdt1_256k.sh` with the
+  exact control seed, 15/2 split, compact 156 actions, GRU, reward, 60-mm
+  patch, 2,048-step horizon, entropy, and learning-rate schedule. The only
+  model change is `6 -> 2` observation channels. The full remote `uv` suite
+  passes: `105 passed`, four subtests passed, 18 warnings.
+- Require a fresh 4,096-frame CUDA smoke with exactly two channels, finite
+  five-epoch PPO, zero invalid actions, and complete two-case validation.
+  Then run fresh to 256k and score seeds 101/202/303. Promotion beyond 256k
+  requires at least one held-out traversal or, at minimum, pt18 mean Dice
+  `>=0.20` with pt18 endpoint error `<=80 mm` and overall mean Dice above the
+  six-channel control's `0.23654`. Otherwise reject the forced invariant cue
+  and do not add more PPO frames.

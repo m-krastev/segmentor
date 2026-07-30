@@ -367,7 +367,8 @@ class SmallBowelEnv(EnvBase):
         )
         if (
             self.config.clean_policy_inputs
-            and self.config.policy_observation_contract == "navigation_filters"
+            and self.config.policy_observation_contract
+            in {"navigation_filters", "navigation_dark_path"}
         ):
             if image_features is None:
                 image_features = np.stack(
@@ -613,6 +614,29 @@ class SmallBowelEnv(EnvBase):
                 self.current_pos_vox,
                 self.config.patch_size_vox,
             )
+            if (
+                self.config.policy_observation_contract
+                == "navigation_dark_path"
+            ):
+                actor_state = torch.stack(
+                    [
+                        filter_patches[0],
+                        cum_path_patch.to(self.dtype),
+                    ],
+                    dim=0,
+                )
+                context = torch.cat(
+                    [
+                        torch.as_tensor(
+                            [time_fraction],
+                            dtype=self.dtype,
+                            device=self.device,
+                        ),
+                        normalized_position,
+                        previous_direction,
+                    ]
+                )
+                return {"actor": actor_state, "context": context}
             actor_channels = [
                 current_ct_patch.unsqueeze(0),
                 filter_patches,

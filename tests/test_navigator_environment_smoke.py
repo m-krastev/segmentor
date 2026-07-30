@@ -954,6 +954,71 @@ class NavigatorEnvironmentSmokeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clean policy inputs"):
             Config(policy_observation_contract="shin_068_repaired")
 
+    def test_dark_path_observation_uses_only_raw_dark_filter_and_path(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = Config(
+            device=str(device),
+            patch_size_mm=8,
+            voxel_size_mm=1.0,
+            max_step_displacement_mm=2,
+            cumulative_path_radius_mm=0,
+            reward_supervised=True,
+            policy_observation_contract="navigation_dark_path",
+        )
+        self.assertEqual(config.observation_channels, 2)
+        self.assertEqual(config.context_features, 7)
+        with self.assertRaisesRegex(ValueError, "cannot include"):
+            Config(
+                reward_supervised=True,
+                policy_observation_contract="navigation_dark_path",
+                observe_segmentation=True,
+            )
+        with self.assertRaisesRegex(ValueError, "clean policy inputs"):
+            Config(policy_observation_contract="navigation_dark_path")
+
+        shape = (16, 16, 16)
+        start = (8, 8, 8)
+        end = (8, 8, 12)
+        segmentation = np.zeros(shape, dtype=np.uint8)
+        segmentation[8, 8, 4:13] = 1
+        subject = self._make_subject(shape, start, end, segmentation)
+        dark_filter = np.linspace(
+            0.0,
+            0.5,
+            num=np.prod(shape),
+            dtype=np.float32,
+        ).reshape(shape)
+        subject["image_features"] = np.stack(
+            [
+                dark_filter,
+                np.full(shape, 0.75, dtype=np.float32),
+                np.full(shape, 0.50, dtype=np.float32),
+                np.full(shape, 0.25, dtype=np.float32),
+            ]
+        )
+        environment = SmallBowelEnv(
+            config=config,
+            dataset_iterator=iter([subject]),
+            num_episodes_per_sample=1,
+            device=device,
+        )
+        try:
+            initial = environment._reset()
+            expected_dark = get_patch(
+                torch.from_numpy(dark_filter).to(device),
+                start,
+                config.patch_size_vox,
+            )
+            torch.testing.assert_close(initial["actor"][0, 0], expected_dark)
+            self.assertEqual(int(initial["actor"][0, 1].sum().item()), 1)
+            self.assertEqual(
+                initial["actor"].shape,
+                torch.Size([1, 2, *config.patch_size_vox]),
+            )
+            self.assertEqual(initial["context"].shape, torch.Size([1, 7]))
+        finally:
+            environment.close()
+
     def test_guarded_shin_makes_low_coverage_endpoint_a_failure(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         shape = (20, 20, 20)
