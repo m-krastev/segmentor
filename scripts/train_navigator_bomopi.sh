@@ -17,8 +17,10 @@ SAVE_FREQ="${NAVIGATOR_SAVE_FREQ:-50}"
 PATCH_SIZE_MM="${NAVIGATOR_PATCH_SIZE_MM:-48}"
 BATCH_SIZE="${NAVIGATOR_BATCH_SIZE:-64}"
 GDT_REWARD_SCALE="${NAVIGATOR_GDT_REWARD_SCALE:-0.1}"
+COVERAGE_REWARD_SCALE="${NAVIGATOR_COVERAGE_REWARD_SCALE:-50}"
 TARGET_DISTANCE_RADIUS_MM="${NAVIGATOR_TARGET_DISTANCE_PENALTY_RADIUS_MM:-600}"
 TARGET_RECOVERY_REWARD_SCALE="${NAVIGATOR_TARGET_RECOVERY_REWARD_SCALE:-0.05}"
+EPISODIC_CELL_REWARD_SCALE="${NAVIGATOR_EPISODIC_CELL_REWARD_SCALE:-0.01}"
 ENT_COEF="${NAVIGATOR_ENT_COEF:-0.0005}"
 LR_ANNEAL_TIMESTEPS="${NAVIGATOR_LR_ANNEAL_TIMESTEPS:-0}"
 TARGET_KL="${NAVIGATOR_TARGET_KL:-0}"
@@ -42,7 +44,7 @@ export UV_NO_PROGRESS="${UV_NO_PROGRESS:-1}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache-navigator}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
-printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_contract=%s policy_observation_contract=%s potential_gdt_scale=%s potential_target_distance_radius_mm=%s potential_recovery_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s categorical_action_support=%s potential_revisit_scale=%s\n' \
+printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_contract=%s policy_observation_contract=%s potential_gdt_scale=%s potential_coverage_scale=%s potential_target_distance_radius_mm=%s potential_recovery_scale=%s potential_episodic_cell_scale=%s ent_coef=%s lr_anneal_steps=%s target_kl=%s reload=%s observe_segmentation=%s action_distribution=%s categorical_action_support=%s potential_revisit_scale=%s\n' \
   "$DATA_DIR" \
   "$TOTAL_TIMESTEPS" \
   "$PATCH_SIZE_MM" \
@@ -50,8 +52,10 @@ printf 'Navigator BOMOPI config: data=%s steps=%s patch_mm=%s batch=%s reward_co
   "$REWARD_CONTRACT" \
   "$POLICY_OBSERVATION_CONTRACT" \
   "$GDT_REWARD_SCALE" \
+  "$COVERAGE_REWARD_SCALE" \
   "$TARGET_DISTANCE_RADIUS_MM" \
   "$TARGET_RECOVERY_REWARD_SCALE" \
+  "$EPISODIC_CELL_REWARD_SCALE" \
   "$ENT_COEF" \
   "$LR_ANNEAL_TIMESTEPS" \
   "$TARGET_KL" \
@@ -83,7 +87,7 @@ case "$REWARD_CONTRACT" in
     REWARD_ARGS=(
       --use-immediate-gdt-reward
       --gate-positive-shaping-on-target-segment
-      --coverage-reward-scale 50
+      --coverage-reward-scale "$COVERAGE_REWARD_SCALE"
       --gdt-reward-scale "$GDT_REWARD_SCALE"
       --gdt-progress-normalization max_step
       --target-recovery-reward-scale "$TARGET_RECOVERY_REWARD_SCALE"
@@ -97,7 +101,7 @@ case "$REWARD_CONTRACT" in
       --r-zero-mov 1
       --terminal-success-bonus 50
       --terminal-failure-penalty 0
-      --episodic-cell-reward-scale 0.01
+      --episodic-cell-reward-scale "$EPISODIC_CELL_REWARD_SCALE"
     )
     ;;
   shin_normalized|shin_normalized_guarded|shin_normalized_repaired)

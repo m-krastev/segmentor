@@ -3005,3 +3005,80 @@ command or service, acceptance metrics, and outcome here.
   neither sharpened the categorical policy nor produced stable held-out
   reward alignment. Further runs should change a learning bottleneck with a
   testable mechanism rather than continue tuning entropy on this objective.
+
+### M26: Exact task/action-signal audit and coverage-dominant repair
+
+- Added a reproducible BOMOPI audit that evaluates the exact
+  `shin_068_repaired` observation, 156-action compact masked support, reward,
+  path geometry, and horizon:
+  `scripts/audit_navigator_bomopi_action_signal.py`. It samples all feasible
+  actions at oracle-route states, executes exact oracle rollouts, and compares
+  the shortest endpoint route against a skeleton-covering route. The reusable
+  route compressor permits only supported on-mask actions and bounded
+  route-order lookahead, preventing folded-loop shortcuts.
+- The current 800-step repaired-Shin task fails before policy optimization:
+  - pt14/pt18 need 1,527/1,811 compact actions for the constructive covering
+    route, versus the registered horizon of 800;
+  - the 800-action prefixes reach Dice `0.342907/0.295385` and remain
+    `120.22/82.17 mm` from the endpoint;
+  - exact prefix returns are `-446.41/-384.04`, with only `1.88%/2.63%`
+    positive-reward actions;
+  - across 128 sampled states the correct route action is positive only
+    `3.91%` of the time and top-five by reward only `21.09%` of the time;
+  - required revisits are never top-five and average `-0.9481`: the binary
+    `-0.6667` revisit, `-0.1667` step cost, and mean wall cost overwhelm
+    average GDT credit of only `+0.00036`.
+- Exact metric geometry also rejects endpoint-only optimization. The direct
+  routes reach the endpoint in 36/54 compact actions but achieve only
+  `0.04176/0.03504` Dice. The full covering routes achieve
+  `0.53952/0.52583` Dice and both endpoints, so the registered 0.40 target is
+  geometrically achievable when the horizon is raised to 2,048.
+- Audited a coverage-dominant potential candidate under the same three policy
+  channels and compact actions:
+  - cumulative Dice scale `500`, max-step-normalized GDT scale `0.1`;
+  - target recovery `0.2`, 60-mm graded target-distance cost, step `0.01`,
+    undilated revisit `0.01`, no wall or episodic novelty reward;
+  - 2,048-step horizon and unchanged endpoint-plus-0.40-Dice success.
+- The candidate passes the numerical anti-hacking gate:
+  - exact full-oracle returns are `+299.53/+288.57`, discounted returns at
+    gamma 0.99 are `+35.19/+20.65`, and both traversals complete;
+  - novel oracle actions are positive in `92%` of sampled states;
+  - required backtracks average only `-0.0112`, preventing free revisitation
+    without making branch return catastrophically bad;
+  - all sampled reward-maximizing actions stay fully on target;
+  - the direct endpoint shortcuts earn only `+21.04/+17.96`, do not terminate,
+    and remain far below the full-route return.
+  Cumulative Dice cannot be farmed by cycling because the path tube only
+  grows: revisiting adds zero coverage potential and still pays step/revisit
+  cost. Positive coverage/GDT are gated off for any segment that leaves the
+  endpoint-connected target, while distance/recovery terms correct off-target
+  motion.
+- Reproducible training launcher:
+  `scripts/run_navigator_bomopi_compact_cov500_64k.sh`. Run a 4,096-frame CUDA
+  smoke first. Promote to a fresh 65,536-frame screen only with finite PPO,
+  exactly zero invalid actions, correct logged scales, and mandatory
+  two-case final validation. Continue beyond 64k only if held-out mean Dice
+  exceeds `0.05` or endpoint distance falls below `150 mm`, while recent
+  diversity stays above `0.10`, boundary residence below `0.80`, and no
+  deterministic short-cycle collapse appears. The scientific target remains
+  at least 0.40 Dice plus endpoint-to-endpoint traversal on both cases.
+- Prelaunch verification on the Linux `uv` environment: complete Navigator
+  suite `103 passed`, four subtests passed, and shell syntax passed.
+- Managed CUDA smoke
+  `navigator-bomopi-gru-compact-cov500-smoke4k-v1.service` completed 4,096
+  frames plus mandatory two-case 2,048-step validation in 45s. Effective
+  configuration logs exactly record potential coverage `500`, GDT `0.1`,
+  recovery `0.2`, target-distance radius `60 mm`, episodic scale `0`, compact
+  masked actions, and the 2,048-step horizon. Peak CUDA
+  allocation/reservation was `9,394.4/14,550 MiB`.
+- Technical telemetry passes promotion: invalid-action fraction was exactly
+  zero, maximum observed KL was `0.01069`, final value loss was `0.2767`, and
+  the stochastic training recent-position diversity averaged `0.9880`.
+  Coverage shaping averaged `+0.004839` per step while the dominant random
+  policy cost was the graded target distance at `-0.06817`; no hidden
+  terminal, wall, off-target, or episodic reward fired.
+- Smoke validation is not learned progress: mean Dice `0.004475`, endpoint
+  distance `187.785 mm`, diversity `0.05078`, and zero endpoint/traversal
+  success. Pt14 boundary residence was `0.96973` while pt18 was `0.00293`, so
+  the fresh 64k screen must establish whether this is an untrained mode or
+  another deterministic boundary failure.

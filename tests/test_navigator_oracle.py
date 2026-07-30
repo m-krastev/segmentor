@@ -3,7 +3,11 @@ import unittest
 import numpy as np
 from skimage.morphology import skeletonize
 
-from navigator.oracle import path_dice, skeleton_covering_route
+from navigator.oracle import (
+    compress_route_with_action_support,
+    path_dice,
+    skeleton_covering_route,
+)
 
 
 class NavigatorSkeletonOracleTests(unittest.TestCase):
@@ -56,6 +60,39 @@ class NavigatorSkeletonOracleTests(unittest.TestCase):
         self.assertEqual(tuple(route[0]), start)
         self.assertEqual(tuple(route[-1]), end)
         self.assertTrue(np.asarray(mask[tuple(route.T)]).all())
+
+    def test_dense_route_is_compressed_with_exact_supported_actions(self):
+        mask = np.zeros((7, 7, 12), dtype=np.uint8)
+        mask[3, 3, 1:11] = 1
+        route = np.argwhere(mask)
+        support = tuple(
+            (0, 0, direction * length)
+            for length in range(1, 4)
+            for direction in (-1, 1)
+        )
+
+        compressed, indices = compress_route_with_action_support(
+            mask,
+            route,
+            support,
+            max_route_lookahead=3,
+        )
+
+        np.testing.assert_array_equal(indices, np.asarray([0, 3, 6, 9]))
+        np.testing.assert_array_equal(compressed, route[indices])
+
+    def test_route_compression_rejects_missing_local_action(self):
+        mask = np.zeros((5, 5, 5), dtype=np.uint8)
+        route = np.asarray([(2, 2, 1), (2, 2, 2)], dtype=np.int64)
+        mask[tuple(route.T)] = 1
+
+        with self.assertRaisesRegex(ValueError, "cannot execute"):
+            compress_route_with_action_support(
+                mask,
+                route,
+                ((1, 0, 0),),
+                max_route_lookahead=1,
+            )
 
 
 if __name__ == "__main__":

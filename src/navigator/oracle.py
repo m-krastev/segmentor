@@ -6,6 +6,7 @@ import networkx as nx
 import numpy as np
 from scipy.ndimage import binary_dilation, binary_propagation
 from scipy.spatial import cKDTree
+from skimage.draw import line_nd
 from skimage.graph import MCP_Geometric
 from skimage.morphology import skeletonize
 
@@ -174,6 +175,82 @@ def skeleton_covering_route(
     )
     keep = np.concatenate(([True], np.any(route[1:] != route[:-1], axis=1)))
     return route[keep]
+
+
+def compress_route_with_action_support(
+    segmentation_mask: np.ndarray,
+    route: np.ndarray,
+    action_displacements: tuple[tuple[int, int, int], ...],
+    max_route_lookahead: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Greedily compress a dense route into exact supported, on-mask actions.
+
+    Lookahead is bounded in route order so a spatially nearby folded loop
+    cannot be selected as a shortcut. The returned indices map every
+    compressed waypoint back to the original dense route.
+    """
+
+    if max_route_lookahead < 1:
+        raise ValueError("max_route_lookahead must be positive")
+    mask = np.asarray(segmentation_mask, dtype=bool)
+    dense_route = np.asarray(route, dtype=np.int64).reshape(-1, 3)
+    if not len(dense_route):
+        raise ValueError("Cannot compress an empty route")
+    shape = np.asarray(mask.shape, dtype=np.int64)
+    if np.any(dense_route < 0) or np.any(dense_route >= shape):
+        raise ValueError("Route contains a point outside the segmentation volume")
+    if not np.asarray(mask[tuple(dense_route.T)]).all():
+        raise ValueError("Route contains a point outside the segmentation mask")
+
+    support = {
+        tuple(int(component) for component in displacement)
+        for displacement in action_displacements
+        if any(displacement)
+    }
+    if not support and len(dense_route) > 1:
+        raise ValueError("Action support contains no nonzero displacement")
+
+    selected_indices = [0]
+    current_index = 0
+    while current_index < len(dense_route) - 1:
+        final_candidate = min(
+            len(dense_route) - 1,
+            current_index + max_route_lookahead,
+        )
+        selected_index = None
+        for candidate_index in range(final_candidate, current_index, -1):
+            displacement = tuple(
+                int(value)
+                for value in (
+                    dense_route[candidate_index] - dense_route[current_index]
+                )
+            )
+            if displacement not in support:
+                continue
+            segment = line_nd(
+                tuple(dense_route[current_index]),
+                tuple(dense_route[candidate_index]),
+                endpoint=True,
+            )
+            if np.asarray(mask[segment]).all():
+                selected_index = candidate_index
+                break
+        if selected_index is None:
+            required = tuple(
+                int(value)
+                for value in (
+                    dense_route[current_index + 1] - dense_route[current_index]
+                )
+            )
+            raise ValueError(
+                "Action support cannot execute the next dense-route step "
+                f"{required} at index {current_index}"
+            )
+        selected_indices.append(selected_index)
+        current_index = selected_index
+
+    indices = np.asarray(selected_indices, dtype=np.int64)
+    return dense_route[indices], indices
 
 
 def path_dice(
