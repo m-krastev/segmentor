@@ -3423,3 +3423,15 @@ command or service, acceptance metrics, and outcome here.
   256k run. Score the same six fixed stochastic episodes at 256k; any real
   traversal would overturn the stronger claim that privileged perception was
   necessary, while failure preserves the pt18 representation diagnosis.
+- The six-channel 4,096-frame CUDA smoke completed successfully with the exact
+  15/2 split, `observe_segmentation=false`, no checkpoint reload, and
+  `observation_channels=6`. All eight updates completed five PPO epochs;
+  invalid-action fraction was exactly zero, maximum KL was `0.006150`, final
+  value loss was `0.37817`, and stochastic recent-position diversity was
+  `0.99074`. Peak CUDA allocation/reservation was
+  `12,615.1/12,664 MiB`, safely below the 15.5-GiB device limit.
+- Untrained deterministic validation is not interpreted as efficacy: final
+  Dice was `0.011563`, endpoint error `249.41 mm`, diversity `0.09961`,
+  boundary residence `0.63062`, and no endpoint/traversal succeeded. The smoke
+  passes only the technical promotion gate. Launch the fresh 256k control with
+  the preregistered sparse validation interval.
