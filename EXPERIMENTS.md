@@ -2973,3 +2973,35 @@ command or service, acceptance metrics, and outcome here.
   residence `0.84`—but an untrained deterministic mode is not the registered
   comparison. The smoke passes only the technical gate for the fresh 64k
   screen.
+- `navigator-bomopi-gru-068-masked-compact-lowent-64k-v1.service` completed
+  successfully in 6m03s, including mandatory validation at exactly 65,536
+  frames. Peak CUDA allocation/reservation was `7,588/9,438 MiB`; invalid
+  actions remained exactly zero at every training update.
+- Held-out validation did not stabilize:
+  - 16,384: Dice `0.022173`, endpoint `232.914 mm`, positive GDT `0.0075`,
+    recent diversity `0.082031`, boundary residence `0.916875`;
+  - 32,768: Dice `0.006180`, endpoint `185.866 mm`, positive GDT `0.00625`,
+    recent diversity `0.011719`, boundary residence `0.955625`;
+  - 49,152: Dice `0.013445`, endpoint `218.685 mm`, positive GDT `0.010625`,
+    recent diversity `0.035156`, boundary residence `0.899375`;
+  - 65,536: Dice `0.011327`, endpoint `169.725 mm`, positive GDT `0.010625`,
+    recent diversity `0.195312`, boundary residence `0.441875`.
+  No gate reached an endpoint or completed traversal. No single metric
+  improved over two successive intervals: Dice improved only from 32k to 49k,
+  while endpoint distance improved from 16k to 32k and 49k to 64k.
+- Lower entropy regularization did not measurably concentrate the policy.
+  Final maximum action probability was `0.01582`; final raw entropy was about
+  `4.9784` nats (`-0.00049784 / 0.0001`), equivalent to roughly 145 effective
+  actions and essentially unchanged from the ordinary compact run's
+  `4.9755` nats. Final logit standard deviation was `0.2826`, KL `0.00472`,
+  policy loss `-0.00158`, and value loss `6.966`.
+- The final apparent diversity recovery is not anatomical success. Pt14 had
+  Dice `0.001722`, zero positive-GDT steps, endpoint distance `107.35 mm`, and
+  boundary residence `0.00125`; pt18 had Dice `0.020932`, positive GDT
+  `0.02125`, endpoint distance `232.10 mm`, and boundary residence `0.8825`.
+  Both exhausted the 800-step horizon and both missed the endpoint.
+- Decision: reject this ablation and do not extend it to 256k or 1M. Reducing
+  the entropy coefficient by tenfold changed the loss scale as intended but
+  neither sharpened the categorical policy nor produced stable held-out
+  reward alignment. Further runs should change a learning bottleneck with a
+  testable mechanism rather than continue tuning entropy on this objective.
