@@ -3277,3 +3277,45 @@ command or service, acceptance metrics, and outcome here.
   quality is Dice `0.03672`, endpoint error `192.59 mm`, diversity `0.03516`,
   boundary residence `0.3840`, and zero endpoint/traversal success; this is not
   treated as learned evidence.
+- The 256k supervised run reached all training frames in 22m40s. In-process
+  deterministic gates were:
+  - 102,400: Dice `0.041010`, endpoint `81.77 mm`, positive GDT `0.28784`,
+    diversity `0.04883`;
+  - 204,800: Dice `0.185604`, endpoint `49.55 mm`, positive GDT `0.19653`,
+    diversity `0.02930`.
+  Both cases were balanced at 204.8k (Dice `0.19470/0.17650`, endpoint
+  `57.18/41.92 mm`) with positive returns, but neither reached the endpoint.
+- The periodic `checkpoint_256000.pth` was saved before mandatory final
+  validation. That in-process validation OOMed while TensorDict attempted to
+  stack 2,048 seven-channel observations into a 3.42-GiB tensor with
+  10.83 GiB of training allocations still live. This does not invalidate the
+  checkpoint. Add a fresh-process deterministic mode to
+  `scripts/evaluate_navigator_stochastic.py`; normalize string/device inputs in
+  validation; the complete Navigator suite remains `104 passed`, four subtests
+  passed. Fresh-process final deterministic scoring gives Dice `0.116015`,
+  endpoint `83.66 mm`, diversity `0.04297`, and zero traversal, so deterministic
+  ranking retains the 204.8k state.
+- Fixed three-seed stochastic scoring changes the conclusion:
+  - 204.8k: mean Dice `0.457375`, endpoint `50.05 mm`, zero endpoint reaches
+    and zero traversals in six episodes;
+  - 256k: mean Dice `0.420629`, endpoint `30.58 mm`, endpoint/traversal success
+    `2/6 = 0.3333`, diversity `0.98372`, and boundary residence `0.00033`.
+  At 256k, pt18 completes in seeds 101 and 202 with Dice `0.41604/0.43696`,
+  endpoint error `2.60/1.50 mm`, and 1,820/1,922 actions. Pt14 obtains Dice
+  `0.37379-0.48937` but no endpoint reach. These are genuine joint successes:
+  both successful episodes exceed Dice `0.40` and satisfy the independent
+  3-mm endpoint test; they are not reward-only or shortcut successes.
+- Training remained stable: maximum KL `0.01836`, invalid actions exactly zero,
+  final-ten diversity `0.99168`, final-ten coverage reward `+0.07013`, and
+  final-ten maximum action probability `0.06256`. The GT mask therefore fixes
+  the severe pt18 perception/generalization failure and proves the compact
+  policy can learn a successful action distribution. Deterministic argmax
+  remains a poor decoder of that distribution.
+- Register one unchanged continuation:
+  `scripts/run_navigator_bomopi_gtmask_compact_cov500_gdt1_512k.sh`. Resume
+  the exact 256k policy, critic, optimizer, scheduler, and frame/update counters;
+  keep the `5e-6` floor and every environment/reward/policy setting unchanged.
+  At 512k, repeat the same six stochastic episodes. Promotion requires mean
+  Dice at least `0.40`, traversal success at least `0.50`, and at least one
+  pt14 traversal; otherwise stop this supervised PPO continuation and address
+  decoding/planning rather than add more frames.
