@@ -3435,3 +3435,35 @@ command or service, acceptance metrics, and outcome here.
   boundary residence `0.63062`, and no endpoint/traversal succeeded. The smoke
   passes only the technical promotion gate. Launch the fresh 256k control with
   the preregistered sparse validation interval.
+- The fresh six-channel control completed all 256,000 frames in 22m46s and
+  saved `checkpoint_256000.pth`. All 500 updates completed five PPO epochs;
+  invalid-action fraction stayed exactly zero, maximum KL was `0.014195`,
+  final-ten value loss was `0.39838`, final-ten stochastic diversity was
+  `0.99012`, and final-ten maximum action probability was only `0.01936`.
+  Training peak allocation/reservation was `12,654.7/12,922 MiB`; final
+  validation raised reservation to `14,496 MiB` and emitted one non-fatal
+  20-MiB expandable-segment mapping warning, but the service exited cleanly.
+- Deterministic validation did not learn a route:
+  - 102,400: Dice `0.015947`, endpoint `139.95 mm`, diversity `0.03125`,
+    boundary residence `0.00952`;
+  - 204,800: Dice `0.002517`, endpoint `142.36 mm`, diversity `0.02734`,
+    boundary residence `0.35669`;
+  - 256,000: Dice `0.006887`, endpoint `125.17 mm`, diversity `0.24219`,
+    boundary residence `0.00098`.
+  No endpoint or traversal succeeded at any gate. A fresh-process mode
+  evaluation exactly reproduces the final in-process metrics.
+- Fixed stochastic seeds 101/202/303 give mean Dice `0.236538`, endpoint
+  distance `104.23 mm`, diversity `0.98893`, boundary residence `0.07096`,
+  and zero endpoint/traversal successes in six episodes. Pt14 Dice is
+  `0.41383/0.42939/0.28847` with endpoint errors
+  `55.76/86.30/54.68 mm`; pt18 Dice is only
+  `0.14222/0.00506/0.14026` with endpoint errors
+  `145.32/182.40/100.91 mm`.
+- Causal conclusion: adding the three extra handcrafted filters improves the
+  failed three-channel checkpoint's stochastic endpoint error
+  (`149.95 -> 104.23 mm`) only modestly and produces no traversal. It cannot
+  explain the supervised checkpoint's two genuine pt18 traversals and
+  `0.42063` mean Dice. The local GT channel is therefore the component that
+  caused the upper-bound success. Do not continue this six-channel PPO policy
+  to 512k. The next representation experiment must address the pt18 domain
+  shift explicitly rather than add frames or reward terms.
