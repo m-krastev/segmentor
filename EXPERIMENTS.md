@@ -3221,3 +3221,32 @@ command or service, acceptance metrics, and outcome here.
   generated only after that fix. Training was unaffected because the managed
   BOMOPI launcher already exports the execution worktree's `src` through
   `PYTHONPATH`.
+
+### M27: Supervised perception upper bound for the repaired control stack
+
+- Stop the failed image-only pure-PPO continuation at 512k as preregistered.
+  The next causal question is whether the remaining failure comes primarily
+  from the weak image-derived state or from recurrent control/optimization.
+- Register
+  `scripts/run_navigator_bomopi_gtmask_compact_cov500_gdt1_256k.sh` as an
+  explicitly supervised upper bound:
+  - train from scratch; do not reuse incompatible three-channel weights;
+  - retain the 156-action bounds-masked direction/length likelihood, exact
+    integer movement, GRU, 60-mm patch, 9-mm action, 6-mm path radius,
+    2,048-step horizon, coverage `500`, GDT `1`, recovery `0.2`, graded
+    target-distance cost, and pt14/pt18 held-out split;
+  - change the policy state to the existing seven-channel supervised contract:
+    CT, four image-filter responses, cumulative path, and local GT mask;
+  - use entropy `0.0001`; anneal to the `5e-6` floor by 65,536 frames; validate
+    only near 102.4k, 204.8k, and the mandatory 256k final state.
+- This run uses GT segmentation at policy inference and can never be reported
+  as annotation-free, image-only, or clinically deployable. Its purpose is to
+  locate the bottleneck. First require a 4,096-frame CUDA smoke with finite
+  PPO, zero invalid actions, exact seven-channel startup, and no OOM.
+- Promotion beyond 256k requires at least one endpoint reach, or mean Dice at
+  least `0.30` together with endpoint distance below `50 mm`; also reject a
+  boundary/short-cycle mode even if accumulated Dice is high. If the
+  supervised upper bound fails, stop tuning policy observations and pivot the
+  main method toward explicit route planning/energy minimization. If it passes,
+  use it only to justify replacing the GT mask with a learned/self-supervised
+  image representation.
