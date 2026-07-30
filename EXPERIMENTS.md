@@ -3128,3 +3128,46 @@ command or service, acceptance metrics, and outcome here.
   stochastic diagnostic at the final checkpoint: it must retain mean Dice
   above `0.10` while improving endpoint distance. Otherwise stop rather than
   extend to 1M.
+- `navigator-bomopi-gru-compact-cov500-lowent-256k-v1.service` resumed exactly
+  at 65,536 frames / 640 updates, held learning rate at `5e-6`, and completed
+  256,000 total frames in 16m41s. Deterministic gates:
+  - 131,072: Dice `0.037043`, endpoint `224.15 mm`, diversity `0.09570`,
+    boundary residence `0.17407`;
+  - 196,608: Dice `0.036540`, endpoint `192.80 mm`, diversity `0.02930`,
+    boundary residence `0.00391`;
+  - 256,000: Dice `0.070075`, endpoint `105.47 mm`, diversity `0.11328`,
+    boundary residence `0.00073`.
+  No gate reached an endpoint or completed a traversal. Final progress was
+  highly case-asymmetric: pt14 reached Dice `0.13802` and `44.92 mm` endpoint
+  error, while pt18 remained at Dice `0.00213` and `166.01 mm`.
+- Lower entropy eventually produced only modest concentration. Final maximum
+  action probability was `0.02867`, raw entropy about `4.876` nats, and
+  invalid actions remained zero. Stochastic training coverage reward improved
+  to a final-ten mean `+0.04232` while target-distance cost improved to
+  `-0.01377`; value loss remained controlled at `0.216`.
+- The fixed final stochastic diagnostic improved mean Dice from `0.10549` to
+  `0.22692` but worsened endpoint error from `118.60` to `149.95 mm`; all six
+  episodes still missed the endpoint. Pt14 averaged roughly `0.3730` Dice and
+  `122.76 mm`, while pt18 averaged `0.0809` Dice and `177.13 mm`. This is
+  meaningful coverage learning, but it fails the preregistered endpoint and
+  joint-improvement gates. Do not extend this reward unchanged to 1M.
+- Audited one endpoint-strengthening candidate by changing only GDT scale
+  `0.1 -> 1.0` while retaining coverage `500`. Exact full covering routes
+  remain much more valuable than endpoint shortcuts:
+  - pt14 full/direct return `+310.83/+30.54`;
+  - pt18 full/direct return `+301.84/+31.22`;
+  - both full routes retain Dice above `0.52` and complete traversal;
+  - novel oracle actions are positive in `86.67%` of sampled states;
+  - all sampled reward maxima stay on-target, while `98.44%` are
+    endpoint-progressing.
+  Thus stronger GDT does not make the low-Dice direct path optimal, does not
+  reward off-target shortcuts, and preserves bounded cumulative coverage.
+- Register
+  `scripts/run_navigator_bomopi_compact_cov500_gdt1_512k.sh`: resume the exact
+  256k state, retain entropy `0.0001` and the frozen `5e-6` learning rate, and
+  change only GDT `0.1 -> 1.0` through 512,000 total frames. Validate near
+  307k, 410k, and the mandatory final state. Acceptance requires at least one
+  held-out endpoint reach, deterministic mean Dice at least `0.10` with
+  endpoint error below `75 mm`, and a final fixed-seed stochastic mean Dice
+  at least `0.20` with endpoint error below `120 mm`. If no endpoint is reached
+  by 512k, stop this pure PPO line rather than run it to 1M.
