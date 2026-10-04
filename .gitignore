@@ -193,3 +193,12 @@ plots
 *.html
 .clinerules
 figures
+# local scratch files
+password.txt
+test_file.txt
+*.res
+*.sol
+*matrix_representatio*
+.DS_Store
+notebooks/graph_theoretic_paper.pdf
+src/navigator/drl_bowel_shin_et_al.pdf

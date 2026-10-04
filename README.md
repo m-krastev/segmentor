@@ -1,95 +1,107 @@
-# Small Bowel Centerline Extraction and Estimation Using Unsupervised Methods
+# Small bowel centreline extraction without centreline annotations
 
-While significant progress has been made in medical image segmentation and deep learning, accurately delineating the small bowel remains a complex challenge due to its intricate folding within the abdomen. This demanding and time-consuming task, known as small bowel centerline extraction, can take expert radiologists several hours to a full day to annotate for a single patient. Unlike simple segmentation, which often fails to capture the organ's proper topology, the centerline specifically maps the small bowel's winding, continuous path --- crucial for understanding its structure and connectivity, and vital for medical analysis. The inherent complexity of this task makes large-scale manual annotation efforts incredibly costly, underscoring the need for robust automated solutions that can overcome the limitations of conventional segmentation by focusing on this critical centerline.
+Code for the MSc thesis *Small Bowel Centerline Extraction and Estimation
+Using Unsupervised Methods* (Matey Krastev, University of Amsterdam, 2025;
+supervised by Dr Yunchao Yin and Prof. Martin R. Oswald, with Amsterdam UMC).
+[Thesis](https://scripties.uba.uva.nl/search?id=record_56865)
 
-We approach this task by reviewing the available literature, and proposing two methods for unsupervised small bowel centerline extraction  -- VoxGraph and VoxTrack, utilizing two distinctly different methodologies -- graph combinatorial optimization and Reinforcement Learning (RL). The benefit of these approaches lies in their ability to find solutions without relying on expert annotations. We discover these approaches can track segments of the small bowel centerline well, and can segment up to 650 mm of the full small bowel path correctly.
+The small bowel is usually segmented, but clinical use needs its centreline:
+one ordered path from the duodenum to the ileocaecal junction. Expert path
+annotation takes hours per patient, so this work compares two methods that
+need only a CT scan and a small bowel segmentation:
 
+- VoxGraph (`notebooks/graph_approach.py`): a reproduction and extension of
+  the graph-theoretic tracker of Shin et al. A Meijering ridge filter marks
+  bowel walls, SLIC supervoxels form a weighted graph, must-pass nodes are
+  sampled inside the segmentation, and the path is found as a travelling
+  salesman tour (simulated annealing, ACHCI, or exact solution with Concorde).
+- VoxTrack (`src/navigator/`): a reinforcement-learning tracker trained with
+  PPO in a 3D environment built for this work. The agent moves through local
+  image patches and is rewarded for advancing along the bowel, measured by the
+  geodesic distance transform of the segmentation.
 
-## Repository Structure
+On 21 contrast-enhanced CT scans, VoxGraph with the exact TSP solver tracks
+the path correctly for 644.6 ± 135.8 mm on average (92.8% coverage), on par
+with the Shin et al. baseline (625.2 ± 143.3 mm, 93.0%), and 574.2 mm when
+it runs on predicted instead of manual segmentations (thesis, Table 2).
 
-```bash
-.
-├── archive              # Legacy code for multi-step segmentation (e.g., GraphCentre, MAE, UNet, ViT)
-├── data                 # Data processing utilities and storage for raw data
-├── notebooks            # Jupyter notebooks for exploration, analysis, and graph-based approaches
-│   ├── graph_approach.py # Script for the graph-based pathfinding approach
-│   └── ...              # Other analysis and utility notebooks (e.g., compute_metrics.ipynb)
-├── scripts              # Training and utility scripts (e.g., SLURM submission scripts)
-└── src                  # Main source code
-    ├── navigator/       # Reinforcement Learning (RL) approach for navigation
-    │   ├── config.py    # Configuration for RL models and environment
-    │   ├── dataset.py   # Dataset handling for the RL environment
-    │   ├── environment.py # Definition of the RL environment
-    │   ├── models/      # Actor-Critic models and other neural networks for RL
-    │   ├── main.py      # Entry point for RL training and evaluation
-    │   └── train.py     # Main training script for the RL agent
+## Repository layout
+
+```text
+notebooks/
+  graph_approach.py       VoxGraph pipeline (CLI)
+  concorde_tsp.py         exact TSP with Concorde
+  achci_tsp.py            ACHCI heuristic
+  bayesian_optimization.py  hyperparameter search for VoxGraph
+  compute_metrics.ipynb   evaluation tables and plots
+src/navigator/            VoxTrack: environment, dataset, actor-critic models, PPO training
+data/
+  generate_phantom.py     synthetic bowel phantoms with known paths
+  nnunet_prep.py          conversion to nnU-Net format for the segmentation model
+slic/                     SLIC supervoxel package (uv workspace member)
+scripts/                  Concorde/ACHCI batch runs, SLURM jobs, nnU-Net runs
+archive/                  earlier segmentation experiments (U-Net, ViT, MAE)
 ```
 
 ## Installation
 
-First, create a virtual environment:
+Python 3.12 or later.
 
 ```bash
-python -m venv .venv
-# Recommend using uv instead: curl -LsSf https://astral.sh/uv/install.sh | sh
-# uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e .
-# uv pip install -e .
+uv venv && source .venv/bin/activate
+uv pip install -e .
+# optional GPU extras: uv pip install -e ".[cuda]"
 ```
 
-If you plan to use `nnUNet` for segmentation tasks, install it as a submodule:
+For the segmentation model, initialise the nnU-Net submodule:
 
 ```bash
-git submodule update --init --recursive
-cd nnUNet && pip install -e .
+git submodule update --init nnUNet
+cd nnUNet && uv pip install -e .
 ```
 
-Finally, set up environment variables by creating a `.env` file in the root directory of the project. The `.env` file may contain variables such as `HF_TOKEN` and `WANDB_API_KEY` for Hugging Face and Weights & Biases, respectively. If using `nnUNet`, you must define the `nnUNet_raw`, `nnUNet_preprocessed`, and `nnUNet_base` variables for nnUNet data processing.
+Weights & Biases logging reads `WANDB_API_KEY` from the environment or a
+`.env` file; nnU-Net needs `nnUNet_raw`, `nnUNet_preprocessed` and
+`nnUNet_results`.
 
 ## Usage
 
-### Graph-Based Approach
-
-To run the graph-based pathfinding approach, execute the relevant script in the `notebooks` directory:
+VoxGraph on one scan:
 
 ```bash
-python notebooks/graph_approach.py
+python notebooks/graph_approach.py \
+    --filename_ct scan.nii.gz \
+    --filename_gt small_bowel_mask.nii.gz \
+    --output out/ [--config params.json]
 ```
 
-### Reinforcement Learning (RL) Approach (Navigator)
+The exact solution is computed from the cached graph with
+`scripts/run_concorde.sh <dataset_dir>`.
 
-To train the RL agent for navigation:
+VoxTrack training (all fields of `src/navigator/config.py` are command-line
+options):
 
 ```bash
-python -m navigator --data-dir <your_data> --patch-size-mm 32 --voxel-size-mm 1.5 --amp
+python -m navigator --data-dir <data> --patch-size-mm 32 --voxel-size-mm 1.5 --amp
 ```
 
-#### Data Preprocessing for nnUNet
+Synthetic test volumes with known paths (100 by default):
 
-To prepare data for nnUNet format:
+```bash
+bash data/generate_phantoms.sh
+```
+
+nnU-Net segmentation model:
 
 ```bash
 python data/nnunet_prep.py --data_dir /path/to/data --output_dir /path/to/output
-```
-
-#### Training nnUNet
-
-```bash
-# Plan and preprocess
 nnUNetv2_plan_and_preprocess -d 42 --verify_dataset_integrity -c 3d_fullres
-
-# Train
 nnUNetv2_train 42 3d_fullres 1 -device cuda --npz
 ```
 
-### Cluster Training (SLURM)
+## Data
 
-For training on a SLURM cluster, you can configure the `scripts/slurm_base.sh` script.
-
-## Requirements
-
-- Python ≥ 3.10
-- PyTorch
-- CUDA-capable GPU (for training)
-- For cluster usage: SLURM workload manager
+The CT scans and their segmentations are in-house data and are not included.
+The phantom generator and the public TotalSegmentator dataset
+(`data/filter_totalsegmentator.py`) can be used to run the pipelines without
+them.
